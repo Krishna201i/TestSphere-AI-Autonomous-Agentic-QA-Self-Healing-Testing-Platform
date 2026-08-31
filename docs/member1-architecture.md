@@ -1,8 +1,8 @@
 # TestSphere-AI — Member 1: AI Intelligence Layer Architecture
 
-> **Version:** 0.1.0 (Day 1 Foundation)
+> **Version:** 0.2.0 (Day 2 LLM Abstraction Foundation)
 > **Author:** Member 1
-> **Date:** 2026-08-29
+> **Date:** 2026-08-31
 
 ---
 
@@ -10,7 +10,7 @@
 
 ### Member 1 — AI Agent & Intelligence Layer
 
-- LLM integration and abstraction
+- LLM integration and provider-independent abstraction
 - AI agent interfaces and orchestration
 - Test generation intelligence (Test Planner Agent)
 - Failure analysis and root-cause analysis (Failure Analyzer Agent)
@@ -261,60 +261,115 @@ These rules govern all self-healing behavior in the system:
 
 ---
 
-## 7. Module Structure
+## 7. Module Structure (`agents/`)
 
 ```
 agents/
 ├── __init__.py
 ├── llm/
-│   ├── __init__.py
-│   ├── client.py          ← Abstract LLM client interface
-│   └── config.py          ← LLM configuration from env vars
+│   ├── __init__.py            ← Exports LLMClient, schemas, factory, parser, exceptions
+│   ├── client.py              ← Abstract LLM client interface (generate, complete)
+│   ├── config.py              ← LLM configuration (provider-aware, defaults to 'mock')
+│   ├── exceptions.py          ← Custom LLM exception hierarchy
+│   ├── factory.py             ← get_llm_provider() factory function
+│   ├── parser.py              ← ResponseParser (text, JSON, Pydantic model parsing)
+│   ├── providers/
+│   │   ├── __init__.py        ← Exports MockLLMProvider
+│   │   └── mock.py            ← MockLLMProvider (deterministic, failure simulations)
+│   └── schemas.py             ← LLMRequest, LLMResponse, LLMUsage Pydantic models
 ├── planner/
 │   ├── __init__.py
-│   ├── planner.py         ← Abstract Test Planner Agent
-│   └── schemas.py         ← ApplicationContext, TestCase, TestStep, Assertion
+│   ├── planner.py             ← Abstract Test Planner Agent
+│   └── schemas.py             ← ApplicationContext, TestCase, TestStep, Assertion
 ├── analyzer/
 │   ├── __init__.py
-│   ├── analyzer.py        ← Abstract Failure Analyzer Agent
-│   └── schemas.py         ← TestFailure, FailureAnalysis
+│   ├── analyzer.py            ← Abstract Failure Analyzer Agent
+│   └── schemas.py             ← TestFailure, FailureAnalysis
 ├── healer/
 │   ├── __init__.py
-│   ├── healer.py          ← Abstract Self-Healing Agent
-│   └── schemas.py         ← HealingCandidate, HealingResult
+│   ├── healer.py              ← Abstract Self-Healing Agent
+│   └── schemas.py             ← HealingCandidate, HealingResult
 ├── memory/
 │   ├── __init__.py
-│   └── healing_history.py ← Abstract Healing Memory store
+│   └── healing_history.py     ← Abstract Healing Memory store
 ├── orchestration/
 │   ├── __init__.py
-│   └── agent_controller.py ← Abstract Agent Controller
+│   └── agent_controller.py    ← Abstract Agent Controller
 └── schemas/
     ├── __init__.py
-    ├── enums.py           ← FailureType, HealingStatus, TestPriority, TestCategory
-    └── contracts.py       ← Re-exports all contracts from one import path
+    ├── enums.py               ← FailureType, HealingStatus, TestPriority, TestCategory
+    └── contracts.py           ← Re-exports all contracts from one import path
 ```
 
 ---
 
-## 8. Future Implementation Phases
+## 8. LLM Abstraction & Provider Architecture
+
+The LLM layer is designed with strict provider independence. AI agents (Test Planner, Failure Analyzer, Self-Healing Agent) depend exclusively on the abstract `LLMClient` interface and structured schemas (`LLMRequest` / `LLMResponse`).
+
+```
+                     ┌──────────────────┐
+                     │    AI AGENTS     │
+                     └────────┬─────────┘
+                              │ uses LLMRequest / LLMResponse
+                              ▼
+                     ┌──────────────────┐
+                     │   LLM INTERFACE  │ (LLMClient abstract base class)
+                     └────────┬─────────┘
+                              │
+                    get_llm_provider(config)
+                              │
+         ┌────────────────────┼────────────────────┐
+         │                    │                    │
+         ▼                    ▼                    ▼
+┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
+│   Mock Provider  │ │  Local Provider  │ │   API Provider   │
+│  (TODAY: Day 2)  │ │ (FUTURE: Ollama) │ │ (FUTURE: Cloud)  │
+└────────┬─────────┘ └────────┬─────────┘ └────────┬─────────┘
+         │                    │                    │
+         ▼                    ▼                    ▼
+┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
+│ Deterministic &  │ │ Local Model Run  │ │ Remote API Call  │
+│ Offline Testing  │ │ (M4 / Ollama)    │ │ (OpenAI/Claude)  │
+└──────────────────┘ └──────────────────┘ └──────────────────┘
+```
+
+### Current State (Day 2):
+- **Provider**: `MockLLMProvider`
+- **Configuration**: `LLM_PROVIDER=mock` (default)
+- **Characteristics**: 100% offline, deterministic, zero credentials required, supports failure simulations (`error`, `timeout`, `empty`, `invalid`).
+
+### Future Local State:
+- **Provider**: `LocalLLMProvider`
+- **Configuration**: `LLM_PROVIDER=local`, `LLM_MODEL=llama3.2` (or similar)
+- **Target**: Apple Silicon / Ollama local runtime without code modifications in agents.
+
+### Future Cloud State:
+- **Provider**: `APIProvider`
+- **Configuration**: `LLM_PROVIDER=api`, `LLM_API_KEY=...`
+
+---
+
+## 9. Future Implementation Phases
 
 | Phase   | Focus                                           | Dependencies         |
 | ------- | ----------------------------------------------- | -------------------- |
 | Day 1   | Architecture, interfaces, schemas, contracts     | None                 |
-| Day 2–3 | Concrete LLM client (OpenAI/Anthropic)          | LLM API key          |
-| Day 4–5 | Test Planner Agent implementation                | LLM client           |
-| Day 6–8 | Failure Analyzer Agent implementation            | LLM client           |
-| Day 9–12 | Self-Healing Agent + selector ranking           | Analyzer, DOM access  |
-| Day 13–15 | Healing Memory (persistent store)              | Database (Member 3)   |
-| Day 16–18 | Agent Controller orchestration                 | All agents            |
-| Day 19–22 | Integration with Member 2 execution engine     | Member 2 APIs         |
-| Day 23–25 | Integration with Member 3 backend/dashboard    | Member 3 APIs         |
-| Day 26–28 | Confidence calibration and evaluation          | Historical data       |
-| Day 29–30 | End-to-end testing and hardening               | All components        |
+| Day 2   | Provider-independent LLM abstraction & Mock     | None (offline)       |
+| Day 3   | Structured output parsing & prompt engineering  | LLM abstraction      |
+| Day 4–5 | Test Planner Agent implementation                | LLM abstraction      |
+| Day 6–8 | Failure Analyzer Agent implementation            | LLM abstraction      |
+| Day 9–12 | Self-Healing Agent + selector ranking           | Analyzer, DOM access |
+| Day 13–15 | Healing Memory (persistent store)              | Database (Member 3)  |
+| Day 16–18 | Agent Controller orchestration                 | All agents           |
+| Day 19–22 | Integration with Member 2 execution engine     | Member 2 APIs        |
+| Day 23–25 | Integration with Member 3 backend/dashboard    | Member 3 APIs        |
+| Day 26–28 | Confidence calibration and evaluation          | Historical data      |
+| Day 29–30 | End-to-end testing and hardening               | All components       |
 
 ---
 
-## 9. Inter-Member Integration Points
+## 10. Inter-Member Integration Points
 
 ### Member 1 → Member 2
 
