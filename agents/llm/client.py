@@ -1,17 +1,25 @@
 """
 TestSphere-AI — LLM Client Interface
 
-Abstract base class for LLM interactions.
-Concrete implementations (OpenAI, Anthropic, etc.) will be
-added on future development days.
+Abstract base class for LLM providers.
+Concrete implementations (Mock, Local, API) inherit from this
+interface. Agents interact ONLY with this abstraction.
+
+Architecture::
+
+    Agent
+      ↓
+    LLMClient (this interface)
+      ↓
+    MockLLMProvider / LocalLLMProvider / APIProvider
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
 
 from agents.llm.config import LLMConfig
+from agents.llm.schemas import LLMRequest, LLMResponse
 
 
 class LLMClient(ABC):
@@ -21,7 +29,10 @@ class LLMClient(ABC):
     This ensures the AI layer is decoupled from any specific LLM
     provider and can be swapped or mocked during testing.
 
-    Concrete implementations will be added on Day 2+.
+    Concrete implementations:
+      - ``MockLLMProvider`` — deterministic mock (Day 2)
+      - ``LocalLLMProvider`` — local model via Ollama etc. (future)
+      - ``APIProvider`` — cloud API like OpenAI (future)
     """
 
     def __init__(self, config: LLMConfig) -> None:
@@ -32,7 +43,40 @@ class LLMClient(ABC):
         """Return the LLM configuration."""
         return self._config
 
+    @property
+    def provider_name(self) -> str:
+        """Return the name of this provider."""
+        return self._config.provider
+
     @abstractmethod
+    async def generate(self, request: LLMRequest) -> LLMResponse:
+        """Send a request to the LLM and return a structured response.
+
+        This is the primary entry point that all agents use.
+
+        Parameters
+        ----------
+        request:
+            A structured LLM request containing the prompt,
+            system instruction, and generation parameters.
+
+        Returns
+        -------
+        LLMResponse
+            A structured response containing the model's output,
+            usage statistics, and metadata.
+
+        Raises
+        ------
+        LLMProviderError
+            If the provider encounters an internal error.
+        LLMTimeoutError
+            If the request exceeds the configured timeout.
+        LLMResponseError
+            If the response cannot be parsed or is invalid.
+        """
+        ...
+
     async def complete(
         self,
         prompt: str,
@@ -41,7 +85,10 @@ class LLMClient(ABC):
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> str:
-        """Send a completion request to the LLM.
+        """Convenience method: send a text prompt and return just the content.
+
+        Builds an ``LLMRequest`` internally and extracts the text
+        content from the ``LLMResponse``.
 
         Parameters
         ----------
@@ -57,39 +104,13 @@ class LLMClient(ABC):
         Returns
         -------
         str
-            The LLM's text response.
+            The model's text response content.
         """
-        ...
-
-    @abstractmethod
-    async def complete_structured(
-        self,
-        prompt: str,
-        response_schema: type,
-        *,
-        system_prompt: str = "",
-        temperature: float | None = None,
-    ) -> Any:
-        """Send a completion request expecting structured output.
-
-        The response will be parsed and validated against the
-        provided Pydantic model / response_schema.
-
-        Parameters
-        ----------
-        prompt:
-            The user/task prompt.
-        response_schema:
-            A Pydantic model class to validate the response against.
-        system_prompt:
-            Optional system-level instruction.
-        temperature:
-            Override the default temperature for this call.
-
-        Returns
-        -------
-        Any
-            An instance of ``response_schema`` populated from the
-            LLM's response.
-        """
-        ...
+        request = LLMRequest(
+            prompt=prompt,
+            system_instruction=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        response = await self.generate(request)
+        return response.content
