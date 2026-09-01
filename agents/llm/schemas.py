@@ -8,7 +8,10 @@ LLM abstraction layer, regardless of the underlying provider.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# Supported response format identifiers
+VALID_RESPONSE_FORMATS = {"text", "json"}
 
 
 class LLMRequest(BaseModel):
@@ -42,6 +45,45 @@ class LLMRequest(BaseModel):
             "'json' when structured JSON output is expected."
         ),
     )
+
+    @field_validator("prompt")
+    @classmethod
+    def prompt_must_not_be_empty(cls, v: str) -> str:
+        """Reject empty or whitespace-only prompts."""
+        if not v or not v.strip():
+            raise ValueError("Prompt must not be empty or whitespace-only.")
+        return v
+
+    @field_validator("temperature")
+    @classmethod
+    def temperature_must_be_in_range(cls, v: float | None) -> float | None:
+        """Temperature must be between 0.0 and 2.0 when specified."""
+        if v is not None and (v < 0.0 or v > 2.0):
+            raise ValueError(
+                f"Temperature must be between 0.0 and 2.0, got {v}."
+            )
+        return v
+
+    @field_validator("max_tokens")
+    @classmethod
+    def max_tokens_must_be_positive(cls, v: int | None) -> int | None:
+        """Max tokens must be positive when specified."""
+        if v is not None and v <= 0:
+            raise ValueError(
+                f"max_tokens must be a positive integer, got {v}."
+            )
+        return v
+
+    @field_validator("response_format")
+    @classmethod
+    def response_format_must_be_valid(cls, v: str) -> str:
+        """Response format must be a supported value."""
+        if v not in VALID_RESPONSE_FORMATS:
+            raise ValueError(
+                f"Unsupported response_format '{v}'. "
+                f"Valid formats: {', '.join(sorted(VALID_RESPONSE_FORMATS))}."
+            )
+        return v
 
 
 class LLMUsage(BaseModel):
