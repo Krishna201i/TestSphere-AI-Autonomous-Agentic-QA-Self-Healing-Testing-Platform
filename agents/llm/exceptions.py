@@ -22,6 +22,16 @@ class LLMError(Exception):
         self.provider = provider
         super().__init__(message)
 
+    @property
+    def is_retryable(self) -> bool:
+        """Whether this error category is potentially transient.
+
+        Subclasses override this to indicate whether the error
+        warrants a retry attempt.  By default, errors are NOT
+        retryable — only explicitly transient categories return True.
+        """
+        return False
+
 
 class LLMConfigurationError(LLMError):
     """Raised when LLM configuration is missing or invalid.
@@ -45,12 +55,29 @@ class LLMAuthenticationError(LLMError):
     """
 
 
+class LLMRequestValidationError(LLMError):
+    """Raised when a request fails validation before reaching the provider.
+
+    Examples:
+        - Empty or missing prompt
+        - Invalid temperature value
+        - Invalid max_tokens value
+        - Unsupported response format
+
+    This error should NOT be retried — it requires fixing the request.
+    """
+
+
 class LLMTimeoutError(LLMError):
     """Raised when an LLM request exceeds the configured timeout.
 
     The request took longer than ``LLMConfig.timeout`` seconds.
     May be retried if retries are configured.
     """
+
+    @property
+    def is_retryable(self) -> bool:
+        return True
 
 
 class LLMRateLimitError(LLMError):
@@ -62,6 +89,10 @@ class LLMRateLimitError(LLMError):
     Note: Can be simulated by the mock provider for testing.
     """
 
+    @property
+    def is_retryable(self) -> bool:
+        return True
+
 
 class LLMConnectionError(LLMError):
     """Raised when the client cannot reach the LLM provider.
@@ -72,6 +103,10 @@ class LLMConnectionError(LLMError):
     Note: Not raised by the mock provider under normal use.
     """
 
+    @property
+    def is_retryable(self) -> bool:
+        return True
+
 
 class LLMProviderError(LLMError):
     """Raised for unexpected provider-side errors.
@@ -81,6 +116,10 @@ class LLMProviderError(LLMError):
 
     The mock provider can simulate this for testing error-handling paths.
     """
+
+    @property
+    def is_retryable(self) -> bool:
+        return True
 
 
 class LLMResponseError(LLMError):

@@ -1,8 +1,8 @@
 # TestSphere-AI — Member 1: AI Intelligence Layer Architecture
 
-> **Version:** 0.2.0 (Day 2 LLM Abstraction Foundation)
+> **Version:** 0.3.0 (Day 3 — Reusable LLM Client Layer)
 > **Author:** Member 1
-> **Date:** 2026-08-31
+> **Date:** 2026-09-01
 
 ---
 
@@ -267,16 +267,16 @@ These rules govern all self-healing behavior in the system:
 agents/
 ├── __init__.py
 ├── llm/
-│   ├── __init__.py            ← Exports LLMClient, schemas, factory, parser, exceptions
-│   ├── client.py              ← Abstract LLM client interface (generate, complete)
+│   ├── __init__.py            ← Exports LLMClient, LLMClientSession, schemas, factory, parser, exceptions
+│   ├── client.py              ← Abstract LLMClient interface + LLMClientSession (Day 3)
 │   ├── config.py              ← LLM configuration (provider-aware, defaults to 'mock')
-│   ├── exceptions.py          ← Custom LLM exception hierarchy
-│   ├── factory.py             ← get_llm_provider() factory function
+│   ├── exceptions.py          ← Custom LLM exception hierarchy (8 types + is_retryable)
+│   ├── factory.py             ← get_llm_provider() + create_llm_client() factory functions
 │   ├── parser.py              ← ResponseParser (text, JSON, Pydantic model parsing)
 │   ├── providers/
 │   │   ├── __init__.py        ← Exports MockLLMProvider
-│   │   └── mock.py            ← MockLLMProvider (deterministic, failure simulations)
-│   └── schemas.py             ← LLMRequest, LLMResponse, LLMUsage Pydantic models
+│   │   └── mock.py            ← MockLLMProvider (deterministic, failure sims, response registry)
+│   └── schemas.py             ← LLMRequest, LLMResponse, LLMUsage (with validators)
 ├── planner/
 │   ├── __init__.py
 │   ├── planner.py             ← Abstract Test Planner Agent
@@ -303,50 +303,157 @@ agents/
 
 ---
 
-## 8. LLM Abstraction & Provider Architecture
+## 8. LLM Client Architecture (Day 3)
 
-The LLM layer is designed with strict provider independence. AI agents (Test Planner, Failure Analyzer, Self-Healing Agent) depend exclusively on the abstract `LLMClient` interface and structured schemas (`LLMRequest` / `LLMResponse`).
+### 8.1 Layer Responsibilities
+
+The LLM layer uses a three-tier architecture with clear separation of concerns:
 
 ```
-                     ┌──────────────────┐
-                     │    AI AGENTS     │
-                     └────────┬─────────┘
-                              │ uses LLMRequest / LLMResponse
-                              ▼
-                     ┌──────────────────┐
-                     │   LLM INTERFACE  │ (LLMClient abstract base class)
-                     └────────┬─────────┘
-                              │
-                    get_llm_provider(config)
-                              │
-         ┌────────────────────┼────────────────────┐
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
-│   Mock Provider  │ │  Local Provider  │ │   API Provider   │
-│  (TODAY: Day 2)  │ │ (FUTURE: Ollama) │ │ (FUTURE: Cloud)  │
-└────────┬─────────┘ └────────┬─────────┘ └────────┬─────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
-│ Deterministic &  │ │ Local Model Run  │ │ Remote API Call  │
-│ Offline Testing  │ │ (M4 / Ollama)    │ │ (OpenAI/Claude)  │
-└──────────────────┘ └──────────────────┘ └──────────────────┘
+                 ┌───────────────────┐
+                 │   FUTURE AGENTS   │
+                 │                   │
+                 │ Planner           │
+                 │ Analyzer          │
+                 │ Healer            │
+                 └─────────┬─────────┘
+                           ↓
+                 ┌───────────────────┐
+                 │  LLMClientSession │  ← Day 3: Agent-facing interface
+                 │  ─────────────────│
+                 │  • Request validation
+                 │  • Response normalization
+                 │  • Retry logic
+                 │  • Timeout handling
+                 │  • Error translation
+                 │  • Safe logging
+                 └─────────┬─────────┘
+                           ↓
+                 ┌───────────────────┐
+                 │     LLMClient     │  ← Abstract provider interface
+                 │     (ABC)         │
+                 └─────────┬─────────┘
+                           ↓
+                   ┌───────┴────────┐
+                   ↓                ↓
+           MockLLMProvider   Future Providers
+                   ↓                ↓
+              Mock Data        Local/API Model
 ```
 
-### Current State (Day 2):
-- **Provider**: `MockLLMProvider`
-- **Configuration**: `LLM_PROVIDER=mock` (default)
-- **Characteristics**: 100% offline, deterministic, zero credentials required, supports failure simulations (`error`, `timeout`, `empty`, `invalid`).
+| Layer              | Class                | Responsibility                                          |
+| ------------------ | -------------------- | ------------------------------------------------------- |
+| **Agent-facing**   | `LLMClientSession`   | Clean, stable interface for agents. Handles validation, retry, normalization, error translation. |
+| **Provider ABC**   | `LLMClient`          | Abstract base class defining the `generate()` contract.  |
+| **Concrete**       | `MockLLMProvider`    | Provider-specific communication. Deterministic mock for testing. |
 
-### Future Local State:
-- **Provider**: `LocalLLMProvider`
-- **Configuration**: `LLM_PROVIDER=local`, `LLM_MODEL=llama3.2` (or similar)
-- **Target**: Apple Silicon / Ollama local runtime without code modifications in agents.
+### 8.2 Request Flow
 
-### Future Cloud State:
-- **Provider**: `APIProvider`
-- **Configuration**: `LLM_PROVIDER=api`, `LLM_API_KEY=...`
+```
+Agent builds LLMRequest
+        ↓
+LLMClientSession.generate(request)
+        ↓
+    ┌── Request Validation ──┐
+    │ • Non-empty prompt     │
+    │ • Valid temperature     │
+    │ • Valid max_tokens      │
+    │ • Valid response_format │
+    └────────┬───────────────┘
+             ↓
+    ┌── Provider Delegation ─┐
+    │   with retry logic     │──→ (up to max_retries on transient errors)
+    └────────┬───────────────┘
+             ↓
+    ┌── Response Normalization ─┐
+    │ • Ensure provider field   │
+    │ • Ensure model field      │
+    │ • Check non-empty content │
+    └────────┬──────────────────┘
+             ↓
+    ┌── Error Translation ──┐
+    │ • Wrap raw exceptions  │
+    │ • Project-level errors │
+    └────────┬───────────────┘
+             ↓
+    Standard LLMResponse returned to agent
+```
+
+### 8.3 Response Normalization
+
+All provider responses are normalized to the standard `LLMResponse` schema:
+
+- `provider` field is always populated (falls back to config value)
+- `model` field is always populated (falls back to config value)
+- Empty content is caught and raises `LLMResponseError`
+- Token usage statistics are preserved
+
+Agents receive identical response structures regardless of provider.
+
+### 8.4 Error Translation
+
+Provider-specific exceptions are translated to project-level errors:
+
+| Error Type                    | Retryable? | When Raised                                |
+| ----------------------------- | ---------- | ------------------------------------------ |
+| `LLMConfigurationError`      | No         | Invalid config, unknown provider            |
+| `LLMAuthenticationError`     | No         | Invalid credentials (future API providers)  |
+| `LLMRequestValidationError`  | No         | Invalid request (empty prompt, bad params)  |
+| `LLMResponseError`           | No         | Empty/invalid response, parse failure       |
+| `LLMProviderError`           | **Yes**    | Internal provider error (5xx equivalent)    |
+| `LLMTimeoutError`            | **Yes**    | Request timeout                             |
+| `LLMConnectionError`         | **Yes**    | Cannot reach provider                       |
+| `LLMRateLimitError`          | **Yes**    | Rate limited (429 equivalent)               |
+
+Unexpected (non-LLM) exceptions are wrapped in `LLMProviderError` automatically.
+
+### 8.5 Retry Behavior
+
+- Configured via `LLMConfig.max_retries` (default: 2, env: `LLM_MAX_RETRIES`)
+- Only **retryable** errors trigger retries (`is_retryable` property)
+- Non-retryable errors (config, auth, validation, response) raise immediately
+- After all retries exhausted, the last error is raised
+- Total attempts = 1 + max_retries
+
+### 8.6 Mock Provider & Response Registry
+
+`MockLLMProvider` supports multiple testing modes:
+
+| Mode                  | Purpose                              | API                                    |
+| --------------------- | ------------------------------------ | -------------------------------------- |
+| Default               | Deterministic echo-style responses   | `MockLLMProvider(config)`              |
+| Simulate              | Fixed failure mode                   | `simulate="error"/"timeout"/…`         |
+| Custom responses      | Cycle through predefined strings     | `responses=["A", "B"]`                 |
+| Response registry     | Match responses by prompt substring  | `register_response("plan", "…")`       |
+| Error registry        | Match errors by prompt substring     | `register_error("crash", exc)`         |
+| Failure sequence      | Transient failures then success      | `set_failure_sequence([exc1, exc2])`   |
+
+### 8.7 How to Add a Future Provider
+
+To add a new provider (e.g., `LocalLLMProvider` for Ollama):
+
+1. **Create** `agents/llm/providers/local.py`:
+   ```python
+   class LocalLLMProvider(LLMClient):
+       async def generate(self, request: LLMRequest) -> LLMResponse:
+           # Call Ollama API, return LLMResponse
+           ...
+   ```
+
+2. **Register** in `agents/llm/factory.py`:
+   ```python
+   if provider == "local":
+       from agents.llm.providers.local import LocalLLMProvider
+       return LocalLLMProvider(config)
+   ```
+
+3. **Configure** via environment:
+   ```
+   LLM_PROVIDER=local
+   LLM_MODEL=llama3.2
+   ```
+
+4. **No agent changes required.** All agents use `LLMClientSession` and receive the same `LLMResponse` regardless of provider.
 
 ---
 
@@ -356,9 +463,9 @@ The LLM layer is designed with strict provider independence. AI agents (Test Pla
 | ------- | ----------------------------------------------- | -------------------- |
 | Day 1   | Architecture, interfaces, schemas, contracts     | None                 |
 | Day 2   | Provider-independent LLM abstraction & Mock     | None (offline)       |
-| Day 3   | Structured output parsing & prompt engineering  | LLM abstraction      |
-| Day 4–5 | Test Planner Agent implementation                | LLM abstraction      |
-| Day 6–8 | Failure Analyzer Agent implementation            | LLM abstraction      |
+| Day 3   | LLMClientSession: validation, retry, normalization | LLM abstraction    |
+| Day 4–5 | Test Planner Agent implementation                | LLM client layer     |
+| Day 6–8 | Failure Analyzer Agent implementation            | LLM client layer     |
 | Day 9–12 | Self-Healing Agent + selector ranking           | Analyzer, DOM access |
 | Day 13–15 | Healing Memory (persistent store)              | Database (Member 3)  |
 | Day 16–18 | Agent Controller orchestration                 | All agents           |
