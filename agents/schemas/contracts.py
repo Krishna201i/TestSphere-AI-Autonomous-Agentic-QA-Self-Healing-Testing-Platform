@@ -12,13 +12,18 @@ from agents.healer.schemas import HealingCandidate, HealingResult
 from agents.planner.schemas import (
     ApplicationContext,
     Assertion,
+    ElementContext,
+    PageContext,
     PageInfo,
     TestCase,
+    TestPlan,
     TestStep,
 )
 from agents.schemas.enums import (
+    AssertionType,
     FailureType,
     HealingStatus,
+    TestAction,
     TestCategory,
     TestPriority,
 )
@@ -26,10 +31,13 @@ from agents.schemas.enums import (
 __all__ = [
     # Planner contracts
     "ApplicationContext",
+    "PageContext",
     "PageInfo",
+    "ElementContext",
     "TestCase",
     "TestStep",
     "Assertion",
+    "TestPlan",
     # Analyzer contracts
     "TestFailure",
     "FailureAnalysis",
@@ -41,4 +49,6 @@ __all__ = [
     "HealingStatus",
     "TestCategory",
     "TestPriority",
+    "TestAction",
+    "AssertionType",
 ]

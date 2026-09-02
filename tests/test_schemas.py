@@ -11,16 +11,21 @@ import json
 import pytest
 
 from agents.schemas.enums import (
+    AssertionType,
     FailureType,
     HealingStatus,
+    TestAction,
     TestCategory,
     TestPriority,
 )
 from agents.planner.schemas import (
     ApplicationContext,
     Assertion,
+    ElementContext,
+    PageContext,
     PageInfo,
     TestCase,
+    TestPlan,
     TestStep,
 )
 from agents.analyzer.schemas import FailureAnalysis, TestFailure
@@ -76,7 +81,41 @@ class TestPriorityAndCategoryEnums:
         assert len(TestPriority) == 4
 
     def test_categories(self):
-        assert len(TestCategory) == 5
+        # Day 4: added NEGATIVE and BOUNDARY → 7 total
+        assert len(TestCategory) == 7
+
+    def test_negative_category_exists(self):
+        assert TestCategory.NEGATIVE == "negative"
+
+    def test_boundary_category_exists(self):
+        assert TestCategory.BOUNDARY == "boundary"
+
+
+class TestActionAndAssertionEnums:
+    """Validate TestAction and AssertionType enums (Day 4)."""
+
+    def test_action_count(self):
+        assert len(TestAction) == 8
+
+    def test_action_values(self):
+        expected = {
+            "navigate", "click", "fill", "select",
+            "check", "uncheck", "press", "wait",
+        }
+        actual = {a.value for a in TestAction}
+        assert actual == expected
+
+    def test_assertion_type_count(self):
+        assert len(AssertionType) == 7
+
+    def test_assertion_type_values(self):
+        expected = {
+            "element_visible", "element_not_visible",
+            "element_contains_text", "element_has_text",
+            "url_contains", "url_equals", "value_equals",
+        }
+        actual = {at.value for at in AssertionType}
+        assert actual == expected
 
 
 # ── Planner Schema Tests ───────────────────────────────────
@@ -108,27 +147,27 @@ class TestPlannerSchemas:
             steps=[
                 TestStep(
                     step_number=1,
-                    action="navigate",
+                    action=TestAction.NAVIGATE,
                     value="https://example.com/login",
                     description="Go to login page",
                 ),
                 TestStep(
                     step_number=2,
-                    action="type",
-                    selector="#username",
+                    action=TestAction.FILL,
+                    target="#username",
                     value="testuser",
                     description="Enter username",
                 ),
                 TestStep(
                     step_number=3,
-                    action="click",
-                    selector="#login-button",
+                    action=TestAction.CLICK,
+                    target="#login-button",
                     description="Click login",
                 ),
             ],
             assertions=[
                 Assertion(
-                    type="url_contains",
+                    type=AssertionType.URL_CONTAINS,
                     expected="/dashboard",
                     description="Should redirect to dashboard",
                 ),
@@ -148,8 +187,8 @@ class TestPlannerSchemas:
             steps=[
                 TestStep(
                     step_number=1,
-                    action="type",
-                    selector="#search-input",
+                    action=TestAction.FILL,
+                    target="#search-input",
                     value="test query",
                 ),
             ],
@@ -177,6 +216,16 @@ class TestPlannerSchemas:
         )
         assert ctx.app_name == "TestApp"
         assert len(ctx.pages) == 2
+
+    def test_backward_compatible_selector_alias(self):
+        """TestStep.selector should return the same value as target."""
+        step = TestStep(
+            step_number=1,
+            action=TestAction.CLICK,
+            target="#my-button",
+        )
+        assert step.selector == "#my-button"
+        assert step.target == "#my-button"
 
 
 # ── Analyzer Schema Tests ──────────────────────────────────

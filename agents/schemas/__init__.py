@@ -1,8 +1,10 @@
 """TestSphere-AI — Schemas package."""
 
 from agents.schemas.enums import (
+    AssertionType,
     FailureType,
     HealingStatus,
+    TestAction,
     TestCategory,
     TestPriority,
 )
@@ -12,4 +14,6 @@ __all__ = [
     "HealingStatus",
     "TestCategory",
     "TestPriority",
+    "TestAction",
+    "AssertionType",
 ]

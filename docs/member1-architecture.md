@@ -1,8 +1,8 @@
 # TestSphere-AI — Member 1: AI Intelligence Layer Architecture
 
-> **Version:** 0.3.0 (Day 3 — Reusable LLM Client Layer)
+> **Version:** 0.4.0 (Day 4 — Test Planner Agent Foundation)
 > **Author:** Member 1
-> **Date:** 2026-09-01
+> **Date:** 2026-09-02
 
 ---
 
@@ -279,8 +279,11 @@ agents/
 │   └── schemas.py             ← LLMRequest, LLMResponse, LLMUsage (with validators)
 ├── planner/
 │   ├── __init__.py
-│   ├── planner.py             ← Abstract Test Planner Agent
-│   └── schemas.py             ← ApplicationContext, TestCase, TestStep, Assertion
+│   ├── planner.py             ← Abstract TestPlannerAgent + concrete LLMTestPlanner (Day 4)
+│   ├── schemas.py             ← ApplicationContext, ElementContext, PageContext, TestCase, TestStep, Assertion, TestPlan
+│   ├── validation.py          ← Business-rule validation (action requirements, step ordering, etc.) (Day 4)
+│   ├── prompts.py             ← Prompt architecture & templates (Day 4)
+│   └── mock_scenarios.py      ← Mock LLM response fixtures for testing (Day 4)
 ├── analyzer/
 │   ├── __init__.py
 │   ├── analyzer.py            ← Abstract Failure Analyzer Agent
@@ -297,7 +300,7 @@ agents/
 │   └── agent_controller.py    ← Abstract Agent Controller
 └── schemas/
     ├── __init__.py
-    ├── enums.py               ← FailureType, HealingStatus, TestPriority, TestCategory
+    ├── enums.py               ← FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType (Day 4)
     └── contracts.py           ← Re-exports all contracts from one import path
 ```
 
@@ -459,20 +462,21 @@ To add a new provider (e.g., `LocalLLMProvider` for Ollama):
 
 ## 9. Future Implementation Phases
 
-| Phase   | Focus                                           | Dependencies         |
-| ------- | ----------------------------------------------- | -------------------- |
-| Day 1   | Architecture, interfaces, schemas, contracts     | None                 |
-| Day 2   | Provider-independent LLM abstraction & Mock     | None (offline)       |
-| Day 3   | LLMClientSession: validation, retry, normalization | LLM abstraction    |
-| Day 4–5 | Test Planner Agent implementation                | LLM client layer     |
-| Day 6–8 | Failure Analyzer Agent implementation            | LLM client layer     |
-| Day 9–12 | Self-Healing Agent + selector ranking           | Analyzer, DOM access |
-| Day 13–15 | Healing Memory (persistent store)              | Database (Member 3)  |
-| Day 16–18 | Agent Controller orchestration                 | All agents           |
-| Day 19–22 | Integration with Member 2 execution engine     | Member 2 APIs        |
-| Day 23–25 | Integration with Member 3 backend/dashboard    | Member 3 APIs        |
-| Day 26–28 | Confidence calibration and evaluation          | Historical data      |
-| Day 29–30 | End-to-end testing and hardening               | All components       |
+| Phase   | Focus                                           | Dependencies         | Status   |
+| ------- | ----------------------------------------------- | -------------------- | -------- |
+| Day 1   | Architecture, interfaces, schemas, contracts     | None                 | ✅ Done  |
+| Day 2   | Provider-independent LLM abstraction & Mock     | None (offline)       | ✅ Done  |
+| Day 3   | LLMClientSession: validation, retry, normalization | LLM abstraction    | ✅ Done  |
+| Day 4   | Test Planner foundation: schemas, validation, prompts | LLM client layer | ✅ Done  |
+| Day 5   | Test Planner Agent: full LLM generation logic   | Day 4 foundation     | Planned  |
+| Day 6–8 | Failure Analyzer Agent implementation            | LLM client layer     | Planned  |
+| Day 9–12 | Self-Healing Agent + selector ranking           | Analyzer, DOM access | Planned  |
+| Day 13–15 | Healing Memory (persistent store)              | Database (Member 3)  | Planned  |
+| Day 16–18 | Agent Controller orchestration                 | All agents           | Planned  |
+| Day 19–22 | Integration with Member 2 execution engine     | Member 2 APIs        | Planned  |
+| Day 23–25 | Integration with Member 3 backend/dashboard    | Member 3 APIs        | Planned  |
+| Day 26–28 | Confidence calibration and evaluation          | Historical data      | Planned  |
+| Day 29–30 | End-to-end testing and hardening               | All components       | Planned  |
 
 ---
 
@@ -491,6 +495,160 @@ To add a new provider (e.g., `LocalLLMProvider` for Ollama):
 - **Output:** `HealingResult` (healing outcomes for dashboard/reports)
 - **Input:** `ApplicationContext` (app info from user via dashboard)
 - **Input:** Configuration / trigger signals via backend API
+
+---
+
+## 11. Test Planner Agent — Day 4 Foundation
+
+### 11.1 Responsibility
+
+The Test Planner Agent's **sole responsibility** is to convert structured application information into meaningful, executable test plans.
+
+It does NOT:
+- Execute browser actions
+- Use Playwright directly
+- Modify the application
+- Validate healed selectors
+- Perform self-healing
+- Interact directly with the frontend
+
+Those responsibilities belong to Member 2's execution engine.
+
+### 11.2 Architecture
+
+```
+ApplicationContext
+        ↓
+┌───────────────────┐
+│  LLMTestPlanner   │  ← Concrete implementation (Day 4 skeleton)
+│  ─────────────────│
+│  • Input validation
+│  • Prompt building
+│  • Output validation
+│  • LLMClientSession dependency injection
+└─────────┬─────────┘
+          ↓
+┌───────────────────┐
+│  LLMClientSession │  ← Day 3 reusable client
+└─────────┬─────────┘
+          ↓
+┌───────────────────┐
+│  MockLLMProvider  │  ← Deterministic mock (no real LLM)
+└─────────┬─────────┘
+          ↓
+   Structured Output
+          ↓
+┌───────────────────┐
+│  Validation Layer │  ← Business-rule validation
+└─────────┬─────────┘
+          ↓
+   Valid Test Cases
+```
+
+### 11.3 Enhanced Schemas
+
+| Schema               | Purpose                                              |
+| -------------------- | ---------------------------------------------------- |
+| `ElementContext`     | Rich DOM element description (tag, id, type, etc.)   |
+| `PageContext`        | Page with title, elements, forms, navigation         |
+| `ApplicationContext` | Full app description with pages and metadata         |
+| `TestStep`           | Atomic action with controlled action vocabulary      |
+| `Assertion`          | Verification with controlled assertion types         |
+| `TestCase`           | Complete test with steps, assertions, metadata       |
+| `TestPlan`           | Wrapper: application name + list of test cases       |
+
+### 11.4 Controlled Action Vocabulary
+
+| Action     | Target Required | Value Required | Description                    |
+| ---------- | --------------- | -------------- | ------------------------------ |
+| `navigate` | No              | Yes (URL)      | Navigate to a URL              |
+| `click`    | Yes             | No             | Click an element               |
+| `fill`     | Yes             | Yes (text)     | Type text into an input        |
+| `select`   | Yes             | Yes (option)   | Select from a dropdown         |
+| `check`    | Yes             | No             | Check a checkbox               |
+| `uncheck`  | Yes             | No             | Uncheck a checkbox             |
+| `press`    | No              | Yes (key)      | Press a keyboard key           |
+| `wait`     | No              | No             | Wait for condition/time        |
+
+### 11.5 Controlled Assertion Types
+
+| Type                    | Target Required | Expected Required | Description                      |
+| ----------------------- | --------------- | ----------------- | -------------------------------- |
+| `element_visible`       | Yes             | No                | Element is visible               |
+| `element_not_visible`   | Yes             | No                | Element is not visible           |
+| `element_contains_text` | Yes             | Yes               | Element contains expected text   |
+| `element_has_text`      | Yes             | Yes               | Element has exactly expected text|
+| `url_contains`          | No              | Yes               | URL contains substring           |
+| `url_equals`            | No              | Yes               | URL matches exactly              |
+| `value_equals`          | Yes             | Yes               | Input value matches              |
+
+### 11.6 Test Categories
+
+| Category        | Meaning                                                |
+| --------------- | ------------------------------------------------------ |
+| `functional`    | Tests expected normal user workflows                   |
+| `negative`      | Tests invalid or incorrect input/workflows             |
+| `boundary`      | Tests minimum, maximum, empty, or edge-case values     |
+| `smoke`         | Quick sanity checks that core features work            |
+| `regression`    | Tests verifying previously working functionality       |
+| `edge_case`     | Tests for unusual or extreme conditions                |
+| `accessibility` | Tests verifying accessibility compliance               |
+
+### 11.7 Priority Levels
+
+| Priority   | Meaning                                                       |
+| ---------- | ------------------------------------------------------------- |
+| `CRITICAL` | System-critical functionality whose failure blocks all usage  |
+| `HIGH`     | Critical workflows — login, signup, payment, checkout         |
+| `MEDIUM`   | Important but not immediately business-critical               |
+| `LOW`      | Minor or low-impact functionality                             |
+
+### 11.8 Validation Rules
+
+Business rules enforced beyond Pydantic schema validation:
+
+- Test ID must be non-empty
+- Test name must be non-empty
+- Category must be from `TestCategory` enum
+- Priority must be from `TestPriority` enum
+- Test must contain at least one step
+- Step numbers must be sequential and non-duplicate
+- Actions must be from `TestAction` enum
+- Target required when action needs it (click, fill, select, check, uncheck)
+- Value required when action needs it (navigate, fill, select, press)
+- Assertion types must be from `AssertionType` enum
+- Assertion target required when type needs it
+- Assertion expected required when type needs it
+- Test plan must have non-empty application name
+- No duplicate test IDs within a plan
+
+### 11.9 Prompt Architecture
+
+Modular, reusable prompt components:
+
+| Component                  | Purpose                                              |
+| -------------------------- | ---------------------------------------------------- |
+| `SYSTEM_PROMPT`            | Role, constraints, rules for the model               |
+| `ACTION_VOCABULARY`        | Documents supported actions with requirements        |
+| `ASSERTION_VOCABULARY`     | Documents supported assertion types                  |
+| `CATEGORY_DEFINITIONS`     | Documents test categories with meanings              |
+| `PRIORITY_DEFINITIONS`     | Documents priority levels with meanings              |
+| `OUTPUT_SCHEMA_INSTRUCTION`| Expected JSON output format                          |
+| `build_test_generation_prompt()` | Assembles context + all components into prompt |
+
+### 11.10 Mock Scenarios
+
+Deterministic test fixtures for the MockLLMProvider:
+
+| Scenario                          | Purpose                                  |
+| --------------------------------- | ---------------------------------------- |
+| `VALID_TEST_PLAN_RESPONSE`        | Well-formed test plan JSON               |
+| `INVALID_MALFORMED_RESPONSE`      | Malformed JSON (parse failure)           |
+| `EMPTY_TEST_PLAN_RESPONSE`        | Valid JSON with empty test_cases list    |
+| `UNSUPPORTED_ACTION_RESPONSE`     | Test plan with unsupported action        |
+| `MISSING_REQUIRED_FIELD_RESPONSE` | Test case missing required fields        |
+| `INVALID_CATEGORY_RESPONSE`       | Test case with unsupported category      |
+| `INVALID_PRIORITY_RESPONSE`       | Test case with unsupported priority      |
 
 ---
 
