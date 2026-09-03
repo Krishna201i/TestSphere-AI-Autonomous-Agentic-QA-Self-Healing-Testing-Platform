@@ -287,4 +287,187 @@ def validate_application_context(context: ApplicationContext) -> list[str]:
     if not context.app_url or not context.app_url.strip():
         errors.append("ApplicationContext 'app_url' must not be empty.")
 
+    # Validate each page's elements have the required 'tag' field
+    for page in context.pages:
+        if not page.url or not page.url.strip():
+            errors.append(
+                f"Page '{page.name or '(unnamed)'}' has an empty URL."
+            )
+        for elem in page.elements:
+            if not elem.tag or not elem.tag.strip():
+                errors.append(
+                    f"Page '{page.name}': element has an empty 'tag'."
+                )
+
     return errors
+
+
+# ── Element Reference Validation (Day 5) ────────────────────
+
+
+def _extract_known_selectors(context: ApplicationContext) -> set[str]:
+    """Extract all plausible CSS selectors from an ApplicationContext.
+
+    Builds selectors from element IDs, names, tags, roles, text,
+    placeholders, and data-testid attributes — the same identifiers
+    the prompt instructs the model to use.
+
+    Parameters
+    ----------
+    context:
+        The application context.
+
+    Returns
+    -------
+    set[str]
+        A set of known selector strings (e.g. ``'#email'``, ``'button'``).
+    """
+    selectors: set[str] = set()
+
+    for page in context.pages:
+        for elem in page.elements:
+            # ID-based selectors: #email
+            if elem.id:
+                selectors.add(f"#{elem.id}")
+            # Name-based selectors: [name="email"]
+            if elem.name:
+                selectors.add(f'[name="{elem.name}"]')
+            # Tag names: input, button, a
+            if elem.tag:
+                selectors.add(elem.tag)
+            # Explicit selector provided by Member 2
+            if elem.selector:
+                selectors.add(elem.selector)
+            # data-testid attribute
+            if "data-testid" in elem.attributes:
+                selectors.add(
+                    f'[data-testid="{elem.attributes["data-testid"]}"]'
+                )
+            # Text content (for text-based selectors)
+            if elem.text:
+                selectors.add(elem.text)
+            # Placeholder text
+            if elem.placeholder:
+                selectors.add(elem.placeholder)
+
+    return selectors
+
+
+def validate_element_references(
+    test_case: TestCase,
+    context: ApplicationContext,
+) -> list[str]:
+    """Validate that test step targets reference known elements.
+
+    Compares each step's ``target`` against the selectors derivable
+    from the ``ApplicationContext``.  Steps whose action does not
+    require a target (e.g. ``navigate``, ``wait``, ``press``) are
+    skipped.
+
+    Strategy
+    --------
+    A target is considered valid if **any** known selector is a
+    substring of the target, or the target is a substring of a
+    known selector.  This keeps matching simple for Day 5 —
+    advanced semantic matching is deferred.
+
+    Parameters
+    ----------
+    test_case:
+        The test case to check.
+    context:
+        The application context that was used for generation.
+
+    Returns
+    -------
+    list[str]
+        Validation error messages for unknown element references.
+    """
+    errors: list[str] = []
+    known = _extract_known_selectors(context)
+
+    if not known:
+        # No elements in context → nothing to validate against
+        return errors
+
+    # Actions that do NOT require a target element
+    no_target_actions = {TestAction.NAVIGATE, TestAction.PRESS, TestAction.WAIT}
+
+    for step in test_case.steps:
+        action_enum = (
+            step.action
+            if isinstance(step.action, TestAction)
+            else TestAction(step.action)
+        )
+        if action_enum in no_target_actions:
+            continue
+        if not step.target:
+            continue
+
+        target = step.target
+        # Check if any known selector matches the target
+        matched = any(
+            selector in target or target in selector
+            for selector in known
+        )
+        if not matched:
+            errors.append(
+                f"Step {step.step_number}: target '{target}' does not "
+                f"match any known element in the ApplicationContext."
+            )
+
+    return errors
+
+
+# ── Duplicate Detection (Day 5) ─────────────────────────────
+
+
+def _test_case_signature(test_case: TestCase) -> str:
+    """Create a deduplication signature for a test case.
+
+    The signature combines (lowercased):
+    - test name
+    - category
+    - ordered list of (action, target) pairs
+
+    This catches exact and near-identical duplicates without
+    advanced AI similarity.
+    """
+    action_seq = "|".join(
+        f"{s.action.value if isinstance(s.action, TestAction) else s.action}"
+        f":{s.target or ''}"
+        for s in test_case.steps
+    )
+    cat = (
+        test_case.category.value
+        if isinstance(test_case.category, TestCategory)
+        else str(test_case.category)
+    )
+    return f"{test_case.name.strip().lower()}::{cat.lower()}::{action_seq.lower()}"
+
+
+def detect_duplicate_test_cases(test_cases: list[TestCase]) -> list[int]:
+    """Detect duplicate test cases based on name + category + action sequence.
+
+    Parameters
+    ----------
+    test_cases:
+        The list of test cases to check.
+
+    Returns
+    -------
+    list[int]
+        Indices (0-based) of test cases that are duplicates of an
+        earlier entry in the list.  The first occurrence is kept.
+    """
+    seen: dict[str, int] = {}
+    duplicate_indices: list[int] = []
+
+    for idx, tc in enumerate(test_cases):
+        sig = _test_case_signature(tc)
+        if sig in seen:
+            duplicate_indices.append(idx)
+        else:
+            seen[sig] = idx
+
+    return duplicate_indices

@@ -314,6 +314,121 @@ INVALID_PRIORITY_RESPONSE: str = json.dumps(
 )
 
 
+# ── Scenario 8: Hallucinated Element References ─────────────
+
+HALLUCINATED_ELEMENT_RESPONSE: str = json.dumps(
+    {
+        "application_name": "Demo Application",
+        "base_url": "http://localhost:3000",
+        "test_cases": [
+            {
+                "test_id": "TC_HALL_001",
+                "name": "Hallucinated Element Test",
+                "description": "References elements that do not exist in the context.",
+                "category": "functional",
+                "priority": "HIGH",
+                "page_url": "/login",
+                "steps": [
+                    {
+                        "step_number": 1,
+                        "action": "navigate",
+                        "target": None,
+                        "value": "http://localhost:3000/login",
+                        "description": "Navigate to login page",
+                    },
+                    {
+                        "step_number": 2,
+                        "action": "fill",
+                        "target": "#username",
+                        "value": "admin",
+                        "description": "Enter username into non-existent field",
+                    },
+                    {
+                        "step_number": 3,
+                        "action": "click",
+                        "target": "#submit-form",
+                        "value": None,
+                        "description": "Click a non-existent submit button",
+                    },
+                ],
+                "assertions": [
+                    {
+                        "type": "url_contains",
+                        "target": "",
+                        "expected": "/dashboard",
+                        "description": "Should redirect to dashboard",
+                    },
+                ],
+            },
+        ],
+    },
+    indent=2,
+)
+
+
+# ── Scenario 9: Duplicate Test Cases ────────────────────────
+
+DUPLICATE_TEST_RESPONSE: str = json.dumps(
+    {
+        "application_name": "Demo Application",
+        "base_url": "http://localhost:3000",
+        "test_cases": [
+            {
+                "test_id": "TC_DUP_001",
+                "name": "Valid Login",
+                "description": "Verify valid login works.",
+                "category": "functional",
+                "priority": "HIGH",
+                "page_url": "/login",
+                "steps": [
+                    {
+                        "step_number": 1,
+                        "action": "fill",
+                        "target": "#email",
+                        "value": "test@example.com",
+                        "description": "Enter email",
+                    },
+                    {
+                        "step_number": 2,
+                        "action": "click",
+                        "target": "#login-button",
+                        "value": None,
+                        "description": "Click login",
+                    },
+                ],
+                "assertions": [],
+            },
+            {
+                "test_id": "TC_DUP_002",
+                "name": "Valid Login",
+                "description": "Duplicate — same name, category, and action sequence.",
+                "category": "functional",
+                "priority": "HIGH",
+                "page_url": "/login",
+                "steps": [
+                    {
+                        "step_number": 1,
+                        "action": "fill",
+                        "target": "#email",
+                        "value": "test@example.com",
+                        "description": "Enter email",
+                    },
+                    {
+                        "step_number": 2,
+                        "action": "click",
+                        "target": "#login-button",
+                        "value": None,
+                        "description": "Click login",
+                    },
+                ],
+                "assertions": [],
+            },
+        ],
+    },
+    indent=2,
+)
+
+
 # ── Registration Helper ─────────────────────────────────────
 
 
@@ -341,3 +456,5 @@ def register_planner_scenarios(provider: object) -> None:
     provider.register_response("missing field", MISSING_REQUIRED_FIELD_RESPONSE)
     provider.register_response("invalid category", INVALID_CATEGORY_RESPONSE)
     provider.register_response("invalid priority", INVALID_PRIORITY_RESPONSE)
+    provider.register_response("hallucinated element", HALLUCINATED_ELEMENT_RESPONSE)
+    provider.register_response("duplicate test", DUPLICATE_TEST_RESPONSE)
