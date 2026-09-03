@@ -1,8 +1,8 @@
 # TestSphere-AI — Member 1: AI Intelligence Layer Architecture
 
-> **Version:** 0.4.0 (Day 4 — Test Planner Agent Foundation)
+> **Version:** 0.5.0 (Day 5 — Test Planner Generation Pipeline)
 > **Author:** Member 1
-> **Date:** 2026-09-02
+> **Date:** 2026-09-03
 
 ---
 
@@ -649,7 +649,204 @@ Deterministic test fixtures for the MockLLMProvider:
 | `MISSING_REQUIRED_FIELD_RESPONSE` | Test case missing required fields        |
 | `INVALID_CATEGORY_RESPONSE`       | Test case with unsupported category      |
 | `INVALID_PRIORITY_RESPONSE`       | Test case with unsupported priority      |
+| `HALLUCINATED_ELEMENT_RESPONSE`   | Test plan referencing non-existent elements (Day 5) |
+| `DUPLICATE_TEST_RESPONSE`         | Test plan with duplicate test cases (Day 5) |
+
+---
+
+## 10. Day 5 — Test Planner Generation Pipeline
+
+### 10.1 Overview
+
+Day 5 completes the first working end-to-end test generation pipeline.
+The `LLMTestPlanner.generate_tests()` method — previously a skeleton
+raising `NotImplementedError` — now flows through:
+
+```
+ApplicationContext
+        ↓
+Input Validation
+        ↓
+Prompt Construction
+        ↓
+LLMClientSession.generate_json()
+        ↓
+MockLLMProvider
+        ↓
+Raw JSON Response
+        ↓
+Response Parsing → TestPlan
+        ↓
+Business-Rule Validation
+        ↓
+Duplicate Detection
+        ↓
+Element Reference Validation
+        ↓
+Valid TestPlan
+```
+
+### 10.2 Input Validation
+
+Before generation, `validate_application_context()` checks:
+
+- `app_name` is non-empty
+- `app_url` is non-empty
+- Each page has a non-empty URL
+- Each element has a non-empty `tag`
+
+If any check fails, `TestPlanValidationError` is raised immediately.
+
+### 10.3 Application Context Preparation
+
+The `build_test_generation_prompt()` function serializes the
+`ApplicationContext` to JSON and combines it with:
+
+- Action vocabulary (supported actions with requirements)
+- Assertion vocabulary (supported assertion types)
+- Category definitions
+- Priority definitions
+- Output schema instruction
+
+Only information from the ApplicationContext is included. No internal
+implementation details are exposed to the model.
+
+### 10.4 Prompt Construction
+
+The prompt instructs the model to:
+
+1. Analyze only the supplied application context
+2. Never invent pages, elements, or selectors
+3. Generate structured JSON matching the TestPlan schema
+4. Use only supported actions, assertion types, categories, and priorities
+5. Avoid duplicate tests
+6. Focus on meaningful user workflows
+
+The system prompt and user prompt are sent separately via `LLMRequest`.
+
+### 10.5 LLM Interaction
+
+The planner uses `LLMClientSession.generate_json()` which:
+
+1. Validates the request
+2. Sends to the provider (with retry logic)
+3. Normalizes the response
+4. Parses JSON automatically
+
+This keeps the planner completely provider-independent.
+
+### 10.6 Response Parsing
+
+`_parse_response()` converts the raw JSON dict into a `TestPlan`
+via `TestPlan.model_validate()`. If Pydantic rejects the response
+(e.g., invalid enum values), `TestPlanValidationError` is raised.
+
+### 10.7 TestPlan Validation
+
+Each generated test case is validated by `validate_test_case()`:
+
+- Non-empty `test_id` and `name`
+- Valid `category` and `priority`
+- At least one step
+- Valid actions with correct target/value requirements
+- Valid assertion types
+
+Invalid test cases are filtered out with a warning (not total failure).
+
+### 10.8 Unknown Element Protection
+
+`validate_element_references()` checks each step's `target` against
+selectors derivable from the `ApplicationContext`:
+
+- `#id` selectors from element IDs
+- `[name="..."]` from element names
+- Tag names
+- Explicit selectors
+- `data-testid` attributes
+- Text and placeholder content
+
+**Strategy:** A target is valid if any known selector is a substring
+of the target, or vice versa. Test cases with unknown references are
+filtered out.
+
+Advanced semantic matching and selector healing are deferred.
+
+### 10.9 Duplicate Detection
+
+`detect_duplicate_test_cases()` creates a signature for each test case
+from:
+
+- Lowercased test name
+- Category
+- Ordered action:target sequence
+
+If two test cases share the same signature, the later one is removed.
+Advanced AI similarity detection is deferred.
+
+### 10.10 Failure Behavior
+
+| Failure                          | Exception Raised            | Retryable |
+| -------------------------------- | --------------------------- | --------- |
+| Invalid ApplicationContext       | `TestPlanValidationError`   | No        |
+| LLM provider internal error      | `LLMProviderError`          | Yes       |
+| LLM request timeout              | `LLMTimeoutError`           | Yes       |
+| Empty LLM response               | `LLMResponseError`          | No        |
+| Malformed JSON response          | `LLMResponseError`          | No        |
+| Invalid TestPlan structure       | `TestPlanValidationError`   | No        |
+| Invalid enum values in response  | `TestPlanValidationError`   | No        |
+
+The caller always receives a meaningful exception — never a silent failure.
+
+### 10.11 Current MockLLMProvider Limitation
+
+The `MockLLMProvider` returns deterministic, pre-registered responses.
+It does not perform any AI reasoning. This means:
+
+- Generated test plans are static fixtures, not intelligent output
+- The pipeline infrastructure is fully tested
+- Real intelligence requires a real model (future)
+
+### 10.12 Connecting a Real Model
+
+To replace the mock with a real model:
+
+```python
+# 1. Implement LLMClient for the new provider
+class LocalLLMProvider(LLMClient):
+    async def generate(self, request: LLMRequest) -> LLMResponse:
+        # Call the local model
+        ...
+
+# 2. Register in factory.py
+if provider == "local":
+    return LocalLLMProvider(config)
+
+# 3. Set environment variable
+# LLM_PROVIDER=local
+
+# 4. The TestPlanner works without any changes
+client = create_llm_client()
+planner = LLMTestPlanner(client)
+plan = await planner.generate_test_plan(context)
+```
+
+No changes to `planner.py`, `validation.py`, `prompts.py`, or
+`schemas.py` are required.
+
+### 10.13 Files Created / Modified on Day 5
+
+| File                             | Action    | Purpose                           |
+| -------------------------------- | --------- | --------------------------------- |
+| `agents/planner/planner.py`      | Modified  | Full generation pipeline          |
+| `agents/planner/validation.py`   | Modified  | Element ref + duplicate detection |
+| `agents/planner/mock_scenarios.py` | Modified | 2 new scenarios                  |
+| `agents/planner/__init__.py`     | Modified  | New exports                       |
+| `tests/test_fixtures.py`         | New       | Reusable test factories           |
+| `tests/test_planner_pipeline.py` | New       | 50 pipeline tests                 |
+| `tests/test_planner_agent.py`    | Modified  | Updated for Day 5 pipeline        |
+| `docs/member1-architecture.md`   | Modified  | Day 5 documentation               |
 
 ---
 
 *This document will be updated as the architecture evolves on future development days.*
+

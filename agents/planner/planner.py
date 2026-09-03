@@ -1,29 +1,38 @@
 """
 TestSphere-AI — Test Planner Agent
 
-Abstract base class and concrete LLM-powered implementation skeleton.
+Abstract base class and concrete LLM-powered implementation.
 
 Architecture::
 
     ApplicationContext
           ↓
+    Input Validation
+          ↓
     LLMTestPlanner
-          ↓  (uses)
-    LLMClientSession
+          ↓  (prompt construction)
+    LLMClientSession.generate_json()
           ↓
     MockLLMProvider (Day 4) / real provider (future)
           ↓
-    Structured Test Plan
+    Raw JSON Response
+          ↓
+    Response Parsing → TestPlan
           ↓
     Validation Layer
           ↓
-    Valid list[TestCase]
+    Duplicate Detection
+          ↓
+    Element Reference Validation
+          ↓
+    Valid TestPlan
 
 The Test Planner's ONLY responsibility is to convert structured
 application information into meaningful, executable test plans.
 
 It does NOT:
-  - Execute browser actions
+  - Execute tests
+  - Open a browser
   - Use Playwright directly
   - Modify the application
   - Validate healed selectors
@@ -36,16 +45,22 @@ Day 5: Full LLM-based generation logic.
 
 from __future__ import annotations
 
+import json
 import logging
 from abc import ABC, abstractmethod
 
 from agents.llm.client import LLMClientSession
+from agents.llm.exceptions import LLMError, LLMResponseError
+from agents.llm.schemas import LLMRequest
 from agents.planner.prompts import SYSTEM_PROMPT, build_test_generation_prompt
 from agents.planner.schemas import ApplicationContext, TestCase, TestPlan
 from agents.planner.validation import (
     TestPlanValidationError,
+    detect_duplicate_test_cases,
     validate_application_context,
+    validate_element_references,
     validate_test_case,
+    validate_test_plan,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,6 +107,17 @@ class LLMTestPlanner(TestPlannerAgent):
     The client is injected at construction time, enabling easy testing
     with the ``MockLLMProvider``.
 
+    The generation pipeline is:
+
+    1. Validate ApplicationContext
+    2. Build the prompt (system + user)
+    3. Send via ``LLMClientSession.generate_json()``
+    4. Parse the JSON response into a ``TestPlan``
+    5. Validate each ``TestCase`` against business rules
+    6. Remove duplicate test cases
+    7. Validate element references against the ApplicationContext
+    8. Return a valid ``TestPlan``
+
     Parameters
     ----------
     llm_client:
@@ -103,7 +129,7 @@ class LLMTestPlanner(TestPlannerAgent):
 
         client = create_llm_client()
         planner = LLMTestPlanner(client)
-        tests = await planner.generate_tests(app_context)
+        plan = await planner.generate_test_plan(app_context)
     """
 
     def __init__(self, llm_client: LLMClientSession) -> None:
@@ -198,6 +224,117 @@ class LLMTestPlanner(TestPlannerAgent):
         """
         return SYSTEM_PROMPT
 
+    # ── Response Parsing ──────────────────────────────────────
+
+    @staticmethod
+    def _parse_response(data: dict) -> TestPlan:
+        """Parse a raw JSON dict into a TestPlan.
+
+        Handles the conversion from the LLM's raw JSON output
+        to a validated ``TestPlan`` Pydantic model.
+
+        Parameters
+        ----------
+        data:
+            The raw JSON dictionary from the LLM response.
+
+        Returns
+        -------
+        TestPlan
+            A parsed (but not yet business-rule validated) TestPlan.
+
+        Raises
+        ------
+        TestPlanValidationError
+            If the response cannot be parsed into a valid TestPlan.
+        """
+        try:
+            plan = TestPlan.model_validate(data)
+        except Exception as exc:
+            raise TestPlanValidationError(
+                f"Failed to parse LLM response into TestPlan: {exc}",
+                field="response",
+            ) from exc
+        return plan
+
+    # ── Duplicate Detection ───────────────────────────────────
+
+    @staticmethod
+    def _remove_duplicates(test_cases: list[TestCase]) -> list[TestCase]:
+        """Remove duplicate test cases.
+
+        Uses the signature-based detection from the validation layer.
+        The first occurrence is kept; duplicates are dropped with a
+        warning.
+
+        Parameters
+        ----------
+        test_cases:
+            The list of test cases to deduplicate.
+
+        Returns
+        -------
+        list[TestCase]
+            Test cases with duplicates removed.
+        """
+        dup_indices = detect_duplicate_test_cases(test_cases)
+        if not dup_indices:
+            return test_cases
+
+        dup_set = set(dup_indices)
+        deduplicated: list[TestCase] = []
+        for idx, tc in enumerate(test_cases):
+            if idx in dup_set:
+                logger.warning(
+                    "LLMTestPlanner: removing duplicate test case '%s' "
+                    "(index %d)",
+                    tc.test_id,
+                    idx,
+                )
+            else:
+                deduplicated.append(tc)
+
+        return deduplicated
+
+    # ── Element Reference Validation ──────────────────────────
+
+    @staticmethod
+    def _validate_element_refs(
+        test_cases: list[TestCase],
+        context: ApplicationContext,
+    ) -> list[TestCase]:
+        """Filter out test cases that reference unknown elements.
+
+        Uses the element reference validation from the validation
+        layer.  Test cases with hallucinated element targets are
+        dropped with a warning.
+
+        Parameters
+        ----------
+        test_cases:
+            The test cases to validate.
+        context:
+            The ApplicationContext used for generation.
+
+        Returns
+        -------
+        list[TestCase]
+            Test cases that only reference known elements.
+        """
+        valid: list[TestCase] = []
+        for tc in test_cases:
+            ref_errors = validate_element_references(tc, context)
+            if ref_errors:
+                logger.warning(
+                    "LLMTestPlanner: dropping test case '%s' — "
+                    "unknown element references: %s",
+                    tc.test_id,
+                    "; ".join(ref_errors),
+                )
+            else:
+                valid.append(tc)
+        return valid
+
     # ── Generate ──────────────────────────────────────────────
 
     async def generate_tests(
@@ -208,9 +345,16 @@ class LLMTestPlanner(TestPlannerAgent):
     ) -> list[TestCase]:
         """Generate test cases from application context.
 
-        Day 4: Skeleton implementation.  Validates input and raises
-        ``NotImplementedError`` — the actual LLM generation logic
-        will be implemented on Day 5.
+        Full generation pipeline (Day 5):
+
+        1. Validate input ApplicationContext
+        2. Build the prompt
+        3. Send to LLM via LLMClientSession
+        4. Parse the structured JSON response
+        5. Validate each test case
+        6. Remove duplicates
+        7. Validate element references
+        8. Return valid test cases
 
         Parameters
         ----------
@@ -222,30 +366,107 @@ class LLMTestPlanner(TestPlannerAgent):
         Returns
         -------
         list[TestCase]
-            A list of generated test cases ready for execution.
+            A list of generated, validated test cases.
 
         Raises
         ------
         TestPlanValidationError
-            If the application context is invalid.
-        NotImplementedError
-            Always — full generation is a Day 5 deliverable.
+            If the application context is invalid or the response
+            cannot be parsed.
+        LLMProviderError
+            If the LLM provider fails.
+        LLMTimeoutError
+            If the LLM request times out.
+        LLMResponseError
+            If the LLM response is empty or malformed.
         """
         # 1. Validate input
         self._validate_input(context)
 
-        # 2. Build prompt (validates prompt construction works)
-        _prompt = self._build_prompt(context, max_tests=max_tests)
-        _system = self._get_system_prompt()
+        # 2. Build prompts
+        user_prompt = self._build_prompt(context, max_tests=max_tests)
+        system_prompt = self._get_system_prompt()
 
         logger.info(
             "LLMTestPlanner.generate_tests() — context validated, "
-            "prompt built (%d chars).  Generation not yet implemented.",
-            len(_prompt),
+            "prompt built (%d chars).",
+            len(user_prompt),
         )
 
-        # 3. Actual LLM invocation → Day 5
-        raise NotImplementedError(
-            "LLMTestPlanner.generate_tests() is a Day 4 skeleton. "
-            "Full LLM-based generation will be implemented on Day 5."
+        # 3. Send to LLM — uses generate_json() for automatic JSON parsing
+        request = LLMRequest(
+            prompt=user_prompt,
+            system_instruction=system_prompt,
+            response_format="json",
+        )
+
+        try:
+            raw_data = await self._llm_client.generate_json(request)
+        except LLMResponseError:
+            # Re-raise LLMResponseError (malformed/empty response)
+            raise
+        except LLMError:
+            # Re-raise other LLM errors (provider, timeout, etc.)
+            raise
+
+        # 4. Parse response into TestPlan
+        plan = self._parse_response(raw_data)
+
+        logger.info(
+            "LLMTestPlanner: parsed %d test cases from LLM response.",
+            len(plan.test_cases),
+        )
+
+        # 5. Validate each test case
+        valid_cases = self._validate_output(plan.test_cases)
+
+        # 6. Remove duplicates
+        valid_cases = self._remove_duplicates(valid_cases)
+
+        # 7. Validate element references
+        valid_cases = self._validate_element_refs(valid_cases, context)
+
+        logger.info(
+            "LLMTestPlanner: returning %d valid test cases "
+            "(from %d generated).",
+            len(valid_cases),
+            len(plan.test_cases),
+        )
+
+        return valid_cases
+
+    async def generate_test_plan(
+        self,
+        context: ApplicationContext,
+        *,
+        max_tests: int = 10,
+    ) -> TestPlan:
+        """Generate a complete TestPlan from application context.
+
+        Convenience method that wraps ``generate_tests()`` and
+        returns a full ``TestPlan`` object with metadata.
+
+        Parameters
+        ----------
+        context:
+            Information about the application under test.
+        max_tests:
+            Maximum number of test cases to generate.
+
+        Returns
+        -------
+        TestPlan
+            A validated test plan with metadata.
+        """
+        test_cases = await self.generate_tests(
+            context, max_tests=max_tests,
+        )
+        return TestPlan(
+            application_name=context.app_name,
+            base_url=context.app_url,
+            test_cases=test_cases,
+            metadata={
+                "max_tests_requested": max_tests,
+                "provider": self._llm_client.provider_name,
+            },
         )

@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/Tests-289%20Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-339%20Passed-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **TestSphere-AI** is an intelligent, multi-agent autonomous testing platform designed to plan, generate, execute, analyze, and self-heal end-to-end web application tests.
@@ -93,52 +93,75 @@ ApplicationContext
 
 ---
 
-## 🧠 Test Planner Agent Foundation (Day 4)
+## 🧠 Test Planner Agent — Generation Pipeline (Day 4 + Day 5)
 
-The **Test Planner Agent** is strictly responsible for converting structured application information into meaningful, executable test plans.
+The **Test Planner Agent** converts structured application information into meaningful, executable test plans via a complete end-to-end generation pipeline.
 
 ```
 ApplicationContext
         │
         ▼
 ┌───────────────────────────┐
-│       LLMTestPlanner      │  ──> Concrete Agent (Day 4 skeleton + validation)
-│  • Input Validation       │
-│  • Prompt Assembly        │
-│  • Output Validation      │
-└─────────────┬─────────────┘
-              │ (uses)
-              ▼
-┌───────────────────────────┐
-│     LLMClientSession      │  ──> Provider-independent LLM client (Day 3)
+│    Input Validation       │  ──> Validates app name, URL, pages, elements
 └─────────────┬─────────────┘
               │
               ▼
 ┌───────────────────────────┐
-│      MockLLMProvider      │  ──> Deterministic mock with response registry
+│       LLMTestPlanner      │  ──> Prompt construction + LLM invocation
+│  • System Prompt          │
+│  • Action/Assertion Vocab │
+│  • Context Serialization  │
+└─────────────┬─────────────┘
+              │ (generate_json)
+              ▼
+┌───────────────────────────┐
+│     LLMClientSession      │  ──> Provider-independent client (retry + validation)
 └─────────────┬─────────────┘
               │
               ▼
-        Raw JSON Plan
+┌───────────────────────────┐
+│      MockLLMProvider      │  ──> Deterministic mock (9 scenarios)
+└─────────────┬─────────────┘
+              │
+              ▼
+        Raw JSON Response
               │
               ▼
 ┌───────────────────────────┐
-│     Validation Layer      │  ──> Business-rule validation (step orders, action rules)
+│    Response Parsing       │  ──> JSON → TestPlan via Pydantic model_validate
+└─────────────┬─────────────┘
+              │
+              ▼
+┌───────────────────────────┐
+│  Business-Rule Validation │  ──> Action requirements, assertion contracts
+└─────────────┬─────────────┘
+              │
+              ▼
+┌───────────────────────────┐
+│   Duplicate Detection     │  ──> Signature-based deduplication
+└─────────────┬─────────────┘
+              │
+              ▼
+┌───────────────────────────┐
+│ Element Ref Validation    │  ──> Rejects hallucinated element targets
 └─────────────┬─────────────┘
               │
               ▼
    Valid TestPlan / Cases
 ```
 
-### Key Day 4 Capabilities:
+### Key Capabilities (Day 4 + Day 5):
 - **Rich Context Schemas**: `ElementContext` (tags, attributes, classes, accessibility roles, selectors, visibility/interactability), `PageContext` (title, elements, forms, navigation elements), and `ApplicationContext`.
 - **Controlled Action Vocabulary (`TestAction`)**: 8 strictly supported browser actions (`navigate`, `click`, `fill`, `select`, `check`, `uncheck`, `press`, `wait`) with mapped parameter requirements (target/value).
 - **Controlled Assertion Vocabulary (`AssertionType`)**: 7 verifiable assertion types (`element_visible`, `element_not_visible`, `element_contains_text`, `element_has_text`, `url_contains`, `url_equals`, `value_equals`).
 - **Standardized Categories & Priorities**: 7 test categories (`functional`, `negative`, `boundary`, `smoke`, `regression`, `edge_case`, `accessibility`) and 4 priorities (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`).
 - **Two-Layer Validation**: Pydantic structural validation + domain business rules in `agents/planner/validation.py` (checks required targets/values per action, non-duplicate step numbering, duplicate test IDs, and assertion contracts).
 - **Prompt Architecture**: Modular, reusable prompt building blocks in `agents/planner/prompts.py` (system instructions, vocabulary tables, category/priority definitions, JSON output constraints).
-- **Deterministic Mock Scenarios**: 7 mock LLM response fixtures in `agents/planner/mock_scenarios.py` covering valid plans, empty plans, malformed JSON, unsupported actions, missing fields, and invalid categories/priorities.
-- **Ready for Day 5**: `LLMTestPlanner` skeleton accepts `LLMClientSession` via dependency injection, with complete input/output validation and prompt generation in place.
+- **Deterministic Mock Scenarios**: 9 mock LLM response fixtures in `agents/planner/mock_scenarios.py` covering valid plans, empty plans, malformed JSON, unsupported actions, missing fields, invalid categories/priorities, hallucinated elements, and duplicate test cases.
+- **Full Generation Pipeline (Day 5)**: `LLMTestPlanner.generate_tests()` and `generate_test_plan()` — complete flow from ApplicationContext through prompt construction, LLM invocation, response parsing, validation, duplicate detection, and element reference checking.
+- **Hallucinated Element Detection**: `validate_element_references()` checks step targets against selectors derivable from the ApplicationContext (IDs, names, tags, data-testid, text, placeholders).
+- **Duplicate Test Case Detection**: `detect_duplicate_test_cases()` uses signature-based matching (name + category + action:target sequence) to remove identical or near-identical test cases.
+- **Provider-Independent**: Swapping `MockLLMProvider` for a real `LocalLLMProvider` requires zero changes to the planner code.
 
 ---
 
@@ -205,23 +228,25 @@ All AI agents interact with models strictly through the provider-independent `LL
 │   │   └── healing_history.py # Abstract HealingMemory interface
 │   ├── orchestration/         # Pipeline Controller
 │   │   └── agent_controller.py# Abstract AgentController
-│   ├── planner/               # Test Planner Agent & Schemas (Day 4)
-│   │   ├── mock_scenarios.py  # Mock LLM response fixtures for deterministic testing
-│   │   ├── planner.py         # Abstract TestPlannerAgent + Concrete LLMTestPlanner
+│   ├── planner/               # Test Planner Agent & Generation Pipeline (Day 4 + Day 5)
+│   │   ├── mock_scenarios.py  # 9 mock LLM response fixtures for deterministic testing
+│   │   ├── planner.py         # Abstract TestPlannerAgent + LLMTestPlanner with full pipeline
 │   │   ├── prompts.py         # Prompt architecture & reusable prompt templates
 │   │   ├── schemas.py         # ElementContext, PageContext, ApplicationContext, TestCase, TestStep, Assertion, TestPlan
-│   │   └── validation.py      # Business-rule validation engine
+│   │   └── validation.py      # Business-rule validation + element refs + duplicate detection
 │   └── schemas/               # Shared Enums & Data Contracts
 │       ├── contracts.py       # Re-exported single source of truth
 │       └── enums.py           # FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType
 ├── docs/
-│   └── member1-architecture.md# Comprehensive architectural specification (v0.4.0)
+│   └── member1-architecture.md# Comprehensive architectural specification (v0.5.0)
 ├── tests/
 │   ├── test_config.py             # Config loading & immutability tests
+│   ├── test_fixtures.py           # Reusable test factories & sample data (Day 5)
 │   ├── test_imports.py            # Module import validation tests
 │   ├── test_llm_client.py         # Day 2 LLM foundation & mock provider tests
 │   ├── test_llm_client_session.py # Day 3 LLM client session & integration tests
-│   ├── test_planner_agent.py      # Day 4 LLMTestPlanner agent & prompt tests
+│   ├── test_planner_agent.py      # LLMTestPlanner agent & prompt tests
+│   ├── test_planner_pipeline.py   # Day 5 full generation pipeline tests (50 tests)
 │   ├── test_planner_schemas.py    # Day 4 ElementContext, PageContext, TestPlan schema tests
 │   ├── test_planner_validation.py # Day 4 action & assertion business rule validation tests
 │   └── test_schemas.py            # Pydantic schema validation tests
@@ -280,7 +305,7 @@ python3 -m pytest tests/ -v
 - [x] **Day 2**: Provider-independent LLM abstraction foundation, `MockLLMProvider`, configuration, exception hierarchy, and response parsing.
 - [x] **Day 3**: Reusable `LLMClientSession` layer with request validation, response normalization, retry mechanism, timeout handling, error translation, and mock response registry.
 - [x] **Day 4**: Test Planner Agent foundation: `ElementContext`, `PageContext`, `TestPlan`, controlled action/assertion vocabularies, two-layer validation, prompt architecture, and mock test scenarios.
-- [ ] **Day 5**: Test Planner Agent: AI-powered test generation pipeline, LLM integration, and plan generation logic.
+- [x] **Day 5**: Test Planner generation pipeline: full end-to-end flow (context → prompt → LLM → parse → validate → deduplicate → element-ref check → TestPlan), hallucinated element detection, duplicate test detection, 9 mock scenarios, 50 new pipeline tests.
 - [ ] **Day 6–8**: Failure Analyzer Agent & root cause classification.
 - [ ] **Day 9–12**: Self-Healing Agent & semantic DOM selector ranking.
 - [ ] **Day 13–15**: Persistent Healing Memory store.

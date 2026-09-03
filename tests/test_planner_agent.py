@@ -248,21 +248,25 @@ class TestLLMTestPlannerPromptBuilding:
         assert "NEVER" in system
 
 
-# ── Generate Tests (Day 5 placeholder) ───────────────────────
+# ── Generate Tests (Day 5 pipeline) ──────────────────────────
 
 
 class TestLLMTestPlannerGenerate:
-    """Validate that generate_tests is a Day 4 skeleton."""
+    """Validate that generate_tests works via the Day 5 pipeline."""
 
     @pytest.mark.asyncio
-    async def test_generate_raises_not_implemented(self, planner, sample_context):
-        with pytest.raises(NotImplementedError) as exc_info:
-            await planner.generate_tests(sample_context)
-        assert "Day 5" in str(exc_info.value)
+    async def test_generate_produces_results(self, planner, sample_context, mock_provider):
+        """Valid context + valid mock response → test cases returned."""
+        mock_provider.register_response(
+            "Generate up to", VALID_TEST_PLAN_RESPONSE
+        )
+        result = await planner.generate_tests(sample_context)
+        assert isinstance(result, list)
+        assert len(result) > 0
 
     @pytest.mark.asyncio
     async def test_generate_validates_input_first(self, planner):
-        """Invalid context should raise TestPlanValidationError, not NotImplementedError."""
+        """Invalid context should raise TestPlanValidationError."""
         bad_ctx = ApplicationContext(app_name="", app_url="http://localhost")
         with pytest.raises(TestPlanValidationError):
             await planner.generate_tests(bad_ctx)
@@ -373,8 +377,8 @@ class TestMockScenarios:
     def test_register_planner_scenarios(self, mock_config):
         provider = MockLLMProvider(mock_config)
         register_planner_scenarios(provider)
-        # Should have registered 7 scenarios
-        assert len(provider._response_registry) == 7
+        # Should have registered 9 scenarios (7 original + 2 Day 5)
+        assert len(provider._response_registry) == 9
 
     def test_register_scenarios_wrong_type(self):
         with pytest.raises(TypeError):

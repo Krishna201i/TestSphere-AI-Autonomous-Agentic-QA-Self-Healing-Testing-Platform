@@ -13,8 +13,10 @@ from agents.planner.schemas import (
 )
 from agents.planner.validation import (
     TestPlanValidationError,
+    detect_duplicate_test_cases,
     validate_application_context,
     validate_assertion,
+    validate_element_references,
     validate_test_case,
     validate_test_plan,
     validate_test_step,
@@ -41,4 +43,7 @@ __all__ = [
     "validate_test_plan",
     "validate_application_context",
     "validate_assertion",
+    "validate_element_references",
+    "detect_duplicate_test_cases",
 ]
+
