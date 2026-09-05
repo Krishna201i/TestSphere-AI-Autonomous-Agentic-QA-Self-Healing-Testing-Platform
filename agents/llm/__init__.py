@@ -24,10 +24,12 @@ from agents.llm.exceptions import (
     LLMConfigurationError,
     LLMConnectionError,
     LLMError,
+    LLMParsingError,
     LLMProviderError,
     LLMRateLimitError,
     LLMRequestValidationError,
     LLMResponseError,
+    LLMSchemaValidationError,
     LLMTimeoutError,
 )
 from agents.llm.factory import create_llm_client, get_llm_provider
@@ -62,4 +64,6 @@ __all__ = [
     "LLMConnectionError",
     "LLMProviderError",
     "LLMResponseError",
+    "LLMParsingError",
+    "LLMSchemaValidationError",
 ]

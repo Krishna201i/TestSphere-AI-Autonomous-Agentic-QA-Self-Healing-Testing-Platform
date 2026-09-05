@@ -261,16 +261,41 @@ class LLMClientSession:
         Raises
         ------
         LLMResponseError
-            If the response has empty or missing content.
+            If the response has empty or missing content, non-string
+            content, or an error finish reason.
         """
         # Ensure provider field is populated
         provider = response.provider or self._config.provider
         model = response.model or self._config.model
 
-        # Check for empty content
-        if not response.content and not response.content.strip():
+        # Type guard: content must be a string (not None or another type)
+        if response.content is None:
+            raise LLMResponseError(
+                "Provider returned None content.",
+                provider=provider,
+            )
+
+        if not isinstance(response.content, str):
+            raise LLMResponseError(
+                f"Provider returned non-string content: "
+                f"{type(response.content).__name__}.",
+                provider=provider,
+            )
+
+        # Check for empty or whitespace-only content
+        # Day 6 fix: changed 'and' to 'or' — the original condition
+        # short-circuited on whitespace-only strings, silently
+        # accepting them as valid responses.
+        if not response.content or not response.content.strip():
             raise LLMResponseError(
                 "Provider returned an empty response.",
+                provider=provider,
+            )
+
+        # Check for error finish reason
+        if response.finish_reason == "error":
+            raise LLMResponseError(
+                "Provider indicated an error finish reason.",
                 provider=provider,
             )
 

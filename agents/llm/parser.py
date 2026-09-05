@@ -33,7 +33,11 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from agents.llm.exceptions import LLMResponseError
+from agents.llm.exceptions import (
+    LLMParsingError,
+    LLMResponseError,
+    LLMSchemaValidationError,
+)
 from agents.llm.schemas import LLMResponse
 
 logger = logging.getLogger(__name__)
@@ -96,25 +100,25 @@ class ResponseParser:
 
         Raises
         ------
-        LLMResponseError
-            If the content is not valid JSON.
+        LLMParsingError
+            If the content is not valid JSON or is not a JSON object.
         """
         text = response.content.strip()
         if not text:
-            raise LLMResponseError(
+            raise LLMParsingError(
                 "Cannot parse JSON from empty response.",
                 provider=response.provider,
             )
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise LLMResponseError(
+            raise LLMParsingError(
                 f"LLM response is not valid JSON: {exc}",
                 provider=response.provider,
             ) from exc
 
         if not isinstance(data, dict):
-            raise LLMResponseError(
+            raise LLMParsingError(
                 f"Expected a JSON object, got {type(data).__name__}.",
                 provider=response.provider,
             )
@@ -140,15 +144,17 @@ class ResponseParser:
 
         Raises
         ------
-        LLMResponseError
-            If the content is not valid JSON or does not match the schema.
+        LLMParsingError
+            If the content is not valid JSON.
+        LLMSchemaValidationError
+            If the parsed data does not match the schema.
         """
         data = ResponseParser.parse_json(response)
 
         try:
             return schema.model_validate(data)
         except Exception as exc:
-            raise LLMResponseError(
+            raise LLMSchemaValidationError(
                 f"LLM response does not match schema "
                 f"{schema.__name__}: {exc}",
                 provider=response.provider,

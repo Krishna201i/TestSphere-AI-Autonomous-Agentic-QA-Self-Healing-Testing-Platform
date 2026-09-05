@@ -266,12 +266,12 @@ class MockLLMProvider(LLMClient):
 
         # ── Error registry (Day 3) ───────────────────────────
         for substring, error in self._error_registry:
-            if substring in request.prompt:
+            if substring.lower() in request.prompt.lower():
                 raise error
 
         # ── Response registry (Day 3) ────────────────────────
         for substring, response_content in self._response_registry:
-            if substring in request.prompt:
+            if substring.lower() in request.prompt.lower():
                 content = response_content
                 break
         else:

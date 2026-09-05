@@ -130,3 +130,29 @@ class LLMResponseError(LLMError):
         - Malformed JSON when structured output was expected
         - Response does not match the expected Pydantic schema
     """
+
+
+class LLMParsingError(LLMResponseError):
+    """Raised when the LLM response content cannot be parsed as JSON.
+
+    This is a subclass of ``LLMResponseError`` so existing handlers
+    that catch ``LLMResponseError`` will still work.
+
+    Examples:
+        - Malformed JSON syntax
+        - Response is plain text when JSON was expected
+        - JSON array when a JSON object was expected
+    """
+
+
+class LLMSchemaValidationError(LLMResponseError):
+    """Raised when parsed LLM response data does not match the expected schema.
+
+    This is a subclass of ``LLMResponseError`` so existing handlers
+    that catch ``LLMResponseError`` will still work.
+
+    Examples:
+        - Missing required fields in the response
+        - Incorrect field types
+        - Response structure does not match the Pydantic model
+    """
