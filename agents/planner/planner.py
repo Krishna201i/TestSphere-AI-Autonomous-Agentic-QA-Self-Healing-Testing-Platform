@@ -470,3 +470,200 @@ class LLMTestPlanner(TestPlannerAgent):
                 "provider": self._llm_client.provider_name,
             },
         )
+
+
+# ════════════════════════════════════════════════════════════════
+#  LangChainTestPlanner — Day 7 LangChain-powered implementation
+# ════════════════════════════════════════════════════════════════
+
+
+class LangChainTestPlanner(TestPlannerAgent):
+    """Test Planner Agent powered by LangChain prompt templates.
+
+    Uses the ``LangChainPlanningAdapter`` for prompt construction
+    and the ``StructuredOutputProcessor`` for response parsing.
+    All validation logic is reused from the existing pipeline.
+
+    This planner does NOT replace ``LLMTestPlanner``.  Both can
+    coexist and be used interchangeably.
+
+    The generation pipeline is:
+
+    1. Validate ApplicationContext
+    2. Build prompt via LangChain templates (adapter)
+    3. Send via existing LLMClientSession (adapter)
+    4. Process structured output (StructuredOutputProcessor)
+    5. Validate each TestCase against business rules
+    6. Remove duplicate test cases
+    7. Validate element references against the ApplicationContext
+    8. Return a valid TestPlan
+
+    Parameters
+    ----------
+    llm_client:
+        An ``LLMClientSession`` instance (wraps any LLM provider).
+
+    Example::
+
+        from agents.llm.factory import create_llm_client
+        from agents.planner.planner import LangChainTestPlanner
+
+        client = create_llm_client()
+        planner = LangChainTestPlanner(client)
+        plan = await planner.generate_test_plan(app_context)
+    """
+
+    def __init__(self, llm_client: LLMClientSession) -> None:
+        # Import here to keep the main module lightweight when
+        # LangChain is not needed (i.e. when using LLMTestPlanner)
+        from agents.planner.langchain_adapter import LangChainPlanningAdapter
+        from agents.planner.structured_output import StructuredOutputProcessor
+
+        self._llm_client = llm_client
+        self._adapter = LangChainPlanningAdapter(llm_client)
+        self._output_processor = StructuredOutputProcessor()
+        logger.info(
+            "LangChainTestPlanner initialized — provider=%s",
+            llm_client.provider_name,
+        )
+
+    # ── Properties ────────────────────────────────────────────
+
+    @property
+    def llm_client(self) -> LLMClientSession:
+        """The underlying LLM client session."""
+        return self._llm_client
+
+    @property
+    def adapter(self):
+        """The LangChain planning adapter."""
+        return self._adapter
+
+    @property
+    def output_processor(self):
+        """The structured output processor."""
+        return self._output_processor
+
+    # ── Generate ──────────────────────────────────────────────
+
+    async def generate_tests(
+        self,
+        context: ApplicationContext,
+        *,
+        max_tests: int = 10,
+    ) -> list[TestCase]:
+        """Generate test cases using LangChain-powered pipeline.
+
+        Full generation pipeline (Day 7):
+
+        1. Validate input ApplicationContext
+        2. Build prompt via LangChain (adapter)
+        3. Send to LLM via existing abstraction (adapter)
+        4. Process structured output
+        5. Validate each test case
+        6. Remove duplicates
+        7. Validate element references
+        8. Return valid test cases
+
+        Parameters
+        ----------
+        context:
+            Information about the application under test.
+        max_tests:
+            Maximum number of test cases to generate.
+
+        Returns
+        -------
+        list[TestCase]
+            A list of generated, validated test cases.
+
+        Raises
+        ------
+        TestPlanValidationError
+            If the application context is invalid.
+        StructuredOutputError
+            If the response cannot be processed.
+        LLMProviderError
+            If the LLM provider fails.
+        LLMTimeoutError
+            If the LLM request times out.
+        LLMResponseError
+            If the LLM response is empty or malformed.
+        """
+        # 1. Validate input (reuse existing validation)
+        LLMTestPlanner._validate_input(context)
+
+        # 2–3. Build prompt + send to LLM (via adapter)
+        logger.info(
+            "LangChainTestPlanner.generate_tests() — context validated, "
+            "invoking LangChain adapter.",
+        )
+        raw_data = await self._adapter.generate_raw_plan(
+            context, max_tests=max_tests,
+        )
+
+        # 4. Process structured output
+        plan = self._output_processor.process(raw_data)
+
+        logger.info(
+            "LangChainTestPlanner: processed %d test cases from response.",
+            len(plan.test_cases),
+        )
+
+        # 5. Validate each test case (reuse existing validation)
+        valid_cases = LLMTestPlanner._validate_output(plan.test_cases)
+
+        # 6. Remove duplicates (reuse existing logic)
+        valid_cases = LLMTestPlanner._remove_duplicates(valid_cases)
+
+        # 7. Validate element references (reuse existing logic)
+        valid_cases = LLMTestPlanner._validate_element_refs(
+            valid_cases, context,
+        )
+
+        logger.info(
+            "LangChainTestPlanner: returning %d valid test cases "
+            "(from %d generated).",
+            len(valid_cases),
+            len(plan.test_cases),
+        )
+
+        return valid_cases
+
+    async def generate_test_plan(
+        self,
+        context: ApplicationContext,
+        *,
+        max_tests: int = 10,
+    ) -> TestPlan:
+        """Generate a complete TestPlan from application context.
+
+        Convenience method that wraps ``generate_tests()`` and
+        returns a full ``TestPlan`` object with metadata.
+
+        Parameters
+        ----------
+        context:
+            Information about the application under test.
+        max_tests:
+            Maximum number of test cases to generate.
+
+        Returns
+        -------
+        TestPlan
+            A validated test plan with metadata.
+        """
+        test_cases = await self.generate_tests(
+            context, max_tests=max_tests,
+        )
+        return TestPlan(
+            application_name=context.app_name,
+            base_url=context.app_url,
+            test_cases=test_cases,
+            metadata={
+                "max_tests_requested": max_tests,
+                "provider": self._llm_client.provider_name,
+                "pipeline": "langchain",
+            },
+        )
+

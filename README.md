@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/Tests-380%20Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-475%20Passed-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **TestSphere-AI** is an intelligent, multi-agent autonomous testing platform designed to plan, generate, execute, analyze, and self-heal end-to-end web application tests.
@@ -219,6 +219,76 @@ Day 6 focused on hardening the LLM response processing pipeline and resolving mo
 
 ---
 
+## 🦜 LangChain Integration for Test Planner (Day 7)
+
+Day 7 introduces LangChain into the Test Planner pipeline while fully preserving the existing architecture, provider independence, and 100% offline determinism:
+
+```
+ApplicationContext
+        │
+        ▼
+┌─────────────────────────────────┐
+│   TestPlannerPromptTemplate     │  ──> LangChain ChatPromptTemplate management
+│   (System + Human Messages)     │      with modular section partialing
+└───────────────┬─────────────────┘
+                │ Formatted Messages
+                ▼
+┌─────────────────────────────────┐
+│   LangChainPlanningAdapter      │  ──> Bridges LangChain templates with LLMClientSession;
+│                                 │      handles message conversion & generation parameters
+└───────────────┬─────────────────┘
+                │
+                ▼
+┌─────────────────────────────────┐
+│      LLMClientSession           │  ──> Provider-independent execution (MockLLMProvider)
+└───────────────┬─────────────────┘
+                │ Raw String / JSON
+                ▼
+┌─────────────────────────────────┐
+│   StructuredOutputProcessor     │  ──> Markdown code-fence stripping, type coercion,
+│                                 │      Pydantic schema validation (TestPlan / TestCase)
+└───────────────┬─────────────────┘
+                │ Validated Pydantic Models
+                ▼
+┌─────────────────────────────────┐
+│    Business-Rule Validation     │  ──> Domain rule enforcement (actions, assertions)
+└───────────────┬─────────────────┘
+                │
+                ▼
+┌─────────────────────────────────┐
+│   Duplicate Detection & Element │  ──> Signature deduplication & hallucination filtering
+│         Ref Validation          │
+└───────────────┬─────────────────┘
+                │
+                ▼
+     Final Validated TestPlan
+```
+
+### Key Components & Capabilities:
+- **`TestPlannerPromptTemplate` (`agents/planner/langchain_prompts.py`)**:
+  - Leverages LangChain's `ChatPromptTemplate`, `SystemMessagePromptTemplate`, and `HumanMessagePromptTemplate`.
+  - Encapsulates system instructions, controlled action/assertion vocabularies, schema rules, and contextual formatting.
+  - Supports custom prompt overrides, serialization helpers, and direct string/message generation.
+- **`LangChainPlanningAdapter` (`agents/planner/langchain_adapter.py`)**:
+  - Bridges LangChain prompt management with the project's internal `LLMClientSession`.
+  - Converts LangChain messages into formatted LLM prompts with appropriate generation parameters (`temperature`, `max_tokens`, `response_format`).
+  - Implements fail-safe fallbacks: cleanly returns raw content or structured dicts even on formatting edge cases.
+- **`StructuredOutputProcessor` (`agents/planner/structured_output.py`)**:
+  - Robust post-processing for LLM outputs: strips markdown code fences (````json ... ````), extracts JSON payloads from mixed text, coerces string step numbers and enum casing.
+  - Validates outputs against Pydantic schemas (`TestPlan`, `TestCase`, `TestStep`, `Assertion`) with clear diagnostics and `StructuredOutputError`.
+- **`LangChainTestPlanner` (`agents/planner/planner.py`)**:
+  - Direct extension of the generation pipeline powered by LangChain orchestration.
+  - Supports `generate_tests()`, `generate_test_plan()`, deduplication, and element reference validation.
+  - Completely backwards-compatible: existing `LLMTestPlanner` remains untouched as a drop-in alternative.
+- **100% Offline & Zero API Keys**:
+  - Fully compatible with `MockLLMProvider` and existing mock scenario fixtures.
+  - Zero external cloud calls required for local execution and automated testing.
+- **95 Comprehensive Tests**:
+  - Added `tests/test_day7_langchain_integration.py` testing prompt templates, adapter behavior, structured output parsing/coercion, end-to-end planning, mock scenarios, error handling, and regression parity.
+  - Overall test suite expanded from 380 to **475 passing tests**.
+
+---
+
 ## 📂 Project Structure (`agents/`)
 
 ```
@@ -243,11 +313,14 @@ Day 6 focused on hardening the LLM response processing pipeline and resolving mo
 │   │   └── healing_history.py # Abstract HealingMemory interface
 │   ├── orchestration/         # Pipeline Controller
 │   │   └── agent_controller.py# Abstract AgentController
-│   ├── planner/               # Test Planner Agent & Generation Pipeline (Day 4 + Day 5)
+│   ├── planner/               # Test Planner Agent & Generation Pipeline (Day 4 + Day 5 + Day 7)
+│   │   ├── langchain_adapter.py # LangChain adapter bridging templates to LLMClientSession
+│   │   ├── langchain_prompts.py # LangChain ChatPromptTemplate management for test planning
 │   │   ├── mock_scenarios.py  # 9 mock LLM response fixtures for deterministic testing
-│   │   ├── planner.py         # Abstract TestPlannerAgent + LLMTestPlanner with full pipeline
+│   │   ├── planner.py         # Abstract TestPlannerAgent + LLMTestPlanner + LangChainTestPlanner
 │   │   ├── prompts.py         # Prompt architecture & reusable prompt templates
 │   │   ├── schemas.py         # ElementContext, PageContext, ApplicationContext, TestCase, TestStep, Assertion, TestPlan
+│   │   ├── structured_output.py # JSON extraction, coercion & schema validation for LLM outputs
 │   │   └── validation.py      # Business-rule validation + element refs + duplicate detection
 │   └── schemas/               # Shared Enums & Data Contracts
 │       ├── contracts.py       # Re-exported single source of truth
@@ -257,6 +330,7 @@ Day 6 focused on hardening the LLM response processing pipeline and resolving mo
 ├── tests/
 │   ├── test_config.py             # Config loading & immutability tests
 │   ├── test_day6_response_validation.py # Day 6 response validation & hardening (41 tests)
+│   ├── test_day7_langchain_integration.py # Day 7 LangChain integration tests (95 tests)
 │   ├── test_fixtures.py           # Reusable test factories & sample data (Day 5)
 │   ├── test_imports.py            # Module import validation tests
 │   ├── test_llm_client.py         # Day 2 LLM foundation & mock provider tests
@@ -321,8 +395,11 @@ python3 -m pytest tests/ -v
 - [x] **Day 2**: Provider-independent LLM abstraction foundation, `MockLLMProvider`, configuration, exception hierarchy, and response parsing.
 - [x] **Day 3**: Reusable `LLMClientSession` layer with request validation, response normalization, retry mechanism, timeout handling, error translation, and mock response registry.
 - [x] **Day 4**: Test Planner Agent foundation: `ElementContext`, `PageContext`, `TestPlan`, controlled action/assertion vocabularies, two-layer validation, prompt architecture, and mock test scenarios.
+- [x] **Day 5**: Full generation pipeline (`LLMTestPlanner.generate_tests()` / `generate_test_plan()`), duplicate test case detection, and hallucinated element reference validation.
 - [x] **Day 6**: LLM response validation hardening & mock scenario alignment: fixed normalization logic, added explicit `LLMParsingError` and `LLMSchemaValidationError`, case-insensitive mock registry matching, default planner scenario registration helper, and 41 regression tests (380 tests total).
-- [ ] **Day 7–8**: Failure Analyzer Agent & root cause classification.
+- [x] **Day 7**: LangChain integration for Test Planner: prompt template management (`ChatPromptTemplate`), structured output handling with field coercion & validation (`StructuredOutputProcessor`), adapter bridging LangChain and `LLMClientSession` (`LangChainPlanningAdapter`), backwards-compatible `LangChainTestPlanner`, and 95 tests (475 tests total).
+- [ ] **Day 8**: Failure Analyzer Agent & root cause classification.
 - [ ] **Day 9–12**: Self-Healing Agent & semantic DOM selector ranking.
 - [ ] **Day 13–15**: Persistent Healing Memory store.
 - [ ] **Day 16–18**: Full pipeline orchestration & integration with Member 2 & 3.
+

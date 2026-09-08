@@ -1,6 +1,10 @@
 """TestSphere-AI — Test Planner subpackage."""
 
-from agents.planner.planner import LLMTestPlanner, TestPlannerAgent
+from agents.planner.planner import (
+    LangChainTestPlanner,
+    LLMTestPlanner,
+    TestPlannerAgent,
+)
 from agents.planner.schemas import (
     ApplicationContext,
     Assertion,
@@ -22,10 +26,24 @@ from agents.planner.validation import (
     validate_test_step,
 )
 
+# Day 7 — LangChain integration components
+from agents.planner.langchain_adapter import LangChainPlanningAdapter
+from agents.planner.langchain_prompts import TestPlannerPromptTemplate
+from agents.planner.structured_output import (
+    StructuredOutputError,
+    StructuredOutputProcessor,
+)
+
 __all__ = [
     # Agent classes
     "TestPlannerAgent",
     "LLMTestPlanner",
+    "LangChainTestPlanner",
+    # LangChain integration (Day 7)
+    "LangChainPlanningAdapter",
+    "TestPlannerPromptTemplate",
+    "StructuredOutputProcessor",
+    "StructuredOutputError",
     # Input schemas
     "ApplicationContext",
     "PageContext",
@@ -46,4 +64,3 @@ __all__ = [
     "validate_element_references",
     "detect_duplicate_test_cases",
 ]
-
