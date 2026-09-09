@@ -2,6 +2,8 @@
 
 from agents.schemas.enums import (
     AssertionType,
+    ChangeType,
+    ExecutionStatus,
     FailureType,
     HealingStatus,
     TestAction,
@@ -16,4 +18,7 @@ __all__ = [
     "TestPriority",
     "TestAction",
     "AssertionType",
+    "ExecutionStatus",
+    "ChangeType",
 ]
+

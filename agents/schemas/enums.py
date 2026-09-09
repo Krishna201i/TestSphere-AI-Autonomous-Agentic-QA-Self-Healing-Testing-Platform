@@ -139,3 +139,29 @@ class AssertionType(str, Enum):
     URL_CONTAINS = "url_contains"
     URL_EQUALS = "url_equals"
     VALUE_EQUALS = "value_equals"
+
+
+class ExecutionStatus(str, Enum):
+    """Status of a test execution.
+
+    Used by the Historical Memory layer to track test execution
+    outcomes over time.
+    """
+
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+    ERROR = "ERROR"
+
+
+class ChangeType(str, Enum):
+    """Classification of a field-level change between two element snapshots.
+
+    Used by the Context Comparator to describe how individual
+    fields differ between a previous and current element state.
+    """
+
+    ADDED = "ADDED"
+    REMOVED = "REMOVED"
+    MODIFIED = "MODIFIED"
+    UNCHANGED = "UNCHANGED"

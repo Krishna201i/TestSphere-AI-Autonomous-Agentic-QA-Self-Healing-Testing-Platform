@@ -289,6 +289,61 @@ ApplicationContext
 
 ---
 
+## 🧠 Historical Memory & Context Management Layer (Day 8)
+
+Day 8 introduces the foundation for historical test execution tracking, failure pattern querying, UI element snapshot evolution, and context comparison, establishing the memory subsystem for self-healing and adaptive test planning:
+
+```
+Test Execution / UI Run / Self-Healing Event
+                      │
+                      ▼
+┌───────────────────────────────────────────┐
+│              MemoryStore (ABC)            │  ──> Storage-independent memory abstraction
+│  (store/query executions, failures, etc.) │      defining contract for all backends
+└─────────────────────┬─────────────────────┘
+                      │
+                      ▼
+┌───────────────────────────────────────────┐
+│              InMemoryStore                │  ──> High-performance dict-backed store:
+│  • Execution history (by test/app/status) │      - Isolated deep copies on store/retrieve
+│  • Failure query index                    │      - Pagination (limit & offset)
+│  • Element snapshot tracking by page      │      - Element snapshot history & timelines
+│  • Healing history & pattern lookups      │      - Selector-based healing rate queries
+└─────────────────────┬─────────────────────┘
+                      │
+                      ▼
+┌───────────────────────────────────────────┐
+│             ContextComparator             │  ──> UI Context Diff Engine:
+│  • compare_contexts(prev, current)        │      - Detects ADDED, REMOVED, MODIFIED
+│  • compare_element_snapshots(e1, e2)      │      - Multi-attribute tracking & field diffs
+│  • ChangeType & FieldChange detail        │      - Structural tag/selector change detection
+└───────────────────────────────────────────┘
+```
+
+### Key Components & Capabilities:
+- **`MemoryStore` Interface (`agents/memory/memory_interface.py`)**:
+  - Storage-independent Abstract Base Class defining contracts for storing/querying test executions, failure histories, element snapshots, and healing attempts.
+  - Future-ready for SQLite, PostgreSQL, MongoDB, or vector database backends without changing downstream agent interfaces.
+- **`InMemoryStore` (`agents/memory/in_memory_store.py`)**:
+  - Complete concrete implementation with in-memory indexes for fast retrieval.
+  - Safe mutation handling using deep copying to prevent shared mutable state leaks.
+  - Comprehensive query capabilities: filtering by `test_name`, `app_name`, `status`, pagination (`limit`, `offset`), failure filtering, element versioning, and selector-based healing success rates.
+- **`ContextComparator` (`agents/memory/context_comparator.py`)**:
+  - Deterministic UI element diff engine comparing element snapshots across test runs or page context transitions.
+  - Classifies changes as `ADDED`, `REMOVED`, `MODIFIED`, or `UNCHANGED`.
+  - Pinpoints specific field-level attribute variations (`tag_name`, `selector`, `attributes`, `text_content`, `is_interactive`) with `FieldChange` records.
+- **Pydantic Memory Schemas (`agents/memory/memory_schemas.py`)**:
+  - Strictly typed contracts: `TestExecutionRecord`, `FailureInfo`, `ElementRecord`, `HealingRecord`, `FieldChange`, and `ContextComparisonResult`.
+  - Schema-level validations: ISO timestamps, positive durations, probability ranges (`0.0 <= success_rate <= 1.0`), and non-empty selector constraints.
+- **New Core Enums (`agents/schemas/enums.py`)**:
+  - `ExecutionStatus`: `PASSED`, `FAILED`, `ERROR`, `SKIPPED`, `RUNNING`.
+  - `ChangeType`: `ADDED`, `REMOVED`, `MODIFIED`, `UNCHANGED`.
+- **57 Comprehensive Tests**:
+  - Added `tests/test_day8_memory.py` covering model validations, pagination, filtering, snapshot versioning, healing rate tracking, context comparison diffs, and immutability.
+  - Overall test suite expanded from 475 to **532 passing tests** (100% offline, 0 failures).
+
+---
+
 ## 📂 Project Structure (`agents/`)
 
 ```
@@ -309,8 +364,12 @@ ApplicationContext
 │   │   ├── schemas.py         # LLMRequest, LLMResponse, LLMUsage models + validators
 │   │   └── providers/
 │   │       └── mock.py        # MockLLMProvider with simulations & response registry
-│   ├── memory/                # Healing Memory Store
-│   │   └── healing_history.py # Abstract HealingMemory interface
+│   ├── memory/                # Historical Memory & Context Management (Day 8)
+│   │   ├── context_comparator.py # Element diff engine (added, removed, modified elements)
+│   │   ├── healing_history.py # Abstract HealingMemory interface (legacy compatibility)
+│   │   ├── in_memory_store.py # InMemoryStore with filtering, snapshots & query helpers
+│   │   ├── memory_interface.py# Storage-independent MemoryStore ABC
+│   │   └── memory_schemas.py  # TestExecutionRecord, FailureInfo, ElementRecord, HealingRecord
 │   ├── orchestration/         # Pipeline Controller
 │   │   └── agent_controller.py# Abstract AgentController
 │   ├── planner/               # Test Planner Agent & Generation Pipeline (Day 4 + Day 5 + Day 7)
@@ -323,14 +382,15 @@ ApplicationContext
 │   │   ├── structured_output.py # JSON extraction, coercion & schema validation for LLM outputs
 │   │   └── validation.py      # Business-rule validation + element refs + duplicate detection
 │   └── schemas/               # Shared Enums & Data Contracts
-│       ├── contracts.py       # Re-exported single source of truth
-│       └── enums.py           # FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType
+│       ├── contracts.py       # Re-exported single source of truth (including memory schemas)
+│       └── enums.py           # FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType, ExecutionStatus, ChangeType
 ├── docs/
 │   └── member1-architecture.md# Comprehensive architectural specification (v0.5.0)
 ├── tests/
 │   ├── test_config.py             # Config loading & immutability tests
 │   ├── test_day6_response_validation.py # Day 6 response validation & hardening (41 tests)
 │   ├── test_day7_langchain_integration.py # Day 7 LangChain integration tests (95 tests)
+│   ├── test_day8_memory.py        # Day 8 historical memory & context comparator tests (57 tests)
 │   ├── test_fixtures.py           # Reusable test factories & sample data (Day 5)
 │   ├── test_imports.py            # Module import validation tests
 │   ├── test_llm_client.py         # Day 2 LLM foundation & mock provider tests
@@ -398,8 +458,10 @@ python3 -m pytest tests/ -v
 - [x] **Day 5**: Full generation pipeline (`LLMTestPlanner.generate_tests()` / `generate_test_plan()`), duplicate test case detection, and hallucinated element reference validation.
 - [x] **Day 6**: LLM response validation hardening & mock scenario alignment: fixed normalization logic, added explicit `LLMParsingError` and `LLMSchemaValidationError`, case-insensitive mock registry matching, default planner scenario registration helper, and 41 regression tests (380 tests total).
 - [x] **Day 7**: LangChain integration for Test Planner: prompt template management (`ChatPromptTemplate`), structured output handling with field coercion & validation (`StructuredOutputProcessor`), adapter bridging LangChain and `LLMClientSession` (`LangChainPlanningAdapter`), backwards-compatible `LangChainTestPlanner`, and 95 tests (475 tests total).
-- [ ] **Day 8**: Failure Analyzer Agent & root cause classification.
-- [ ] **Day 9–12**: Self-Healing Agent & semantic DOM selector ranking.
-- [ ] **Day 13–15**: Persistent Healing Memory store.
+- [x] **Day 8**: Historical Memory and Context Management Layer: storage-independent `MemoryStore` interface, `InMemoryStore` implementation with filtering/pagination/element snapshots/healing lookups, Pydantic memory schemas (`TestExecutionRecord`, `FailureInfo`, `ElementRecord`, `HealingRecord`, `FieldChange`, `ContextComparisonResult`), `ContextComparator` element diff engine, and 57 tests (532 tests total).
+- [ ] **Day 9**: Failure Analyzer Agent & root cause classification.
+- [ ] **Day 10–12**: Self-Healing Agent & semantic DOM selector ranking.
+- [ ] **Day 13–15**: Persistent Healing Memory & Vector Storage integration.
 - [ ] **Day 16–18**: Full pipeline orchestration & integration with Member 2 & 3.
+
 

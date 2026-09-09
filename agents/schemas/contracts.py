@@ -9,6 +9,14 @@ Usage:
 
 from agents.analyzer.schemas import FailureAnalysis, TestFailure
 from agents.healer.schemas import HealingCandidate, HealingResult
+from agents.memory.memory_schemas import (
+    ContextComparisonResult,
+    ElementRecord,
+    FailureInfo,
+    FieldChange,
+    HealingRecord,
+    TestExecutionRecord,
+)
 from agents.planner.schemas import (
     ApplicationContext,
     Assertion,
@@ -21,6 +29,8 @@ from agents.planner.schemas import (
 )
 from agents.schemas.enums import (
     AssertionType,
+    ChangeType,
+    ExecutionStatus,
     FailureType,
     HealingStatus,
     TestAction,
@@ -44,6 +54,13 @@ __all__ = [
     # Healer contracts
     "HealingCandidate",
     "HealingResult",
+    # Memory contracts (Day 8)
+    "TestExecutionRecord",
+    "FailureInfo",
+    "ElementRecord",
+    "HealingRecord",
+    "ContextComparisonResult",
+    "FieldChange",
     # Enums
     "FailureType",
     "HealingStatus",
@@ -51,4 +68,7 @@ __all__ = [
     "TestPriority",
     "TestAction",
     "AssertionType",
+    "ExecutionStatus",
+    "ChangeType",
 ]
+
