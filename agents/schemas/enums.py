@@ -15,6 +15,7 @@ class FailureType(str, Enum):
     which determines whether self-healing is applicable.
     """
 
+    SELECTOR_CHANGED = "SELECTOR_CHANGED"
     ELEMENT_NOT_FOUND = "ELEMENT_NOT_FOUND"
     ELEMENT_NOT_INTERACTABLE = "ELEMENT_NOT_INTERACTABLE"
     TIMEOUT = "TIMEOUT"
@@ -165,3 +166,46 @@ class ChangeType(str, Enum):
     REMOVED = "REMOVED"
     MODIFIED = "MODIFIED"
     UNCHANGED = "UNCHANGED"
+
+
+class ConfidenceLevel(str, Enum):
+    """Confidence level for a failure analysis.
+
+    Used by the Failure Analysis Agent to indicate how certain
+    the diagnosis is, based on available evidence.
+
+    Definitions
+    -----------
+    HIGH:
+        Strong evidence from history and current context supports
+        the classification (e.g. previous selector existed, current
+        missing, equivalent element found).
+    MEDIUM:
+        Partial evidence exists but some ambiguity remains
+        (e.g. previous selector existed, current missing,
+        similar but not identical element found).
+    LOW:
+        Insufficient historical or current evidence to make
+        a confident classification.
+    """
+
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+
+
+class RecommendedAction(str, Enum):
+    """Recommended next action after failure analysis.
+
+    The Failure Analysis Agent recommends what the future
+    Self-Healing Agent or operator should do next.  These are
+    recommendations only — the analyzer does NOT execute them.
+    """
+
+    SEARCH_FOR_REPLACEMENT_SELECTOR = "SEARCH_FOR_REPLACEMENT_SELECTOR"
+    INSPECT_CURRENT_UI = "INSPECT_CURRENT_UI"
+    CHECK_ELEMENT_STATE = "CHECK_ELEMENT_STATE"
+    ANALYZE_APPLICATION_STATE = "ANALYZE_APPLICATION_STATE"
+    INVESTIGATE_TIMEOUT = "INVESTIGATE_TIMEOUT"
+    INVESTIGATE_NAVIGATION = "INVESTIGATE_NAVIGATION"
+    REQUIRE_FURTHER_ANALYSIS = "REQUIRE_FURTHER_ANALYSIS"

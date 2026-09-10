@@ -7,7 +7,13 @@ Usage:
     from agents.schemas.contracts import TestCase, TestFailure, HealingCandidate
 """
 
-from agents.analyzer.schemas import FailureAnalysis, TestFailure
+from agents.analyzer.schemas import (
+    FailureAnalysis,
+    FailureContext,
+    FailureEvidence,
+    HistoricalContext,
+    TestFailure,
+)
 from agents.healer.schemas import HealingCandidate, HealingResult
 from agents.memory.memory_schemas import (
     ContextComparisonResult,
@@ -30,9 +36,11 @@ from agents.planner.schemas import (
 from agents.schemas.enums import (
     AssertionType,
     ChangeType,
+    ConfidenceLevel,
     ExecutionStatus,
     FailureType,
     HealingStatus,
+    RecommendedAction,
     TestAction,
     TestCategory,
     TestPriority,
@@ -50,6 +58,9 @@ __all__ = [
     "TestPlan",
     # Analyzer contracts
     "TestFailure",
+    "FailureContext",
+    "FailureEvidence",
+    "HistoricalContext",
     "FailureAnalysis",
     # Healer contracts
     "HealingCandidate",
@@ -70,5 +81,6 @@ __all__ = [
     "AssertionType",
     "ExecutionStatus",
     "ChangeType",
+    "ConfidenceLevel",
+    "RecommendedAction",
 ]
-

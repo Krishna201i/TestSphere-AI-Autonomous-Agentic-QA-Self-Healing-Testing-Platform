@@ -344,14 +344,84 @@ Test Execution / UI Run / Self-Healing Event
 
 ---
 
+## 🔍 Failure Analysis Agent (Day 9)
+
+Day 9 introduces the **Failure Analysis Agent**, diagnosing test execution failures and identifying their root cause across five distinct signals without performing self-healing directly:
+
+```
+                  ┌──────────────────────────────────────────────┐
+                  │                Failure Context               │
+                  │  (test_name, step, selector, error message)  │
+                  └──────────────────────┬───────────────────────┘
+                                         │
+        ┌────────────────────────────────┼───────────────────────────────┐
+        ▼                                ▼                               ▼
+┌───────────────┐              ┌───────────────────┐           ┌───────────────────┐
+│ Memory Store  │              │  Element Context  │           │Structured Evidence│
+│  & Execution  │              │(previous snapshot │           │ (console logs,    │
+│    History    │              │ vs. current DOM)  │           │ network errors,   │
+│  (flakiness,  │              │(tag, attrs, text, │           │  screenshot URL)  │
+│  recurrence)  │              │ similarity drift) │           │                   │
+└───────┬───────┘              └─────────┬─────────┘           └─────────┬─────────┘
+        │                                │                               │
+        └────────────────────────────────┼───────────────────────────────┘
+                                         ▼
+        ┌────────────────────────────────────────────────────────────────┐
+        │            RuleBasedFailureAnalyzer / Multi-Signal Engine      │
+        │  • Error pattern heuristic matching & category classification │
+        │  • Context comparator & DOM attribute drift analysis          │
+        │  • Execution history recurrence & flakiness evaluation        │
+        │  • Structured evidence correlation (network/console/status)   │
+        │  • Self-healing candidate qualification & strategy generation │
+        └────────────────────────────────┬───────────────────────────────┘
+                                         │
+                                         ▼
+        ┌────────────────────────────────────────────────────────────────┐
+        │                     FailureAnalysisResult                      │
+        │  • failure_type & failure_category (SELECTOR_ISSUE, etc.)      │
+        │  • root_cause & detailed diagnostic explanation                │
+        │  • confidence & confidence_level (HIGH, MEDIUM, LOW)           │
+        │  • is_retryable & eligible_for_self_healing                    │
+        │  • suggested_strategies (candidate selectors & heuristics)     │
+        └────────────────────────────────────────────────────────────────┘
+```
+
+### Key Components & Capabilities:
+- **`FailureAnalysisAgent` & `RuleBasedFailureAnalyzer` (`agents/analyzer/analyzer.py`)**:
+  - Abstract base agent interface (`FailureAnalysisAgent`) defining `analyze_failure()` with full multi-signal context support (`execution_history`, `previous_element_context`, `current_element_context`, `structured_evidence`), along with backward-compatible single-argument `analyze()`.
+  - Concrete rule-based heuristic diagnostic engine (`RuleBasedFailureAnalyzer`) operating fully offline with zero mandatory LLM token overhead.
+  - Multi-signal diagnosis: error pattern heuristics, historical memory querying, DOM element drift comparison, evidence correlation, and confidence scoring.
+- **Strict Self-Healing Boundary**:
+  - The analyzer's sole responsibility is **diagnosis**, classifying root causes and qualifying whether a failure is eligible for self-healing (`eligible_for_self_healing = True/False`).
+  - It proposes healing strategies (`suggested_strategies`) but explicitly leaves selector mutation and execution to the future Self-Healing Agent (Day 10) and Execution Engine (Member 2).
+- **Pydantic Failure Schemas (`agents/analyzer/schemas.py`)**:
+  - `FailureContext`: Test name, step index/description, failed selector, error message, stack trace, timestamp, and optional page/app context.
+  - `PreviousExecutionSummary`: Total runs, pass/fail counts, failure rate, consecutive failures, and last pass/fail timestamps.
+  - `ElementContextSnapshot`: Structured snapshot of element attributes, tag, text, and selector before/after failure.
+  - `FailureEvidence`: Screenshots, console logs, network error logs, HTTP response codes, and page title.
+  - `FailureAnalysisResult`: Structured diagnosis with `root_cause`, `failure_type`, `failure_category`, calibrated numeric `confidence`, `confidence_level`, `is_retryable`, `eligible_for_self_healing`, `suggested_strategies`, and evidence references.
+- **Core Enums & Contracts (`agents/schemas/enums.py`)**:
+  - `FailureCategory`: `SELECTOR_ISSUE`, `TIMING_ISSUE`, `APPLICATION_BUG`, `ENVIRONMENT_ISSUE`, `TEST_DATA_ISSUE`, `UNKNOWN`.
+  - `ConfidenceLevel`: `HIGH`, `MEDIUM`, `LOW`.
+  - `FailureType.SELECTOR_CHANGED`: Added to existing failure types (`ELEMENT_NOT_FOUND`, `TIMEOUT`, `ASSERTION_FAILED`, etc.).
+- **Seamless Memory & Context Integration**:
+  - Direct integration with Day 8 `MemoryStore` (`InMemoryStore`) and `ContextComparator` to automatically query historical runs and compute DOM element diffs.
+- **Full Backward Compatibility**:
+  - `TestFailure = FailureContext` and `FailureAnalysis = FailureAnalysisResult` aliases preserve backwards compatibility with all earlier modules and tests.
+- **61 Comprehensive Unit Tests (`tests/test_day9_failure_analyzer.py`)**:
+  - Thorough testing covering selector drift, timeouts, assertions, network crashes, multi-signal evidence, confidence level calculation, memory store integration, and immutability.
+  - Overall test suite expanded from 532 to **593 passing tests** (100% offline, 0 failures).
+
+---
+
 ## 📂 Project Structure (`agents/`)
 
 ```
 .
 ├── agents/
-│   ├── analyzer/              # Failure Analysis Agent & Schemas
-│   │   ├── analyzer.py        # Abstract FailureAnalyzerAgent
-│   │   └── schemas.py         # TestFailure, FailureAnalysis
+│   ├── analyzer/              # Failure Analysis Agent & Schemas (Day 9)
+│   │   ├── analyzer.py        # FailureAnalysisAgent ABC + RuleBasedFailureAnalyzer
+│   │   └── schemas.py         # FailureContext, FailureAnalysisResult, FailureEvidence, etc.
 │   ├── healer/                # Self-Healing Agent & Schemas
 │   │   ├── healer.py          # Abstract SelfHealingAgent
 │   │   └── schemas.py         # HealingCandidate, HealingResult
@@ -383,7 +453,7 @@ Test Execution / UI Run / Self-Healing Event
 │   │   └── validation.py      # Business-rule validation + element refs + duplicate detection
 │   └── schemas/               # Shared Enums & Data Contracts
 │       ├── contracts.py       # Re-exported single source of truth (including memory schemas)
-│       └── enums.py           # FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType, ExecutionStatus, ChangeType
+│       └── enums.py           # FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType, ExecutionStatus, ChangeType, FailureCategory, ConfidenceLevel
 ├── docs/
 │   └── member1-architecture.md# Comprehensive architectural specification (v0.5.0)
 ├── tests/
@@ -391,6 +461,7 @@ Test Execution / UI Run / Self-Healing Event
 │   ├── test_day6_response_validation.py # Day 6 response validation & hardening (41 tests)
 │   ├── test_day7_langchain_integration.py # Day 7 LangChain integration tests (95 tests)
 │   ├── test_day8_memory.py        # Day 8 historical memory & context comparator tests (57 tests)
+│   ├── test_day9_failure_analyzer.py # Day 9 failure analyzer agent & diagnostic tests (61 tests)
 │   ├── test_fixtures.py           # Reusable test factories & sample data (Day 5)
 │   ├── test_imports.py            # Module import validation tests
 │   ├── test_llm_client.py         # Day 2 LLM foundation & mock provider tests
@@ -459,9 +530,10 @@ python3 -m pytest tests/ -v
 - [x] **Day 6**: LLM response validation hardening & mock scenario alignment: fixed normalization logic, added explicit `LLMParsingError` and `LLMSchemaValidationError`, case-insensitive mock registry matching, default planner scenario registration helper, and 41 regression tests (380 tests total).
 - [x] **Day 7**: LangChain integration for Test Planner: prompt template management (`ChatPromptTemplate`), structured output handling with field coercion & validation (`StructuredOutputProcessor`), adapter bridging LangChain and `LLMClientSession` (`LangChainPlanningAdapter`), backwards-compatible `LangChainTestPlanner`, and 95 tests (475 tests total).
 - [x] **Day 8**: Historical Memory and Context Management Layer: storage-independent `MemoryStore` interface, `InMemoryStore` implementation with filtering/pagination/element snapshots/healing lookups, Pydantic memory schemas (`TestExecutionRecord`, `FailureInfo`, `ElementRecord`, `HealingRecord`, `FieldChange`, `ContextComparisonResult`), `ContextComparator` element diff engine, and 57 tests (532 tests total).
-- [ ] **Day 9**: Failure Analyzer Agent & root cause classification.
+- [x] **Day 9**: Failure Analyzer Agent: multi-signal root cause diagnosis, Pydantic failure schemas (`FailureContext`, `FailureAnalysisResult`, `FailureEvidence`, `ElementContextSnapshot`), `FailureCategory` & `ConfidenceLevel` enums, self-healing eligibility evaluation, `MemoryStore` historical context correlation, backwards-compatible schemas/agent signatures, and 61 tests (593 tests total).
 - [ ] **Day 10–12**: Self-Healing Agent & semantic DOM selector ranking.
 - [ ] **Day 13–15**: Persistent Healing Memory & Vector Storage integration.
 - [ ] **Day 16–18**: Full pipeline orchestration & integration with Member 2 & 3.
+
 
 

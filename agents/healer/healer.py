@@ -12,9 +12,12 @@ Implementation will be added on Day 2+.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
-from agents.analyzer.schemas import FailureAnalysis, TestFailure
 from agents.healer.schemas import HealingCandidate
+
+if TYPE_CHECKING:
+    from agents.analyzer.schemas import FailureAnalysis, FailureContext
 
 
 class SelfHealingAgent(ABC):
@@ -41,7 +44,7 @@ class SelfHealingAgent(ABC):
     @abstractmethod
     async def propose_healing(
         self,
-        failure: TestFailure,
+        failure: FailureContext,
         analysis: FailureAnalysis,
         dom_snapshot: str,
     ) -> HealingCandidate:
