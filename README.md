@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/Tests-475%20Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-643%20Passed-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **TestSphere-AI** is an intelligent, multi-agent autonomous testing platform designed to plan, generate, execute, analyze, and self-heal end-to-end web application tests.
@@ -414,6 +414,109 @@ Day 9 introduces the **Failure Analysis Agent**, diagnosing test execution failu
 
 ---
 
+## 🩹 Self-Healing Decision & Candidate Generation Foundation (Day 10)
+
+Day 10 establishes the foundation of the **Self-Healing Decision Layer** — the intelligence engine bridging the Failure Analyzer (Day 9) with Member 2's Test Execution Engine. It evaluates failure context, searches both current DOM elements and historical healing records, scores candidates deterministically across multiple weighted dimensions, enforces safety guardrails, and outputs structured `HealingRecommendation` contracts.
+
+```
+Failed Test Execution
+         │
+         ▼
+┌─────────────────────────────────┐
+│     Failure Analyzer (Day 9)    │  ──> FailureAnalysisResult (root cause, failure category)
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│  Healing Decision Engine (Day 10) │
+│  ┌───────────────────────────┐  │
+│  │ 1. Safety Rules Guardrail │  │  ──> Blocks ASSERTION_FAILED, NETWORK_ERROR, etc.
+│  └─────────────┬─────────────┘  │
+│                ▼                │
+│  ┌───────────────────────────┐  │
+│  │ 2. Candidate Generation   │  │  ──> Sources: Current DOM elements + Historical Healing records
+│  └─────────────┬─────────────┘  │
+│                ▼                │
+│  ┌───────────────────────────┐  │
+│  │ 3. Multi-Signal Scoring   │  │  ──> Deterministic weights (text, role, page, type, history)
+│  └─────────────┬─────────────┘  │
+│                ▼                │
+│  ┌───────────────────────────┐  │
+│  │ 4. Ranking & Thresholds   │  │  ──> HIGH (≥0.80), MEDIUM (≥0.50), LOW (<0.50), MIN (0.30)
+│  └─────────────┬─────────────┘  │
+│                ▼                │
+│  ┌───────────────────────────┐  │
+│  │ 5. Optional LLM Disambig  │  │  ──> Invoked only if top candidate scores are tied / close
+│  └─────────────┬─────────────┘  │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+       HealingRecommendation
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ recommendation_to_healing_      │  ──> Bridges Member 1 recommendation to Member 2 contract
+│          candidate()            │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+          HealingCandidate
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│   Member 2 Execution Engine     │  ──> Browser validation in Playwright (runs proposed selector)
+└────────────────┬────────────────┘
+                 │
+                 ▼
+            HealingResult
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ healing_result_to_memory_       │  ──> Formats validated outcome for persistent memory storage
+│          update()               │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+     MemoryStore.store_healing_
+               record()
+```
+
+### Key Components & Capabilities:
+- **Strict Architecture Boundaries**:
+  - Member 1's role is strictly **decision-making, candidate generation, and scoring**.
+  - Does **NOT** execute browser actions or directly modify selectors in Playwright (Member 2's domain).
+  - All recommendations enforce `requires_validation = True`.
+- **Multi-Source Candidate Generation (`CandidateGenerator`)**:
+  - **Current UI Elements**: Compares visible elements on the current page against failed element snapshots using text, semantic role, element type, page URL/title, and name similarity.
+  - **Historical Healing Records**: Queries `MemoryStore.get_healing_history()` to locate previously verified selector replacements for identical failed targets.
+- **Weighted Multi-Signal Candidate Scoring (`CandidateScorer`)**:
+  - Deterministic evaluation using configurable `ScoringWeights`:
+    - **Visible Text Match** (`0.30`): Strong signal for UI button/link labels.
+    - **Semantic / ARIA Role** (`0.25`): Ensures structural element parity (`button`, `textbox`, etc.).
+    - **Page Context** (`0.15`): Matches current page URL or title.
+    - **Historical Similarity** (`0.15`): Bonus boost for proven historical fixes.
+    - **Element Type** (`0.10`): Compares HTML tag names (`input`, `a`, `button`).
+    - **Name Attribute** (`0.05`): Matches form input `name` attributes.
+  - *Calibrated Design*: A complete match on observable DOM attributes achieves `0.85` (HIGH confidence) without requiring historical records.
+- **Confidence Thresholds & Safety Rules**:
+  - Evaluates candidates against calibrated levels: `HIGH` (≥ 0.80), `MEDIUM` (≥ 0.50), `LOW` (< 0.50). Candidates below `0.30` are rejected.
+  - **Safety Guardrails**: Automatically blocks healing (`DO_NOT_HEAL`) for `ASSERTION_FAILED` (business logic failures), `NETWORK_ERROR` (infrastructure), and `APPLICATION_ERROR` (backend bugs).
+- **Action Mapping Matrix (`HealingAction`)**:
+  - `TRY_REPLACEMENT_SELECTOR`: Clear top candidate meets confidence threshold.
+  - `SEARCH_CURRENT_UI`: Candidates exist but confidence is low; broader UI search recommended.
+  - `REQUIRE_FURTHER_ANALYSIS`: No viable candidates or unclassifiable failure.
+  - `DO_NOT_HEAL`: Non-healable failure category or confidence below minimum threshold.
+- **Selective LLM Disambiguation**:
+  - LLM is only queried if multiple high-ranking candidates tie or score within `0.1` of each other, preserving fast deterministic performance for clear-cut matches.
+- **Member 1 ↔ Member 2 Contract Bridge (`agents/healer/healing_result_mapper.py`)**:
+  - `recommendation_to_healing_candidate()` converts `HealingRecommendation` into the `HealingCandidate` schema consumed by Member 2.
+  - `healing_result_to_memory_update()` translates Member 2's post-execution `HealingResult` into a `HealingRecord` to update `MemoryStore`.
+- **50 Comprehensive Tests (`tests/test_day10_healing_decision.py`)**:
+  - Validates schemas, context aggregation, candidate generation, scoring weights, ranking, confidence calibration, safety rules, LLM disambiguation, and Member 2 bridge mappings.
+  - Test suite expanded from 593 to **643 passing tests** (100% offline, 0 failures, 0 regressions).
+
+---
+
 ## 📂 Project Structure (`agents/`)
 
 ```
@@ -422,7 +525,12 @@ Day 9 introduces the **Failure Analysis Agent**, diagnosing test execution failu
 │   ├── analyzer/              # Failure Analysis Agent & Schemas (Day 9)
 │   │   ├── analyzer.py        # FailureAnalysisAgent ABC + RuleBasedFailureAnalyzer
 │   │   └── schemas.py         # FailureContext, FailureAnalysisResult, FailureEvidence, etc.
-│   ├── healer/                # Self-Healing Agent & Schemas
+│   ├── healer/                # Self-Healing Decision Layer (Day 10)
+│   │   ├── candidate_generator.py # Candidate generation from DOM & historical memory
+│   │   ├── candidate_scorer.py# Weighted candidate scoring, ranking & confidence thresholds
+│   │   ├── healing_decision.py# HealingDecisionEngine orchestrator & safety rules
+│   │   ├── healing_result_mapper.py # Member 1 ↔ Member 2 contract bridge
+│   │   ├── healing_schemas.py # ScoredCandidate, HealingRecommendation, HealingContext
 │   │   ├── healer.py          # Abstract SelfHealingAgent
 │   │   └── schemas.py         # HealingCandidate, HealingResult
 │   ├── llm/                   # LLM Client Abstraction & Infrastructure
@@ -453,15 +561,16 @@ Day 9 introduces the **Failure Analysis Agent**, diagnosing test execution failu
 │   │   └── validation.py      # Business-rule validation + element refs + duplicate detection
 │   └── schemas/               # Shared Enums & Data Contracts
 │       ├── contracts.py       # Re-exported single source of truth (including memory schemas)
-│       └── enums.py           # FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType, ExecutionStatus, ChangeType, FailureCategory, ConfidenceLevel
+│       └── enums.py           # FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType, ExecutionStatus, ChangeType, FailureCategory, ConfidenceLevel, HealingAction, CandidateSource
 ├── docs/
-│   └── member1-architecture.md# Comprehensive architectural specification (v0.5.0)
+│   └── member1-architecture.md# Comprehensive architectural specification (v0.10.0)
 ├── tests/
 │   ├── test_config.py             # Config loading & immutability tests
 │   ├── test_day6_response_validation.py # Day 6 response validation & hardening (41 tests)
 │   ├── test_day7_langchain_integration.py # Day 7 LangChain integration tests (95 tests)
 │   ├── test_day8_memory.py        # Day 8 historical memory & context comparator tests (57 tests)
 │   ├── test_day9_failure_analyzer.py # Day 9 failure analyzer agent & diagnostic tests (61 tests)
+│   ├── test_day10_healing_decision.py # Day 10 self-healing decision & candidate generator tests (50 tests)
 │   ├── test_fixtures.py           # Reusable test factories & sample data (Day 5)
 │   ├── test_imports.py            # Module import validation tests
 │   ├── test_llm_client.py         # Day 2 LLM foundation & mock provider tests
@@ -531,7 +640,8 @@ python3 -m pytest tests/ -v
 - [x] **Day 7**: LangChain integration for Test Planner: prompt template management (`ChatPromptTemplate`), structured output handling with field coercion & validation (`StructuredOutputProcessor`), adapter bridging LangChain and `LLMClientSession` (`LangChainPlanningAdapter`), backwards-compatible `LangChainTestPlanner`, and 95 tests (475 tests total).
 - [x] **Day 8**: Historical Memory and Context Management Layer: storage-independent `MemoryStore` interface, `InMemoryStore` implementation with filtering/pagination/element snapshots/healing lookups, Pydantic memory schemas (`TestExecutionRecord`, `FailureInfo`, `ElementRecord`, `HealingRecord`, `FieldChange`, `ContextComparisonResult`), `ContextComparator` element diff engine, and 57 tests (532 tests total).
 - [x] **Day 9**: Failure Analyzer Agent: multi-signal root cause diagnosis, Pydantic failure schemas (`FailureContext`, `FailureAnalysisResult`, `FailureEvidence`, `ElementContextSnapshot`), `FailureCategory` & `ConfidenceLevel` enums, self-healing eligibility evaluation, `MemoryStore` historical context correlation, backwards-compatible schemas/agent signatures, and 61 tests (593 tests total).
-- [ ] **Day 10–12**: Self-Healing Agent & semantic DOM selector ranking.
+- [x] **Day 10**: Self-Healing Decision Layer & Candidate Generation foundation: candidate generation (DOM + history), weighted multi-signal scoring, confidence thresholds, safety rules, action mapping, optional LLM disambiguation, Member 1 ↔ Member 2 contract bridge, and 50 tests (643 tests total).
+- [ ] **Day 11–12**: Advanced DOM semantic healing & locator strategies.
 - [ ] **Day 13–15**: Persistent Healing Memory & Vector Storage integration.
 - [ ] **Day 16–18**: Full pipeline orchestration & integration with Member 2 & 3.
 

@@ -14,6 +14,11 @@ from agents.analyzer.schemas import (
     HistoricalContext,
     TestFailure,
 )
+from agents.healer.healing_schemas import (
+    HealingContext,
+    HealingRecommendation,
+    ScoredCandidate,
+)
 from agents.healer.schemas import HealingCandidate, HealingResult
 from agents.memory.memory_schemas import (
     ContextComparisonResult,
@@ -35,10 +40,12 @@ from agents.planner.schemas import (
 )
 from agents.schemas.enums import (
     AssertionType,
+    CandidateSource,
     ChangeType,
     ConfidenceLevel,
     ExecutionStatus,
     FailureType,
+    HealingAction,
     HealingStatus,
     RecommendedAction,
     TestAction,
@@ -62,9 +69,13 @@ __all__ = [
     "FailureEvidence",
     "HistoricalContext",
     "FailureAnalysis",
-    # Healer contracts
+    # Healer contracts (Day 1)
     "HealingCandidate",
     "HealingResult",
+    # Healer contracts (Day 10)
+    "ScoredCandidate",
+    "HealingRecommendation",
+    "HealingContext",
     # Memory contracts (Day 8)
     "TestExecutionRecord",
     "FailureInfo",
@@ -75,6 +86,8 @@ __all__ = [
     # Enums
     "FailureType",
     "HealingStatus",
+    "HealingAction",
+    "CandidateSource",
     "TestCategory",
     "TestPriority",
     "TestAction",

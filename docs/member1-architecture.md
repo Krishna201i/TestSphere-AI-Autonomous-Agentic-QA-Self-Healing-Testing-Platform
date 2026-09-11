@@ -850,3 +850,226 @@ No changes to `planner.py`, `validation.py`, `prompts.py`, or
 
 *This document will be updated as the architecture evolves on future development days.*
 
+
+---
+
+## Day 10 — Self-Healing Decision & Candidate Generation Foundation
+
+> **Version:** 0.10.0 (Day 10)
+> **Date:** 2026-09-11
+
+### Overview
+
+Day 10 implements the **Healing Decision Layer** — the intelligence component that sits
+between the Failure Analyzer (Day 9) and Member 2's Self-Healing Engine. It takes a
+`FailureAnalysis`, generates candidate replacement selectors, scores and ranks them
+deterministically, and produces a structured `HealingRecommendation`.
+
+**IMPORTANT:** This layer does NOT execute browser actions or modify selectors. It only
+produces structured recommendations that Member 2 can consume.
+
+### Architecture
+
+```
+Failed Test
+     ↓
+Failure Analyzer (Day 9)
+     ↓
+FailureAnalysis
+     ↓
+Healing Decision Engine (Day 10)
+     ├── Safety Rules Check
+     ├── Candidate Generation
+     │   ├── From current UI elements
+     │   └── From historical healing memory
+     ├── Candidate Scoring (deterministic weights)
+     ├── Candidate Ranking
+     ├── Confidence Threshold Evaluation
+     └── Optional LLM Disambiguation
+     ↓
+HealingRecommendation
+     ↓
+recommendation_to_healing_candidate()
+     ↓
+HealingCandidate (Member 2 contract)
+     ↓
+Member 2: Browser Validation
+     ↓
+HealingResult
+     ↓
+healing_result_to_memory_update()
+     ↓
+MemoryStore update
+```
+
+### New Enums
+
+| Enum              | Values                                                                          |
+|-------------------|---------------------------------------------------------------------------------|
+| `HealingAction`   | `TRY_REPLACEMENT_SELECTOR`, `SEARCH_CURRENT_UI`, `REQUIRE_FURTHER_ANALYSIS`, `DO_NOT_HEAL` |
+| `CandidateSource` | `HISTORICAL_MEMORY`, `CURRENT_DOM`, `LLM_SUGGESTION`                            |
+
+### New Schemas
+
+#### `ScoredCandidate`
+
+Internal candidate evaluation with individual similarity scores:
+
+| Field                  | Type            | Description                         |
+|------------------------|-----------------|-------------------------------------|
+| `selector`             | `str`           | Candidate replacement selector      |
+| `selector_type`        | `str`           | "id", "css", "xpath", etc.          |
+| `source`               | `CandidateSource` | Where the candidate originated   |
+| `confidence`           | `float [0,1]`   | Computed weighted confidence        |
+| `evidence`             | `list[str]`     | Observable evidence strings         |
+| `text_similarity`      | `float [0,1]`   | Text content match score            |
+| `role_similarity`      | `float [0,1]`   | ARIA/semantic role match score      |
+| `type_similarity`      | `float [0,1]`   | Element type match score            |
+| `page_similarity`      | `float [0,1]`   | Page context match score            |
+| `historical_similarity`| `float [0,1]`   | Historical relationship score       |
+| `name_similarity`      | `float [0,1]`   | Name attribute match score          |
+
+#### `HealingRecommendation`
+
+Primary output of the Healing Decision Engine:
+
+| Field                | Type                        | Description                          |
+|----------------------|-----------------------------|--------------------------------------|
+| `test_id`            | `str`                       | Failed test case ID                  |
+| `execution_id`       | `str`                       | Execution identifier                 |
+| `failed_step`        | `int`                       | 1-based failed step number           |
+| `original_selector`  | `str`                       | The selector that failed             |
+| `failure_type`       | `FailureType`               | Classified failure type              |
+| `candidates`         | `list[ScoredCandidate]`     | Ranked candidates (highest first)    |
+| `selected_candidate` | `Optional[ScoredCandidate]` | Top candidate if above threshold     |
+| `confidence`         | `ConfidenceLevel`           | Overall recommendation confidence    |
+| `recommended_action` | `HealingAction`             | Recommended action for Member 2      |
+| `evidence`           | `list[str]`                 | Summary evidence                     |
+| `requires_validation`| `bool` (always `True`)      | Member 2 must validate               |
+
+#### `HealingContext`
+
+Input context aggregation:
+
+| Field              | Type                   | Description                    |
+|--------------------|------------------------|--------------------------------|
+| `failure_analysis` | `FailureAnalysis`      | From the Failure Analyzer      |
+| `current_elements` | `list[ElementRecord]`  | Current UI candidate elements  |
+| `page_url`         | `Optional[str]`        | Current page URL               |
+| `page_title`       | `Optional[str]`        | Current page title             |
+
+### Candidate Generation
+
+`CandidateGenerator` uses two sources:
+
+1. **Current UI Elements** — compares each element against the historical element record
+   using text, role, type, page, and name similarity.
+2. **Historical Healing Records** — looks up previously successful healings for the same
+   selector via `MemoryStore.get_healing_history()`.
+
+### Scoring Weights
+
+`CandidateScorer` applies configurable `ScoringWeights` (all sum to 1.0):
+
+| Component   | Default Weight | Strength |
+|-------------|---------------|----------|
+| Text        | 0.30          | Strong   |
+| Role        | 0.25          | Strong   |
+| Page        | 0.15          | Moderate |
+| Historical  | 0.15          | Bonus    |
+| Type        | 0.10          | Moderate |
+| Name        | 0.05          | Light    |
+
+**Design Principle:** A perfect match on all current-DOM observable attributes
+(text+role+type+page+name = 0.85) achieves HIGH confidence even without historical data.
+
+### Confidence Thresholds
+
+| Level    | Range         | Default Threshold |
+|----------|---------------|-------------------|
+| HIGH     | ≥ threshold   | 0.80              |
+| MEDIUM   | ≥ threshold   | 0.50              |
+| LOW      | < medium      | —                 |
+| Minimum  | Below = block | 0.30              |
+
+### Safety Rules
+
+Healing is **blocked** (DO_NOT_HEAL) for:
+- `ASSERTION_FAILURE` — application logic errors should not be masked
+- `NETWORK_ERROR` — infrastructure issues, not selector problems
+- `APPLICATION_ERROR` — backend errors, not UI selector issues
+- No candidates available
+- Confidence below minimum threshold (0.30)
+
+### Action Mapping
+
+| Condition                                  | Action                        |
+|--------------------------------------------|-------------------------------|
+| High/Medium confidence + candidate found   | `TRY_REPLACEMENT_SELECTOR`    |
+| Low confidence + candidate exists          | `SEARCH_CURRENT_UI`           |
+| No candidates + UNKNOWN failure            | `REQUIRE_FURTHER_ANALYSIS`    |
+| Non-healable failure or below threshold    | `DO_NOT_HEAL`                 |
+
+### Member 1 ↔ Member 2 Interface
+
+```
+MEMBER 1 produces:         MEMBER 2 consumes:
+HealingRecommendation  →   HealingCandidate
+                              ↓
+                           Browser execution
+                              ↓
+                           Validation
+                              ↓
+HealingResult          ←   HealingResult
+                              ↓
+healing_result_to_memory_update()
+                              ↓
+MemoryStore.store_healing_record()
+```
+
+Helper functions:
+- `recommendation_to_healing_candidate()` — maps recommendation to the existing `HealingCandidate` inter-member contract
+- `healing_result_to_memory_update()` — prepares validated results for memory storage
+
+### Optional LLM Support
+
+The LLM is used **only** when:
+1. Multiple candidates exist with tied/close scores (within 0.1)
+2. No clear deterministic winner
+3. LLM client is available
+
+The LLM never runs for obvious cases. Uses existing `LLMClientSession.generate_json()`.
+
+### Files Created/Modified
+
+| File                                        | Status   | Description                           |
+|---------------------------------------------|----------|---------------------------------------|
+| `agents/schemas/enums.py`                   | Modified | Added `HealingAction`, `CandidateSource` |
+| `agents/schemas/__init__.py`                | Modified | New enum exports                      |
+| `agents/schemas/contracts.py`               | Modified | New schema exports                    |
+| `agents/healer/healing_schemas.py`          | New      | `ScoredCandidate`, `HealingRecommendation`, `HealingContext` |
+| `agents/healer/candidate_generator.py`      | New      | Candidate generation engine           |
+| `agents/healer/candidate_scorer.py`         | New      | Scoring weights and ranking           |
+| `agents/healer/healing_decision.py`         | New      | `HealingDecisionEngine` orchestrator  |
+| `agents/healer/healing_result_mapper.py`    | New      | Member 1 ↔ Member 2 mapping          |
+| `agents/healer/__init__.py`                 | Modified | Day 10 exports                        |
+| `tests/test_day10_healing_decision.py`      | New      | 50 comprehensive tests                |
+| `docs/member1-architecture.md`              | Modified | Day 10 documentation                  |
+
+### Test Summary
+
+50 new tests covering:
+- Schema validation (5 tests)
+- Recommendation schema (3 tests)
+- Context schema (2 tests)
+- Candidate generation (7 tests)
+- Candidate scoring (9 tests)
+- Candidate ranking (3 tests)
+- Confidence thresholds (4 tests)
+- Decision engine (4 tests)
+- Safety rules (4 tests)
+- LLM disambiguation (2 tests)
+- Member 2 interface (4 tests)
+- End-to-end integration (3 tests)
+
+---

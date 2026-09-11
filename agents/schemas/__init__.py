@@ -2,10 +2,12 @@
 
 from agents.schemas.enums import (
     AssertionType,
+    CandidateSource,
     ChangeType,
     ConfidenceLevel,
     ExecutionStatus,
     FailureType,
+    HealingAction,
     HealingStatus,
     RecommendedAction,
     TestAction,
@@ -16,6 +18,8 @@ from agents.schemas.enums import (
 __all__ = [
     "FailureType",
     "HealingStatus",
+    "HealingAction",
+    "CandidateSource",
     "TestCategory",
     "TestPriority",
     "TestAction",
@@ -25,3 +29,4 @@ __all__ = [
     "ConfidenceLevel",
     "RecommendedAction",
 ]
+

@@ -209,3 +209,57 @@ class RecommendedAction(str, Enum):
     INVESTIGATE_TIMEOUT = "INVESTIGATE_TIMEOUT"
     INVESTIGATE_NAVIGATION = "INVESTIGATE_NAVIGATION"
     REQUIRE_FURTHER_ANALYSIS = "REQUIRE_FURTHER_ANALYSIS"
+
+
+class HealingAction(str, Enum):
+    """Controlled vocabulary of healing recommendation actions.
+
+    Used by the Healing Decision Engine (Day 10) to indicate what
+    Member 2's Self-Healing Engine should attempt.  These are
+    recommendations only — the intelligence layer does NOT execute them.
+
+    Definitions
+    -----------
+    TRY_REPLACEMENT_SELECTOR:
+        A high-confidence replacement selector candidate has been
+        identified.  Member 2 should attempt to use it.
+    SEARCH_CURRENT_UI:
+        No strong candidate was found from available context.
+        Member 2 should perform a broader UI search.
+    REQUIRE_FURTHER_ANALYSIS:
+        Evidence is insufficient or ambiguous.  The failure needs
+        additional investigation before healing can be attempted.
+    DO_NOT_HEAL:
+        Healing is not appropriate for this failure type (e.g.
+        assertion failures) or no candidate meets the minimum
+        confidence threshold.
+    """
+
+    TRY_REPLACEMENT_SELECTOR = "TRY_REPLACEMENT_SELECTOR"
+    SEARCH_CURRENT_UI = "SEARCH_CURRENT_UI"
+    REQUIRE_FURTHER_ANALYSIS = "REQUIRE_FURTHER_ANALYSIS"
+    DO_NOT_HEAL = "DO_NOT_HEAL"
+
+
+class CandidateSource(str, Enum):
+    """Source of a healing candidate selector.
+
+    Tracks where a candidate replacement selector originated from,
+    providing transparency for debugging and confidence calibration.
+
+    Definitions
+    -----------
+    HISTORICAL_MEMORY:
+        Candidate was found by comparing against historical element
+        records stored in the memory layer.
+    CURRENT_DOM:
+        Candidate was identified from current UI elements provided
+        in the failure context.
+    LLM_SUGGESTION:
+        Candidate was suggested by the LLM during disambiguation
+        of ambiguous or tied candidates.
+    """
+
+    HISTORICAL_MEMORY = "HISTORICAL_MEMORY"
+    CURRENT_DOM = "CURRENT_DOM"
+    LLM_SUGGESTION = "LLM_SUGGESTION"
