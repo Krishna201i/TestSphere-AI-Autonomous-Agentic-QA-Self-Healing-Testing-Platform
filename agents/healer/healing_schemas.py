@@ -27,6 +27,7 @@ from agents.schemas.enums import (
     ConfidenceLevel,
     FailureType,
     HealingAction,
+    HealingDecision,
 )
 
 if TYPE_CHECKING:
@@ -96,6 +97,10 @@ class ScoredCandidate(BaseModel):
         default=0.0, ge=0.0, le=1.0,
         description="Name attribute match score",
     )
+    stable_attribute_similarity: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Stable attribute match score (data-testid, aria-label, etc.)",
+    )
 
 
 # ── Healing Recommendation ───────────────────────────────────
@@ -152,6 +157,13 @@ class HealingRecommendation(BaseModel):
         ...,
         description="Recommended action for Member 2's Self-Healing Engine",
     )
+    decision: HealingDecision = Field(
+        default=HealingDecision.REQUIRE_FURTHER_ANALYSIS,
+        description=(
+            "Final healing decision: RECOMMEND_HEALING, "
+            "REQUIRE_VALIDATION, REQUIRE_FURTHER_ANALYSIS, or DO_NOT_HEAL"
+        ),
+    )
     evidence: list[str] = Field(
         default_factory=list,
         description="Summary evidence supporting the recommendation",
@@ -174,6 +186,33 @@ class HealingRecommendation(BaseModel):
                 "the intelligence layer never self-validates healing"
             )
         return v
+
+
+# ── LLM Evaluation Result ────────────────────────────────────
+
+
+class LLMEvaluationResult(BaseModel):
+    """Structured result from LLM-assisted candidate evaluation.
+
+    Produced when the LLM is invoked to disambiguate ambiguous
+    candidates.  Contains only the selected candidate selector,
+    a confidence score, and a concise reason.
+
+    No chain-of-thought is stored.
+    """
+
+    selected_selector: str = Field(
+        ..., min_length=1,
+        description="The selector chosen by the LLM (must match a supplied candidate)",
+    )
+    confidence: float = Field(
+        ..., ge=0.0, le=1.0,
+        description="LLM's confidence in the selection (0.0 to 1.0)",
+    )
+    reason: str = Field(
+        default="",
+        description="Concise reason for the selection (no chain-of-thought)",
+    )
 
 
 # ── Healing Context (input) ──────────────────────────────────

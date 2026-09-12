@@ -16,6 +16,35 @@ This module provides the clean interface between:
         healing_result_to_memory_update() → MemoryStore
 
 Day 10: Foundation implementation.
+Day 11: Added prepare_healing_result() and contract documentation.
+
+Member 1 ↔ Member 2 Contract
+=============================
+
+INPUT (from Member 2 to Member 1):
+    FailureAnalysis + Current UI Context (HealingContext)
+    - FailureAnalysis contains: test_id, execution_id, failure_type,
+      failed_target, evidence, historical_context
+    - HealingContext adds: current_elements, page_url
+
+OUTPUT (from Member 1 to Member 2):
+    HealingRecommendation (mapped to HealingCandidate)
+    - test_id, failed_step, old_selector, new_selector
+    - confidence, requires_validation (always True)
+    - decision: RECOMMEND_HEALING / REQUIRE_VALIDATION /
+                REQUIRE_FURTHER_ANALYSIS / DO_NOT_HEAL
+    - alternative_selectors: other ranked candidates
+
+FEEDBACK (from Member 2 back to Member 1):
+    HealingResult
+    - test_id, old_selector, new_selector
+    - status: VALIDATED_SUCCESS / VALIDATED_FAILURE
+    - confidence, validated_by: "execution_engine"
+
+Member 1 NEVER:
+    - Executes browser actions
+    - Modifies selectors in actual tests
+    - Declares healing successful (that's Member 2's job)
 """
 
 from __future__ import annotations
@@ -134,3 +163,70 @@ def healing_result_to_memory_update(
         "old_selector": result.old_selector,
         "new_selector": result.new_selector,
     }
+
+
+def prepare_healing_result(
+    test_id: str,
+    old_selector: str,
+    new_selector: str,
+    validation_success: bool,
+    confidence: float = 0.0,
+    failed_step: int = 1,
+    validation_error: Optional[str] = None,
+) -> HealingResult:
+    """Prepare a HealingResult from Member 2's validation feedback.
+
+    This is a convenience function for creating ``HealingResult``
+    instances from Member 2's browser validation feedback.  The
+    result can then be passed to ``healing_result_to_memory_update()``
+    for storage in Historical Memory.
+
+    Parameters
+    ----------
+    test_id:
+        ID of the test case that was healed.
+    old_selector:
+        Original selector that failed.
+    new_selector:
+        Replacement selector that was attempted.
+    validation_success:
+        Whether the replacement selector worked (True) or not (False).
+    confidence:
+        Confidence score of the original healing recommendation.
+    failed_step:
+        Step number that was healed.
+    validation_error:
+        Optional error message if validation failed.
+
+    Returns
+    -------
+    HealingResult
+        A validated ``HealingResult`` ready for memory storage.
+
+    Example
+    -------
+    >>> result = prepare_healing_result(
+    ...     test_id="TC_LOGIN_001",
+    ...     old_selector="#login-btn",
+    ...     new_selector="#sign-in-btn",
+    ...     validation_success=True,
+    ...     confidence=0.94,
+    ... )
+    >>> update = healing_result_to_memory_update(result)
+    """
+    status = (
+        HealingStatus.VALIDATED_SUCCESS
+        if validation_success
+        else HealingStatus.VALIDATED_FAILURE
+    )
+
+    return HealingResult(
+        test_id=test_id,
+        failed_step=failed_step,
+        old_selector=old_selector,
+        new_selector=new_selector,
+        status=status,
+        confidence=confidence,
+        validated_by="execution_engine",
+        validation_error=validation_error,
+    )

@@ -13,6 +13,8 @@ Components
 - ScoringWeights            — Configurable scoring weights (Day 10)
 - HealingDecisionEngine     — Decision pipeline orchestrator (Day 10)
 - ConfidenceThresholds      — Configurable thresholds (Day 10)
+- LLMEvaluationResult       — LLM evaluation result (Day 11)
+- LLMHealingEvaluator       — LLM-assisted evaluator (Day 11)
 """
 
 from agents.healer.candidate_generator import CandidateGenerator
@@ -24,13 +26,16 @@ from agents.healer.healing_decision import (
 )
 from agents.healer.healing_result_mapper import (
     healing_result_to_memory_update,
+    prepare_healing_result,
     recommendation_to_healing_candidate,
 )
 from agents.healer.healing_schemas import (
     HealingContext,
     HealingRecommendation,
+    LLMEvaluationResult,
     ScoredCandidate,
 )
+from agents.healer.llm_healing_evaluator import LLMHealingEvaluator
 from agents.healer.schemas import HealingCandidate, HealingResult
 
 __all__ = [
@@ -50,5 +55,8 @@ __all__ = [
     # Day 10 — Member 2 interface helpers
     "recommendation_to_healing_candidate",
     "healing_result_to_memory_update",
+    # Day 11 — AI-assisted evaluation
+    "LLMEvaluationResult",
+    "LLMHealingEvaluator",
+    "prepare_healing_result",
 ]
-

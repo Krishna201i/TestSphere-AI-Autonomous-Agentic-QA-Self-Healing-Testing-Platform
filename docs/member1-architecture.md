@@ -1073,3 +1073,106 @@ The LLM never runs for obvious cases. Uses existing `LLMClientSession.generate_j
 - End-to-end integration (3 tests)
 
 ---
+
+## Day 11 — AI-Assisted Healing Decision & Candidate Ranking
+
+> **Version:** 0.11.0 (Day 11)  
+> **Date:** 2026-09-12
+
+### Overview
+
+Day 11 advances Member 1's intelligence layer by implementing **AI-assisted candidate evaluation**, **ambiguity detection**, **strict LLM grounding validation**, and a standardized **HealingDecision lifecycle**.
+
+Building on Day 10's foundation, Day 11 ensures that:
+1. Candidate evidence includes stable HTML attributes (`data-testid`, `aria-label`, `data-qa`, etc.).
+2. Scoring remains deterministic and configurable.
+3. Ambiguity (candidates with score gaps $\le$ `ambiguity_threshold`) is explicitly detected rather than making arbitrary choices.
+4. An optional LLM evaluation layer (`LLMHealingEvaluator`) provides structured disambiguation with strict grounding validation (rejecting hallucinated/invented selectors).
+5. A high-level `HealingDecision` enum categorizes the outcome for Member 2 (`RECOMMEND_HEALING`, `REQUIRE_VALIDATION`, `REQUIRE_FURTHER_ANALYSIS`, `DO_NOT_HEAL`).
+6. The Member 1 ↔ Member 2 contract is formalized with bidirectional mapping and `prepare_healing_result()` for browser feedback ingestion.
+
+### Architecture
+
+```
+Failed Test
+     │
+Failure Analyzer (Day 9)
+     │
+FailureAnalysis + Historical Context
+     │
+Candidate Generator (Day 10 + Day 11)
+     │ (DOM + History + Stable Attributes)
+Candidates with Observable Evidence
+     │
+Candidate Scorer (Deterministic)
+     │
+Candidate Ranking (Confidence Sort)
+     │
+Ambiguity Detection (Gap ≤ ambiguity_threshold?)
+    ├── NO  ──> Select Top Candidate ──> Classify Decision
+    └── YES ──> Is LLM Available?
+                 ├── YES ──> LLMHealingEvaluator
+                 │            ├── Structured Prompt (Observable Evidence Only)
+                 │            ├── Response Normalization & Schema Validation
+                 │            └── Grounding Validation (Selector in Context?)
+                 │                 ├── VALID   ──> Resolved Candidate
+                 │                 └── INVALID ──> Fallback / Escalate
+                 └── NO  ──> REQUIRE_FURTHER_ANALYSIS
+     │
+Final HealingRecommendation (with HealingDecision)
+     │
+Member 1 ↔ Member 2 Contract Bridge
+     │
+Member 2 (Browser Execution & Validation)
+     │
+prepare_healing_result()
+     │
+HealingResult ──> MemoryStore Update
+```
+
+### Key Components
+
+#### 1. Stable Attribute Evidence & Scoring
+- `_STABLE_ATTRIBUTES`: `data-testid`, `data-test-id`, `data-qa`, `data-cy`, `aria-label`, `aria-labelledby`, `class`.
+- `ScoredCandidate.stable_attribute_similarity`: Fractional match score for stable attributes.
+- `ScoringWeights.stable_attribute_weight`: Configurable weight dimension in deterministic scoring.
+
+#### 2. Ambiguity Detection
+- `ConfidenceThresholds.ambiguity_threshold`: Configurable gap threshold (default `0.05`).
+- When the gap between the top two candidates is $\le$ `ambiguity_threshold`, the decision engine detects ambiguity and marks the action as `REQUIRE_FURTHER_ANALYSIS` (or triggers LLM evaluation).
+
+#### 3. LLM Healing Evaluator with Grounding Validation
+- `LLMHealingEvaluator` (`agents/healer/llm_healing_evaluator.py`):
+  - Ingests only observable evidence (failure type, target selector, candidates, text, roles, attributes).
+  - Prompts LLM for structured JSON (`selected_candidate`, `confidence`, `reason`).
+  - Strict grounding validation: verifies `selected_candidate` exists in the provided candidate list. Rejects any invented selectors.
+  - Zero chain-of-thought stored; only clean, verifiable recommendations.
+
+#### 4. Final Healing Decision (`HealingDecision`)
+- `RECOMMEND_HEALING`: High confidence (score $\ge 0.80$), clear winner.
+- `REQUIRE_VALIDATION`: Medium confidence ($0.50 \le \text{score} < 0.80$), requires browser validation.
+- `REQUIRE_FURTHER_ANALYSIS`: Ambiguous candidates or low confidence ($0.30 \le \text{score} < 0.50$).
+- `DO_NOT_HEAL`: Non-healable failure type (`ASSERTION_FAILURE`, `NETWORK_ERROR`, `APPLICATION_ERROR`), no candidates, or score $< 0.30$.
+
+#### 5. Member 2 Inter-Member Contract
+- Clear input/output specification documented in `agents/healer/healing_result_mapper.py`.
+- `prepare_healing_result()` convenience function for transforming Member 2 browser feedback into a standardized `HealingResult`.
+
+### Files Created/Modified on Day 11
+
+| File | Status | Description |
+|---|---|---|
+| `agents/schemas/enums.py` | Modified | Added `HealingDecision` enum |
+| `agents/schemas/__init__.py` | Modified | Exported `HealingDecision` |
+| `agents/healer/healing_schemas.py` | Modified | Added `stable_attribute_similarity`, `LLMEvaluationResult`, `decision` field |
+| `agents/healer/candidate_generator.py` | Modified | Added stable attribute similarity computation & evidence strings |
+| `agents/healer/candidate_scorer.py` | Modified | Added `stable_attribute_weight` to `ScoringWeights` and scoring formula |
+| `agents/healer/healing_decision.py` | Modified | Added ambiguity detection, LLM evaluator delegation, and `_determine_decision()` |
+| `agents/healer/llm_healing_evaluator.py` | New | AI-assisted candidate evaluation with strict grounding validation |
+| `agents/healer/healing_result_mapper.py` | Modified | Added contract documentation and `prepare_healing_result()` |
+| `agents/healer/__init__.py` | Modified | Exported Day 11 classes |
+| `tests/test_day11_healing_intelligence.py` | New | Comprehensive 45-test suite covering Day 11 features & all 6 scenarios |
+| `docs/member1-architecture.md` | Modified | Day 11 architectural documentation |
+| `README.md` | Modified | Updated test count, Day 11 feature section, roadmap |
+
+---

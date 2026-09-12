@@ -241,6 +241,34 @@ class HealingAction(str, Enum):
     DO_NOT_HEAL = "DO_NOT_HEAL"
 
 
+class HealingDecision(str, Enum):
+    """Final healing decision from the intelligence layer.
+
+    Captures the overall assessment of whether healing should
+    proceed, independent of the specific action recommended.
+
+    Definitions
+    -----------
+    RECOMMEND_HEALING:
+        High-confidence candidate found.  Recommend sending to
+        Member 2 for browser validation.
+    REQUIRE_VALIDATION:
+        Medium-confidence candidate found.  Recommend candidate
+        but require additional validation by Member 2.
+    REQUIRE_FURTHER_ANALYSIS:
+        Candidates are ambiguous or insufficient.  Further
+        investigation is needed before healing can proceed.
+    DO_NOT_HEAL:
+        Healing is not appropriate (e.g. assertion failure,
+        no candidates, confidence below minimum threshold).
+    """
+
+    RECOMMEND_HEALING = "RECOMMEND_HEALING"
+    REQUIRE_VALIDATION = "REQUIRE_VALIDATION"
+    REQUIRE_FURTHER_ANALYSIS = "REQUIRE_FURTHER_ANALYSIS"
+    DO_NOT_HEAL = "DO_NOT_HEAL"
+
+
 class CandidateSource(str, Enum):
     """Source of a healing candidate selector.
 

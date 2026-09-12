@@ -30,6 +30,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Stable attributes that are designed to be resilient across UI changes
+_STABLE_ATTRIBUTES: frozenset[str] = frozenset({
+    "data-testid", "data-test-id", "data-qa", "data-cy",
+    "aria-label", "aria-labelledby", "class",
+})
+
 
 class CandidateGenerator:
     """Generates candidate replacement selectors.
@@ -155,6 +161,7 @@ class CandidateGenerator:
                 page_similarity=similarities["page"],
                 historical_similarity=0.0,  # Set below if applicable
                 name_similarity=similarities["name"],
+                stable_attribute_similarity=similarities["stable_attribute"],
             )
             candidates.append(candidate)
 
@@ -215,8 +222,9 @@ class CandidateGenerator:
     ) -> dict[str, float]:
         """Compute individual similarity scores between two elements.
 
-        Returns a dict with keys: text, role, type, page, name.
-        Each value is 0.0 (no match) or 1.0 (match).
+        Returns a dict with keys: text, role, type, page, name, stable_attribute.
+        Each value is 0.0 (no match) or 1.0 (match), except stable_attribute
+        which is the fraction of matching stable attributes.
         """
         scores: dict[str, float] = {}
 
@@ -240,6 +248,11 @@ class CandidateGenerator:
         prev_name = previous.attributes.get("name", "")
         curr_name = current.attributes.get("name", "")
         scores["name"] = self._exact_match(prev_name, curr_name)
+
+        # Stable attribute similarity
+        scores["stable_attribute"] = self._stable_attribute_match(
+            previous.attributes, current.attributes,
+        )
 
         return scores
 
@@ -270,6 +283,15 @@ class CandidateGenerator:
             name_val = previous.attributes.get("name", "")
             if name_val:
                 evidence.append(f"Same name attribute: {name_val}")
+
+        if similarities.get("stable_attribute", 0.0) > 0.0:
+            matching_attrs = self._get_matching_stable_attributes(
+                previous.attributes, current.attributes,
+            )
+            if matching_attrs:
+                evidence.append(
+                    f"Matching stable attributes: {', '.join(matching_attrs)}"
+                )
 
         # Note selector difference
         if previous.selector != current.selector:
@@ -342,3 +364,48 @@ class CandidateGenerator:
         if s.startswith("."):
             return "class"
         return "css"
+
+    @staticmethod
+    def _stable_attribute_match(
+        attrs_a: dict[str, str],
+        attrs_b: dict[str, str],
+    ) -> float:
+        """Compute similarity based on matching stable attributes.
+
+        Compares stable HTML attributes (data-testid, aria-label, etc.)
+        between two elements.  Returns the fraction of overlapping
+        stable attributes that have matching values.
+
+        Returns 0.0 if no stable attributes exist in either element.
+        """
+        # Collect stable attributes present in either element
+        relevant_keys = set()
+        for key in _STABLE_ATTRIBUTES:
+            if key in attrs_a or key in attrs_b:
+                relevant_keys.add(key)
+
+        if not relevant_keys:
+            return 0.0
+
+        matches = 0
+        for key in relevant_keys:
+            val_a = attrs_a.get(key, "").strip().lower()
+            val_b = attrs_b.get(key, "").strip().lower()
+            if val_a and val_b and val_a == val_b:
+                matches += 1
+
+        return matches / len(relevant_keys)
+
+    @staticmethod
+    def _get_matching_stable_attributes(
+        attrs_a: dict[str, str],
+        attrs_b: dict[str, str],
+    ) -> list[str]:
+        """Return list of stable attribute names that match between elements."""
+        matching: list[str] = []
+        for key in _STABLE_ATTRIBUTES:
+            val_a = attrs_a.get(key, "").strip().lower()
+            val_b = attrs_b.get(key, "").strip().lower()
+            if val_a and val_b and val_a == val_b:
+                matching.append(key)
+        return sorted(matching)

@@ -13,13 +13,21 @@ Orchestrates the full healing recommendation pipeline:
          ↓
     Candidate Ranking
          ↓
+    Ambiguity Detection
+         ↓
     Confidence Threshold Check
          ↓
-    Optional LLM Disambiguation
+    Optional LLM Disambiguation (ambiguous only)
+         ↓
+    Grounding Validation
+         ↓
+    Final Healing Decision
          ↓
     HealingRecommendation
 
 Day 10: Foundation implementation.
+Day 11: Ambiguity detection, LLM evaluator integration,
+        HealingDecision enum, grounding validation.
 
 IMPORTANT: This engine does NOT execute browser actions.
 It produces a structured ``HealingRecommendation`` that
@@ -47,6 +55,7 @@ from agents.schemas.enums import (
     ConfidenceLevel,
     FailureType,
     HealingAction,
+    HealingDecision,
 )
 
 if TYPE_CHECKING:
@@ -81,6 +90,11 @@ class ConfidenceThresholds(BaseModel):
     minimum_healing_threshold:
         Minimum confidence score required for any healing attempt
         (0.30 default).  Below this, DO_NOT_HEAL is recommended.
+    ambiguity_threshold:
+        Maximum score gap between the top two candidates for them
+        to be considered ambiguous (0.05 default).  If the gap is
+        <= this value, the candidates are considered ambiguous and
+        further analysis or LLM disambiguation is triggered.
     """
 
     high_threshold: float = Field(
@@ -95,6 +109,13 @@ class ConfidenceThresholds(BaseModel):
         default=0.30, ge=0.0, le=1.0,
         description="Minimum confidence for any healing attempt (default 0.30)",
     )
+    ambiguity_threshold: float = Field(
+        default=0.05, ge=0.0, le=1.0,
+        description=(
+            "Maximum gap between top two candidates to be considered "
+            "ambiguous (default 0.05)"
+        ),
+    )
 
 
 # ── Healing Decision Engine ───────────────────────────────────
@@ -105,7 +126,8 @@ class HealingDecisionEngine:
 
     Takes a ``HealingContext`` (containing a ``FailureAnalysis``
     and current UI elements), generates and scores candidates,
-    applies safety rules, and produces a ``HealingRecommendation``.
+    applies safety rules, detects ambiguity, and produces a
+    ``HealingRecommendation``.
 
     Parameters
     ----------
@@ -136,6 +158,12 @@ class HealingDecisionEngine:
         )
         self._scorer = CandidateScorer(weights=weights)
         self._thresholds = thresholds or ConfidenceThresholds()
+
+        # Initialize LLM evaluator if client is available
+        self._llm_evaluator = None
+        if llm_client is not None:
+            from agents.healer.llm_healing_evaluator import LLMHealingEvaluator
+            self._llm_evaluator = LLMHealingEvaluator(llm_client)
 
         logger.info(
             "HealingDecisionEngine initialized — llm_available=%s",
@@ -183,16 +211,20 @@ class HealingDecisionEngine:
         # 3. Score and rank
         ranked = self._scorer.rank_candidates(candidates)
 
-        # 4. Apply confidence thresholds and determine action
+        # 4. Detect ambiguity
+        is_ambiguous = self._detect_ambiguity(ranked)
+
+        # 5. Apply confidence thresholds and determine action
         selected, confidence_level, action = self._evaluate_candidates(
-            ranked, analysis,
+            ranked, analysis, is_ambiguous,
         )
 
-        # 5. Optional LLM disambiguation
+        # 6. Optional LLM disambiguation for ambiguous cases
         if (
-            action == HealingAction.SEARCH_CURRENT_UI
-            and self._llm_client is not None
+            is_ambiguous
+            and self._llm_evaluator is not None
             and len(ranked) >= 2
+            and action == HealingAction.REQUIRE_FURTHER_ANALYSIS
         ):
             llm_result = await self._attempt_llm_disambiguation(
                 ranked, analysis,
@@ -205,10 +237,16 @@ class HealingDecisionEngine:
                 action = self._determine_action_for_confidence(
                     llm_result.confidence,
                 )
+                is_ambiguous = False  # LLM resolved ambiguity
 
-        # 6. Build evidence summary
+        # 7. Determine final healing decision
+        decision = self._determine_decision(
+            selected, confidence_level, action, is_ambiguous,
+        )
+
+        # 8. Build evidence summary
         evidence = self._build_evidence_summary(
-            analysis, ranked, selected, action,
+            analysis, ranked, selected, action, is_ambiguous,
         )
 
         recommendation = HealingRecommendation(
@@ -221,17 +259,20 @@ class HealingDecisionEngine:
             selected_candidate=selected,
             confidence=confidence_level,
             recommended_action=action,
+            decision=decision,
             evidence=evidence,
             requires_validation=True,
         )
 
         logger.info(
-            "Recommendation complete — action=%s, confidence=%s, "
-            "candidates=%d, selected=%s",
+            "Recommendation complete — decision=%s, action=%s, "
+            "confidence=%s, candidates=%d, selected=%s, ambiguous=%s",
+            decision.value,
             action.value,
             confidence_level.value,
             len(ranked),
             selected.selector if selected else "None",
+            is_ambiguous,
         )
 
         return recommendation
@@ -261,11 +302,52 @@ class HealingDecisionEngine:
                 selected_candidate=None,
                 confidence=ConfidenceLevel.HIGH,
                 recommended_action=HealingAction.DO_NOT_HEAL,
+                decision=HealingDecision.DO_NOT_HEAL,
                 evidence=[reason],
                 requires_validation=True,
             )
 
         return None
+
+    # ── Ambiguity Detection ───────────────────────────────────
+
+    def _detect_ambiguity(
+        self, ranked: list[ScoredCandidate],
+    ) -> bool:
+        """Detect if the top two candidates have ambiguous scores.
+
+        Two candidates are considered ambiguous when the gap between
+        their confidence scores is <= the configured ambiguity_threshold.
+
+        Parameters
+        ----------
+        ranked:
+            Candidates sorted by confidence (highest first).
+
+        Returns
+        -------
+        bool
+            True if top two candidates are ambiguous, False otherwise.
+        """
+        if len(ranked) < 2:
+            return False
+
+        gap = ranked[0].confidence - ranked[1].confidence
+        is_ambiguous = gap <= self._thresholds.ambiguity_threshold
+
+        if is_ambiguous:
+            logger.info(
+                "Ambiguity detected — top=%s (%.4f), second=%s (%.4f), "
+                "gap=%.4f <= threshold=%.4f",
+                ranked[0].selector,
+                ranked[0].confidence,
+                ranked[1].selector,
+                ranked[1].confidence,
+                gap,
+                self._thresholds.ambiguity_threshold,
+            )
+
+        return is_ambiguous
 
     # ── Candidate Evaluation ──────────────────────────────────
 
@@ -273,6 +355,7 @@ class HealingDecisionEngine:
         self,
         ranked: list[ScoredCandidate],
         analysis: FailureAnalysis,
+        is_ambiguous: bool = False,
     ) -> tuple[Optional[ScoredCandidate], ConfidenceLevel, HealingAction]:
         """Evaluate ranked candidates and determine action.
 
@@ -303,6 +386,14 @@ class HealingDecisionEngine:
                 HealingAction.REQUIRE_FURTHER_ANALYSIS,
             )
 
+        # Ambiguous candidates — require further analysis or LLM
+        if is_ambiguous and top.confidence >= self._thresholds.medium_threshold:
+            return (
+                top,
+                confidence_level,
+                HealingAction.REQUIRE_FURTHER_ANALYSIS,
+            )
+
         # Between minimum and medium threshold
         if top.confidence < self._thresholds.medium_threshold:
             return (
@@ -325,6 +416,41 @@ class HealingDecisionEngine:
             ConfidenceLevel.HIGH,
             HealingAction.TRY_REPLACEMENT_SELECTOR,
         )
+
+    # ── Final Decision ────────────────────────────────────────
+
+    @staticmethod
+    def _determine_decision(
+        selected: Optional[ScoredCandidate],
+        confidence_level: ConfidenceLevel,
+        action: HealingAction,
+        is_ambiguous: bool,
+    ) -> HealingDecision:
+        """Determine the final healing decision.
+
+        Maps confidence level and action into one of:
+        RECOMMEND_HEALING, REQUIRE_VALIDATION,
+        REQUIRE_FURTHER_ANALYSIS, or DO_NOT_HEAL.
+        """
+        if action == HealingAction.DO_NOT_HEAL:
+            return HealingDecision.DO_NOT_HEAL
+
+        if is_ambiguous:
+            return HealingDecision.REQUIRE_FURTHER_ANALYSIS
+
+        if action == HealingAction.REQUIRE_FURTHER_ANALYSIS:
+            return HealingDecision.REQUIRE_FURTHER_ANALYSIS
+
+        if selected is None:
+            return HealingDecision.DO_NOT_HEAL
+
+        if confidence_level == ConfidenceLevel.HIGH:
+            return HealingDecision.RECOMMEND_HEALING
+
+        if confidence_level == ConfidenceLevel.MEDIUM:
+            return HealingDecision.REQUIRE_VALIDATION
+
+        return HealingDecision.REQUIRE_FURTHER_ANALYSIS
 
     # ── Confidence Classification ─────────────────────────────
 
@@ -359,6 +485,7 @@ class HealingDecisionEngine:
         ranked: list[ScoredCandidate],
         selected: Optional[ScoredCandidate],
         action: HealingAction,
+        is_ambiguous: bool = False,
     ) -> list[str]:
         """Build a concise evidence summary for the recommendation."""
         evidence: list[str] = []
@@ -381,6 +508,9 @@ class HealingDecisionEngine:
         else:
             evidence.append("No candidate selected")
 
+        if is_ambiguous:
+            evidence.append("Ambiguous candidates detected")
+
         evidence.append(f"Recommended action: {action.value}")
 
         return evidence
@@ -392,95 +522,54 @@ class HealingDecisionEngine:
         ranked: list[ScoredCandidate],
         analysis: FailureAnalysis,
     ) -> Optional[ScoredCandidate]:
-        """Use the LLM to disambiguate tied or ambiguous candidates.
+        """Use the LLM evaluator to disambiguate ambiguous candidates.
 
         Only called when:
-        - Multiple candidates exist
-        - No clear winner (top candidates are close in confidence)
-        - LLM client is available
+        - Ambiguity is detected between top candidates
+        - LLM evaluator is available
+        - At least 2 candidates exist
 
-        Returns the LLM's preferred candidate, or None if the LLM
-        fails or returns an invalid response.
+        The LLM's recommendation is strictly validated:
+        - Schema validation (required fields + types)
+        - Grounding check (selected_candidate must be in candidate list)
+
+        Returns the LLM's preferred candidate as a ScoredCandidate,
+        or None if the LLM fails or returns an invalid response.
         """
-        if self._llm_client is None:
+        if self._llm_evaluator is None:
             return None
 
-        # Check if top candidates are close (within 0.1)
         if len(ranked) < 2:
             return None
 
-        top_score = ranked[0].confidence
-        second_score = ranked[1].confidence
-        if top_score - second_score > 0.1:
-            # Clear winner — no LLM needed
-            return ranked[0]
+        result = await self._llm_evaluator.evaluate_candidates(
+            candidates=ranked,
+            original_selector=analysis.failed_target,
+            failure_type=analysis.failure_type.value,
+        )
 
-        # Build concise prompt
-        candidates_data = [
-            {
-                "selector": c.selector,
-                "confidence": c.confidence,
-                "evidence": c.evidence[:3],  # Limit evidence
-            }
-            for c in ranked[:5]  # Limit to top 5
-        ]
-
-        prompt_data = {
-            "task": "Select the best replacement selector candidate.",
-            "original_selector": analysis.failed_target,
-            "failure_type": analysis.failure_type.value,
-            "candidates": candidates_data,
-            "instruction": (
-                "Return a JSON object with 'selected_index' (0-based) "
-                "and 'confidence' (0.0-1.0)."
-            ),
-        }
-
-        from agents.llm.schemas import LLMRequest
-
-        try:
-            request = LLMRequest(
-                prompt=json.dumps(prompt_data, indent=2),
-                system_instruction=(
-                    "You are a test healing disambiguation engine. "
-                    "Respond ONLY with a JSON object containing: "
-                    "selected_index, confidence. "
-                    "Do not include any other text."
-                ),
-                response_format="json",
-                temperature=0.1,
-            )
-
-            response_data = await self._llm_client.generate_json(request)
-
-            idx = response_data.get("selected_index", 0)
-            conf = response_data.get("confidence", 0.0)
-
-            if not isinstance(idx, int) or idx < 0 or idx >= len(ranked):
-                logger.warning(
-                    "LLM returned invalid selected_index: %s", idx,
-                )
-                return None
-
-            if not isinstance(conf, (int, float)):
-                conf = ranked[idx].confidence
-
-            conf = min(max(float(conf), 0.0), 1.0)
-
-            selected = ranked[idx].model_copy(update={"confidence": conf})
-            logger.info(
-                "LLM disambiguation selected index=%d, "
-                "selector=%s, confidence=%.4f",
-                idx,
-                selected.selector,
-                conf,
-            )
-            return selected
-
-        except Exception as exc:
-            logger.warning(
-                "LLM disambiguation failed: %s: %s",
-                type(exc).__name__,
-                exc,
-            )
+        if result is None:
             return None
+
+        # Find the matching candidate and return updated copy
+        for candidate in ranked:
+            if candidate.selector == result.selected_selector:
+                updated = candidate.model_copy(
+                    update={"confidence": result.confidence},
+                )
+                logger.info(
+                    "LLM disambiguation resolved — "
+                    "selector=%s, confidence=%.4f, reason=%s",
+                    result.selected_selector,
+                    result.confidence,
+                    result.reason,
+                )
+                return updated
+
+        # Should not reach here due to grounding validation
+        logger.warning(
+            "LLM selected selector '%s' not found in candidates "
+            "(post-grounding — should not happen)",
+            result.selected_selector,
+        )
+        return None
