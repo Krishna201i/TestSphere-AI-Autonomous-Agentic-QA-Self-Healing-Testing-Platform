@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/Tests-688%20Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-738%20Passed-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **TestSphere-AI** is an intelligent, multi-agent autonomous testing platform designed to plan, generate, execute, analyze, and self-heal end-to-end web application tests.
@@ -590,6 +590,71 @@ HealingResult ──> MemoryStore Update
 
 ---
 
+## 🔄 Healing Result Feedback & Memory Learning (Day 12)
+
+Building on Day 11's AI-assisted decision making, **Day 12** closes the self-healing feedback loop by introducing **Healing Result Feedback & Memory Learning**. The platform now dynamically learns from execution outcomes: Member 2's browser validation results feed directly into Member 1's historical memory, continually updating selector stability scores, tracking replacement history, and detecting recurring failure patterns.
+
+```
+Failed Test
+     │
+Failure Analyzer (Day 9)
+     │
+Candidate Generator (Day 10 + 11) ◄── Historical Evidence (Day 12)
+     │                                 (ReplacementStats, SelectorHistory,
+     │                                  Stability Scores, Success Rates)
+Candidate Scorer (Deterministic Multi-Signal + History)
+     │
+Candidate Ranking & Ambiguity Detection
+     │
+Healing Decision Engine (Day 11)
+     │
+HealingRecommendation
+     │
+Member 2 (Browser Execution & Validation)
+     │
+HealingResultFeedback (Day 12)
+  ├── validation_status (SUCCESS / FAILED / TIMEOUT / ERROR)
+  ├── execution_time_ms, attempts, error_message
+  └── dom_snapshot, screenshot_path
+     │
+HealingResultFeedbackProcessor (Day 12)
+  ├── Ingests validation outcome
+  ├── Stores structured HealingRecord in MemoryStore
+  ├── Updates selector stability & replacement frequencies
+  └── Feeds into HealingPatternDetector
+```
+
+### Key Capabilities (Day 12):
+- **Structured Validation Feedback Contract (`HealingResultFeedback`)**:
+  - Pydantic v2 data contract capturing Member 2 post-validation execution results.
+  - Fields: `healing_id`, `test_id`, `original_selector`, `healed_selector`, `validation_status` (`SUCCESS`, `FAILED`, `TIMEOUT`, `ERROR`, `SKIPPED`), `execution_time_ms`, `attempts`, `error_message`, `dom_snapshot`, `screenshot_path`, `validated_at`.
+  - Backwards-compatible `to_healing_result()` converter to produce legacy `HealingResult` objects.
+- **Feedback Ingestion & State Updating (`HealingResultFeedbackProcessor`)**:
+  - Ingests validation outcomes into `MemoryStore` as structured `HealingRecord`s.
+  - Dynamically updates selector stability tallies and replacement counts.
+  - Emits observable feedback summary events for auditability and real-time observability.
+- **Historical Evidence Retrieval (`HealingEvidenceRetriever`)**:
+  - Aggregates historical performance of proposed replacements before scoring.
+  - Queries `MemoryStore` for `ReplacementStats` (total attempts, success rate, last used timestamp).
+  - Queries `SelectorHistory` (breakage count, known replacements, overall stability score).
+  - Populates `healing_history_score` on candidate selectors to favor historically verified replacements.
+- **Healing Pattern Detection (`HealingPatternDetector`)**:
+  - Analyzes historical healing and failure records across tests to identify systemic UI fragility.
+  - Detects `REPEATED_SELECTOR_FAILURE`, `FREQUENT_BREAKAGE`, `FLAKY_SELECTOR`, and `STABLE_REPLACEMENT`.
+  - Generates actionable insights with confidence scores and recommendations for test maintenance.
+- **Closed-Loop Candidate Scoring Integration**:
+  - `ScoredCandidate` enhanced with `healing_history_score`.
+  - Configurable `healing_history_weight` in `ScoringWeights` (defaults to `0.0` for backwards compatibility, configurable for active learning).
+  - `HealingDecisionEngine` enriches candidates with historical evidence during decision making.
+- **50 Comprehensive Day 12 Tests (`tests/test_day12_healing_feedback.py`)**:
+  - Validation feedback ingestion & processor tests.
+  - Healing evidence retrieval & replacement statistics tests.
+  - Pattern detector tests (repeated failure, flaky selector, stable replacement).
+  - Closed-loop feedback cycle tests (decision $\to$ validation $\to$ feedback $\to$ memory $\to$ learned candidate scoring).
+  - Test suite expanded from 688 to **738 passing tests** (100% offline, 0 failures, 0 regressions).
+
+---
+
 ## 📂 Project Structure (`agents/`)
 
 ```
@@ -598,10 +663,11 @@ HealingResult ──> MemoryStore Update
 │   ├── analyzer/              # Failure Analysis Agent & Schemas (Day 9)
 │   │   ├── analyzer.py        # FailureAnalysisAgent ABC + RuleBasedFailureAnalyzer
 │   │   └── schemas.py         # FailureContext, FailureAnalysisResult, FailureEvidence, etc.
-│   ├── healer/                # Self-Healing Decision Layer (Day 10 + Day 11)
+│   ├── healer/                # Self-Healing Decision Layer (Day 10 + Day 11 + Day 12)
 │   │   ├── candidate_generator.py # Candidate generation from DOM & historical memory + stable attrs
 │   │   ├── candidate_scorer.py# Weighted candidate scoring, ranking & confidence thresholds
 │   │   ├── healing_decision.py# HealingDecisionEngine orchestrator & ambiguity detection
+│   │   ├── healing_feedback.py# HealingResultFeedback & processor for Member 2 feedback (Day 12)
 │   │   ├── healing_result_mapper.py # Member 1 ↔ Member 2 contract bridge & prepare_healing_result()
 │   │   ├── healing_schemas.py # ScoredCandidate, HealingRecommendation, HealingContext, LLMEvaluationResult
 │   │   ├── llm_healing_evaluator.py # AI-assisted candidate evaluation with strict grounding validation (Day 11)
@@ -616,12 +682,14 @@ HealingResult ──> MemoryStore Update
 │   │   ├── schemas.py         # LLMRequest, LLMResponse, LLMUsage models + validators
 │   │   └── providers/
 │   │       └── mock.py        # MockLLMProvider with simulations & response registry
-│   ├── memory/                # Historical Memory & Context Management (Day 8)
+│   ├── memory/                # Historical Memory & Context Management (Day 8 + Day 12)
 │   │   ├── context_comparator.py # Element diff engine (added, removed, modified elements)
+│   │   ├── healing_evidence.py# HealingEvidenceRetriever & ReplacementStats (Day 12)
 │   │   ├── healing_history.py # Abstract HealingMemory interface (legacy compatibility)
 │   │   ├── in_memory_store.py # InMemoryStore with filtering, snapshots & query helpers
 │   │   ├── memory_interface.py# Storage-independent MemoryStore ABC
-│   │   └── memory_schemas.py  # TestExecutionRecord, FailureInfo, ElementRecord, HealingRecord
+│   │   ├── memory_schemas.py  # TestExecutionRecord, FailureInfo, ElementRecord, HealingRecord
+│   │   └── pattern_detector.py# HealingPatternDetector for recurring selector patterns (Day 12)
 │   ├── orchestration/         # Pipeline Controller
 │   │   └── agent_controller.py# Abstract AgentController
 │   ├── planner/               # Test Planner Agent & Generation Pipeline (Day 4 + Day 5 + Day 7)
@@ -635,7 +703,7 @@ HealingResult ──> MemoryStore Update
 │   │   └── validation.py      # Business-rule validation + element refs + duplicate detection
 │   └── schemas/               # Shared Enums & Data Contracts
 │       ├── contracts.py       # Re-exported single source of truth (including memory schemas)
-│       └── enums.py           # FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType, ExecutionStatus, ChangeType, FailureCategory, ConfidenceLevel, HealingAction, CandidateSource, HealingDecision
+│       └── enums.py           # FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType, ExecutionStatus, ChangeType, FailureCategory, ConfidenceLevel, HealingAction, CandidateSource, HealingDecision, ValidationStatus, HealingPatternType
 ├── docs/
 │   └── member1-architecture.md# Comprehensive architectural specification (v0.11.0)
 ├── tests/
@@ -646,6 +714,7 @@ HealingResult ──> MemoryStore Update
 │   ├── test_day9_failure_analyzer.py # Day 9 failure analyzer agent & diagnostic tests (61 tests)
 │   ├── test_day10_healing_decision.py # Day 10 self-healing decision & candidate generator tests (50 tests)
 │   ├── test_day11_healing_intelligence.py # Day 11 AI-assisted healing decision & candidate ranking tests (45 tests)
+│   ├── test_day12_healing_feedback.py # Day 12 healing result feedback & memory learning tests (50 tests)
 │   ├── test_fixtures.py           # Reusable test factories & sample data (Day 5)
 │   ├── test_imports.py            # Module import validation tests
 │   ├── test_llm_client.py         # Day 2 LLM foundation & mock provider tests
@@ -716,8 +785,7 @@ python3 -m pytest tests/ -v
 - [x] **Day 8**: Historical Memory and Context Management Layer: storage-independent `MemoryStore` interface, `InMemoryStore` implementation with filtering/pagination/element snapshots/healing lookups, Pydantic memory schemas (`TestExecutionRecord`, `FailureInfo`, `ElementRecord`, `HealingRecord`, `FieldChange`, `ContextComparisonResult`), `ContextComparator` element diff engine, and 57 tests (532 tests total).
 - [x] **Day 9**: Failure Analyzer Agent: multi-signal root cause diagnosis, Pydantic failure schemas (`FailureContext`, `FailureAnalysisResult`, `FailureEvidence`, `ElementContextSnapshot`), `FailureCategory` & `ConfidenceLevel` enums, self-healing eligibility evaluation, `MemoryStore` historical context correlation, backwards-compatible schemas/agent signatures, and 61 tests (593 tests total).
 - [x] **Day 10**: Self-Healing Decision Layer & Candidate Generation foundation: candidate generation (DOM + history), weighted multi-signal scoring, confidence thresholds, safety rules, action mapping, optional LLM disambiguation, Member 1 ↔ Member 2 contract bridge, and 50 tests (643 tests total).
-- [x] **Day 11**: AI-Assisted Healing Decision & Candidate Ranking: stable attribute evidence, deterministic scoring, ambiguity detection, LLM candidate evaluation with strict grounding validation, `HealingDecision` enum & lifecycle, Member 2 contract documentation & `prepare_healing_result`, and 45 tests (688 tests total).
-- [ ] **Day 12**: Advanced DOM semantic healing & locator strategies.
+- [x] **Day 12**: Healing Result Feedback & Memory Learning: validation feedback ingestion (`HealingResultFeedback`, `HealingResultFeedbackProcessor`), historical evidence retrieval (`HealingEvidenceRetriever`), pattern detection (`HealingPatternDetector`), feedback loop enrichment in `HealingDecisionEngine`, and 50 tests (738 tests total).
 - [ ] **Day 13–15**: Persistent Healing Memory & Vector Storage integration.
 - [ ] **Day 16–18**: Full pipeline orchestration & integration with Member 2 & 3.
 

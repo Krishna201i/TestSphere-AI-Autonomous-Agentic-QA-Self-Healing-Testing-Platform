@@ -195,6 +195,15 @@ class CandidateGenerator:
 
             selector_type = self._infer_selector_type(record.new_selector)
 
+            # Compute historical healing score from replacement stats
+            healing_history_score = self._compute_healing_history_score(
+                original_selector, record.new_selector,
+            )
+            if healing_history_score > 0.0:
+                evidence.append(
+                    f"Historical success rate: {healing_history_score:.0%}"
+                )
+
             candidate = ScoredCandidate(
                 selector=record.new_selector,
                 selector_type=selector_type,
@@ -207,10 +216,30 @@ class CandidateGenerator:
                 page_similarity=0.0,
                 historical_similarity=1.0,  # Strong: validated in the past
                 name_similarity=0.0,
+                healing_history_score=healing_history_score,
             )
             candidates.append(candidate)
 
         return candidates
+
+    def _compute_healing_history_score(
+        self,
+        old_selector: str,
+        new_selector: str,
+    ) -> float:
+        """Compute healing history score from replacement stats.
+
+        Returns the success rate of this specific replacement pair,
+        or 0.0 if no history exists.
+        """
+        records = self._memory.get_healing_history_for_replacement(
+            old_selector, new_selector,
+        )
+        if not records:
+            return 0.0
+
+        successes = sum(1 for r in records if r.validation_result is True)
+        return successes / len(records)
 
     # ── Private: Similarity Computation ───────────────────────
 

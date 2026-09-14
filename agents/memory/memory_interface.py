@@ -226,6 +226,36 @@ class MemoryStore(ABC):
         """
         ...
 
+    @abstractmethod
+    def get_healing_history_for_replacement(
+        self,
+        old_selector: str,
+        new_selector: str,
+        *,
+        limit: int = 20,
+    ) -> list[HealingRecord]:
+        """Retrieve healing history for a specific replacement pair.
+
+        Filters healing records to only those where the original
+        selector matches ``old_selector`` and the replacement
+        matches ``new_selector``.
+
+        Parameters
+        ----------
+        old_selector:
+            The original selector that failed.
+        new_selector:
+            The replacement selector that was attempted.
+        limit:
+            Maximum number of records to return.
+
+        Returns
+        -------
+        list[HealingRecord]
+            Matching healing records, newest first.
+        """
+        ...
+
     # ── Aggregated Context ────────────────────────────────────
 
     @abstractmethod

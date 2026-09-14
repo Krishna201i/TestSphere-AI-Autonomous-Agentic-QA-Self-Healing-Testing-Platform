@@ -9,9 +9,16 @@ Components
 - InMemoryStore       — In-memory MemoryStore backend (Day 8)
 - ContextComparator   — Element context comparison engine (Day 8)
 - Memory schemas      — TestExecutionRecord, ElementRecord, etc. (Day 8)
+- HealingEvidenceRetriever — Historical evidence queries (Day 12)
+- HealingPatternDetector   — Pattern detection signals (Day 12)
 """
 
 from agents.memory.context_comparator import ContextComparator
+from agents.memory.healing_evidence import (
+    HealingEvidenceRetriever,
+    ReplacementStats,
+    SelectorHistory,
+)
 from agents.memory.healing_history import HealingMemory
 from agents.memory.in_memory_store import InMemoryStore
 from agents.memory.memory_interface import MemoryStore
@@ -22,6 +29,10 @@ from agents.memory.memory_schemas import (
     FieldChange,
     HealingRecord,
     TestExecutionRecord,
+)
+from agents.memory.pattern_detector import (
+    HealingPattern,
+    HealingPatternDetector,
 )
 
 __all__ = [
@@ -38,4 +49,10 @@ __all__ = [
     "HealingRecord",
     "ContextComparisonResult",
     "FieldChange",
+    # Day 12 — Evidence retrieval and pattern detection
+    "HealingEvidenceRetriever",
+    "ReplacementStats",
+    "SelectorHistory",
+    "HealingPattern",
+    "HealingPatternDetector",
 ]

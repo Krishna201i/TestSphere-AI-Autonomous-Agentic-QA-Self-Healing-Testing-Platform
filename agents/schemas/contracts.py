@@ -14,12 +14,21 @@ from agents.analyzer.schemas import (
     HistoricalContext,
     TestFailure,
 )
+from agents.healer.healing_feedback import (
+    HealingResultFeedback,
+    HealingResultFeedbackProcessor,
+)
 from agents.healer.healing_schemas import (
     HealingContext,
     HealingRecommendation,
     ScoredCandidate,
 )
 from agents.healer.schemas import HealingCandidate, HealingResult
+from agents.memory.healing_evidence import (
+    HealingEvidenceRetriever,
+    ReplacementStats,
+    SelectorHistory,
+)
 from agents.memory.memory_schemas import (
     ContextComparisonResult,
     ElementRecord,
@@ -27,6 +36,10 @@ from agents.memory.memory_schemas import (
     FieldChange,
     HealingRecord,
     TestExecutionRecord,
+)
+from agents.memory.pattern_detector import (
+    HealingPattern,
+    HealingPatternDetector,
 )
 from agents.planner.schemas import (
     ApplicationContext,
@@ -46,11 +59,13 @@ from agents.schemas.enums import (
     ExecutionStatus,
     FailureType,
     HealingAction,
+    HealingPatternType,
     HealingStatus,
     RecommendedAction,
     TestAction,
     TestCategory,
     TestPriority,
+    ValidationStatus,
 )
 
 __all__ = [
@@ -76,6 +91,9 @@ __all__ = [
     "ScoredCandidate",
     "HealingRecommendation",
     "HealingContext",
+    # Healer contracts (Day 12)
+    "HealingResultFeedback",
+    "HealingResultFeedbackProcessor",
     # Memory contracts (Day 8)
     "TestExecutionRecord",
     "FailureInfo",
@@ -83,10 +101,17 @@ __all__ = [
     "HealingRecord",
     "ContextComparisonResult",
     "FieldChange",
+    # Memory contracts (Day 12)
+    "HealingEvidenceRetriever",
+    "ReplacementStats",
+    "SelectorHistory",
+    "HealingPattern",
+    "HealingPatternDetector",
     # Enums
     "FailureType",
     "HealingStatus",
     "HealingAction",
+    "HealingPatternType",
     "CandidateSource",
     "TestCategory",
     "TestPriority",
@@ -96,4 +121,5 @@ __all__ = [
     "ChangeType",
     "ConfidenceLevel",
     "RecommendedAction",
+    "ValidationStatus",
 ]

@@ -15,6 +15,8 @@ Components
 - ConfidenceThresholds      — Configurable thresholds (Day 10)
 - LLMEvaluationResult       — LLM evaluation result (Day 11)
 - LLMHealingEvaluator       — LLM-assisted evaluator (Day 11)
+- HealingResultFeedback     — Member 2 feedback schema (Day 12)
+- HealingResultFeedbackProcessor — Feedback processor (Day 12)
 """
 
 from agents.healer.candidate_generator import CandidateGenerator
@@ -23,6 +25,10 @@ from agents.healer.healer import SelfHealingAgent
 from agents.healer.healing_decision import (
     ConfidenceThresholds,
     HealingDecisionEngine,
+)
+from agents.healer.healing_feedback import (
+    HealingResultFeedback,
+    HealingResultFeedbackProcessor,
 )
 from agents.healer.healing_result_mapper import (
     healing_result_to_memory_update,
@@ -59,4 +65,7 @@ __all__ = [
     "LLMEvaluationResult",
     "LLMHealingEvaluator",
     "prepare_healing_result",
+    # Day 12 — Healing feedback loop
+    "HealingResultFeedback",
+    "HealingResultFeedbackProcessor",
 ]

@@ -291,3 +291,55 @@ class CandidateSource(str, Enum):
     HISTORICAL_MEMORY = "HISTORICAL_MEMORY"
     CURRENT_DOM = "CURRENT_DOM"
     LLM_SUGGESTION = "LLM_SUGGESTION"
+
+
+class ValidationStatus(str, Enum):
+    """Status of Member 2's browser validation of a healing attempt.
+
+    Distinct from ``HealingStatus`` which tracks the healing lifecycle.
+    This enum represents the actual outcome of running the healed
+    selector in the browser.
+
+    Definitions
+    -----------
+    SUCCESS:
+        The replacement selector worked — the element was found
+        and the action completed successfully.
+    FAILURE:
+        The replacement selector did not work — the element was
+        not found or the action failed.
+    ERROR:
+        An unexpected error occurred during validation (e.g.
+        browser crash, network issue).
+    SKIPPED:
+        Validation was skipped (e.g. healing was not attempted).
+    """
+
+    SUCCESS = "SUCCESS"
+    FAILURE = "FAILURE"
+    ERROR = "ERROR"
+    SKIPPED = "SKIPPED"
+
+
+class HealingPatternType(str, Enum):
+    """Types of healing patterns detected from historical data.
+
+    Used by the ``HealingPatternDetector`` to classify recurring
+    patterns in healing history.
+
+    Definitions
+    -----------
+    SELECTOR_CHAIN:
+        A selector has been replaced multiple times in sequence
+        (e.g. A → B → C), indicating repeated UI changes.
+    RELIABLE_REPLACEMENT:
+        The same replacement selector has succeeded multiple
+        times for the same failure type.
+    UNRELIABLE_REPLACEMENT:
+        A replacement selector repeatedly fails after healing,
+        indicating it is not a stable fix.
+    """
+
+    SELECTOR_CHAIN = "SELECTOR_CHAIN"
+    RELIABLE_REPLACEMENT = "RELIABLE_REPLACEMENT"
+    UNRELIABLE_REPLACEMENT = "UNRELIABLE_REPLACEMENT"

@@ -150,6 +150,21 @@ class InMemoryStore(MemoryStore):
         sorted_records = sorted(records, key=lambda r: r.timestamp, reverse=True)
         return sorted_records[:limit]
 
+    def get_healing_history_for_replacement(
+        self,
+        old_selector: str,
+        new_selector: str,
+        *,
+        limit: int = 20,
+    ) -> list[HealingRecord]:
+        """Retrieve healing history for a specific replacement pair."""
+        records = self._healing.get(old_selector, [])
+        filtered = [r for r in records if r.new_selector == new_selector]
+        sorted_records = sorted(
+            filtered, key=lambda r: r.timestamp, reverse=True,
+        )
+        return sorted_records[:limit]
+
     # ── Aggregated Context ────────────────────────────────────
 
     def get_test_context(self, test_id: str) -> dict[str, Any]:

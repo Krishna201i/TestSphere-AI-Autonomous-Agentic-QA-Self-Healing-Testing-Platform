@@ -28,6 +28,8 @@ Orchestrates the full healing recommendation pipeline:
 Day 10: Foundation implementation.
 Day 11: Ambiguity detection, LLM evaluator integration,
         HealingDecision enum, grounding validation.
+Day 12: Historical healing feedback integration,
+        evidence enrichment in candidate pipeline.
 
 IMPORTANT: This engine does NOT execute browser actions.
 It produces a structured ``HealingRecommendation`` that
@@ -50,6 +52,7 @@ from agents.healer.healing_schemas import (
     ScoredCandidate,
 )
 from agents.memory.context_comparator import ContextComparator
+from agents.memory.healing_evidence import HealingEvidenceRetriever
 from agents.memory.memory_interface import MemoryStore
 from agents.schemas.enums import (
     ConfidenceLevel,
@@ -158,6 +161,7 @@ class HealingDecisionEngine:
         )
         self._scorer = CandidateScorer(weights=weights)
         self._thresholds = thresholds or ConfidenceThresholds()
+        self._evidence_retriever = HealingEvidenceRetriever(memory_store)
 
         # Initialize LLM evaluator if client is available
         self._llm_evaluator = None
@@ -208,18 +212,23 @@ class HealingDecisionEngine:
         # 2. Generate candidates
         candidates = self._generator.generate_candidates(context)
 
-        # 3. Score and rank
+        # 3. Enrich candidates with historical healing evidence
+        candidates = self._enrich_with_healing_evidence(
+            candidates, analysis.failed_target,
+        )
+
+        # 4. Score and rank
         ranked = self._scorer.rank_candidates(candidates)
 
-        # 4. Detect ambiguity
+        # 5. Detect ambiguity
         is_ambiguous = self._detect_ambiguity(ranked)
 
-        # 5. Apply confidence thresholds and determine action
+        # 6. Apply confidence thresholds and determine action
         selected, confidence_level, action = self._evaluate_candidates(
             ranked, analysis, is_ambiguous,
         )
 
-        # 6. Optional LLM disambiguation for ambiguous cases
+        # 7. Optional LLM disambiguation for ambiguous cases
         if (
             is_ambiguous
             and self._llm_evaluator is not None
@@ -239,12 +248,12 @@ class HealingDecisionEngine:
                 )
                 is_ambiguous = False  # LLM resolved ambiguity
 
-        # 7. Determine final healing decision
+        # 8. Determine final healing decision
         decision = self._determine_decision(
             selected, confidence_level, action, is_ambiguous,
         )
 
-        # 8. Build evidence summary
+        # 9. Build evidence summary
         evidence = self._build_evidence_summary(
             analysis, ranked, selected, action, is_ambiguous,
         )
@@ -276,6 +285,60 @@ class HealingDecisionEngine:
         )
 
         return recommendation
+
+    # ── Historical Evidence Enrichment ────────────────────────
+
+    def _enrich_with_healing_evidence(
+        self,
+        candidates: list[ScoredCandidate],
+        original_selector: str,
+    ) -> list[ScoredCandidate]:
+        """Enrich candidates with historical healing evidence.
+
+        For each candidate, computes a healing_history_score based
+        on the success rate of this specific replacement pair.
+
+        Candidates with no history receive a score of 0.0 (neutral).
+
+        Parameters
+        ----------
+        candidates:
+            Unscored candidates to enrich.
+        original_selector:
+            The original selector that failed.
+
+        Returns
+        -------
+        list[ScoredCandidate]
+            Candidates with healing_history_score populated.
+        """
+        enriched: list[ScoredCandidate] = []
+
+        for candidate in candidates:
+            # Skip if already has a non-zero score (e.g., from generator)
+            if candidate.healing_history_score > 0.0:
+                enriched.append(candidate)
+                continue
+
+            # Compute score from evidence retriever
+            score = self._evidence_retriever.compute_history_score(
+                original_selector, candidate.selector,
+            )
+
+            if score > 0.0:
+                updated = candidate.model_copy(
+                    update={
+                        "healing_history_score": score,
+                        "evidence": candidate.evidence + [
+                            f"Historical success rate: {score:.0%}",
+                        ],
+                    },
+                )
+                enriched.append(updated)
+            else:
+                enriched.append(candidate)
+
+        return enriched
 
     # ── Safety Rules ──────────────────────────────────────────
 

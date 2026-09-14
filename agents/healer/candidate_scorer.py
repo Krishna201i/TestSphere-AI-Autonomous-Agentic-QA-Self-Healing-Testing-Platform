@@ -9,6 +9,7 @@ confidence value for each candidate.
 
 Day 10: Foundation implementation.
 Day 11: Added stable_attribute_weight and adjusted defaults.
+Day 12: Added healing_history_weight for feedback loop scoring.
 
 Scoring Formula
 ---------------
@@ -30,6 +31,7 @@ historical_weight         0.15    Validated precedent carries weight
 type_weight               0.10    Element type is moderately stable
 stable_attribute_weight   0.10    data-testid/aria-label designed stable
 name_weight               0.05    Name attribute is a weak signal
+healing_history_weight    0.00    Historical success rate (opt-in)
 ========================  ======  ============
 
 These weights are configurable via the ``ScoringWeights`` model.
@@ -87,6 +89,14 @@ class ScoringWeights(BaseModel):
         default=0.0, ge=0.0,
         description="Weight for stable attribute match (data-testid, aria-label, etc.)",
     )
+    healing_history_weight: float = Field(
+        default=0.0, ge=0.0,
+        description=(
+            "Weight for historical healing success rate (opt-in). "
+            "Defaults to 0.0 to preserve backward compatibility. "
+            "Set to e.g. 0.20 to activate feedback loop scoring."
+        ),
+    )
 
     @model_validator(mode="after")
     def _weights_must_sum_positive(self) -> "ScoringWeights":
@@ -99,6 +109,7 @@ class ScoringWeights(BaseModel):
             + self.historical_weight
             + self.name_weight
             + self.stable_attribute_weight
+            + self.healing_history_weight
         )
         if total <= 0.0:
             raise ValueError("At least one scoring weight must be positive")
@@ -115,6 +126,7 @@ class ScoringWeights(BaseModel):
             + self.historical_weight
             + self.name_weight
             + self.stable_attribute_weight
+            + self.healing_history_weight
         )
 
 
@@ -165,6 +177,7 @@ class CandidateScorer:
             + candidate.historical_similarity * w.historical_weight
             + candidate.name_similarity * w.name_weight
             + candidate.stable_attribute_similarity * w.stable_attribute_weight
+            + candidate.healing_history_score * w.healing_history_weight
         )
 
         # Normalize to 0.0–1.0

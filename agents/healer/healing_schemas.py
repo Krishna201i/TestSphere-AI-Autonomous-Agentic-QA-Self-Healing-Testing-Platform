@@ -101,6 +101,14 @@ class ScoredCandidate(BaseModel):
         default=0.0, ge=0.0, le=1.0,
         description="Stable attribute match score (data-testid, aria-label, etc.)",
     )
+    healing_history_score: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description=(
+            "Historical healing success rate for this candidate. "
+            "0.0 for candidates with no history (neutral). "
+            "Set by HealingEvidenceRetriever during the decision pipeline."
+        ),
+    )
 
 
 # ── Healing Recommendation ───────────────────────────────────

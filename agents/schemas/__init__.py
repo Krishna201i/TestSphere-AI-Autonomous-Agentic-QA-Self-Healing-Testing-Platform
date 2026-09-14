@@ -9,11 +9,13 @@ from agents.schemas.enums import (
     FailureType,
     HealingAction,
     HealingDecision,
+    HealingPatternType,
     HealingStatus,
     RecommendedAction,
     TestAction,
     TestCategory,
     TestPriority,
+    ValidationStatus,
 )
 
 __all__ = [
@@ -21,6 +23,7 @@ __all__ = [
     "HealingStatus",
     "HealingAction",
     "HealingDecision",
+    "HealingPatternType",
     "CandidateSource",
     "TestCategory",
     "TestPriority",
@@ -30,5 +33,5 @@ __all__ = [
     "ChangeType",
     "ConfidenceLevel",
     "RecommendedAction",
+    "ValidationStatus",
 ]
-
