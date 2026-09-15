@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/Tests-738%20Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-799%20Passed-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **TestSphere-AI** is an intelligent, multi-agent autonomous testing platform designed to plan, generate, execute, analyze, and self-heal end-to-end web application tests.
@@ -655,6 +655,112 @@ HealingResultFeedbackProcessor (Day 12)
 
 ---
 
+## 🤖 Autonomous AI Agent Orchestrator (Day 13)
+
+Building on Days 1–12, **Day 13** connects the intelligence components into an end-to-end autonomous orchestration workflow. The `AgentOrchestrator` implements an explicit finite state machine that coordinates:
+**Test Planning** $\to$ **Test Execution Result** $\to$ **Failure Analysis** $\to$ **Historical Memory** $\to$ **Self-Healing Decision** $\to$ **Validation Feedback Ingestion** $\to$ **Memory Learning**.
+
+```
+                           ┌───────────────────────────┐
+                           │      WorkflowStep.IDLE    │
+                           └─────────────┬─────────────┘
+                                         │ start_planning()
+                                         ▼
+                           ┌───────────────────────────┐
+                           │   WorkflowStep.PLANNING   │
+                           └─────────────┬─────────────┘
+                                         │ TestPlan generated
+                                         ▼
+                           ┌───────────────────────────┐
+                           │    WorkflowStep.PLANNED   │
+                           └─────────────┬─────────────┘
+                                         │ (handoff to Member 2)
+                                         ▼
+                           ┌───────────────────────────┐
+                           │   WorkflowStep.EXECUTING  │
+                           └─────────────┬─────────────┘
+                                         │
+                    ┌────────────────────┴────────────────────┐
+     submit_execution_result(PASSED)            submit_execution_result(FAILED)
+                    │                                         │
+                    ▼                                         ▼
+      ┌───────────────────────────┐             ┌───────────────────────────┐
+      │   WorkflowStep.COMPLETED  │             │   WorkflowStep.ANALYZING  │
+      └───────────────────────────┘             └─────────────┬─────────────┘
+                                                              │ Root cause diagnosed
+                                                              ▼
+                                                ┌───────────────────────────┐
+                                                │   WorkflowStep.ANALYZED   │
+                                                └─────────────┬─────────────┘
+                                                              │
+                                       ┌──────────────────────┴──────────────────────┐
+                             Non-healable failure                           Healable failure
+                                       │                                             │
+                                       ▼                                             ▼
+                         ┌───────────────────────────┐                 ┌───────────────────────────┐
+                         │    WorkflowStep.FAILED    │                 │    WorkflowStep.HEALING   │
+                         └───────────────────────────┘                 └─────────────┬─────────────┘
+                                                                                     │ Recommendation made
+                                                                                     ▼
+                                                                       ┌───────────────────────────┐
+                                                                       │     WorkflowStep.HEALED   │
+                                                                       │  (or NO_HEALING_AVAILABLE)│
+                                                                       └─────────────┬─────────────┘
+                                                                                     │ (handoff to Member 2)
+                                                                                     ▼
+                                                                       ┌───────────────────────────┐
+                                                                       │   WorkflowStep.VALIDATING │
+                                                                       └─────────────┬─────────────┘
+                                                                                     │ submit_healing_result()
+                                                                                     ▼
+                                                                       ┌───────────────────────────┐
+                                                                       │ WorkflowStep.FEEDBACK_REC │
+                                                                       └─────────────┬─────────────┘
+                                                                                     │
+                                                      ┌──────────────────────────────┴──────────────────────────────┐
+                                            Validation SUCCESS                                             Validation FAILED
+                                                      │                                                             │
+                                                      ▼                                                             ▼
+                                        ┌───────────────────────────┐                                 ┌───────────────────────────┐
+                                        │   WorkflowStep.COMPLETED  │                                 │ Retries < max_healing_att?│
+                                        └───────────────────────────┘                                 └──────┬─────────────┬──────┘
+                                                                                                       YES   │             │ NO
+                                                                                                             ▼             ▼
+                                                                                                      [Re-enter HEALING] [FAILED]
+```
+
+### Key Capabilities (Day 13):
+
+- **Explicit Finite State Machine (`WorkflowStep` & `VALID_TRANSITIONS`)**:
+  - 13 strongly-typed lifecycle steps: `IDLE`, `PLANNING`, `PLANNED`, `EXECUTING`, `ANALYZING`, `ANALYZED`, `HEALING`, `HEALED`, `VALIDATING`, `FEEDBACK_RECEIVED`, `COMPLETED`, `FAILED`, `NO_HEALING_AVAILABLE`.
+  - Compile-time and runtime validation of transitions through `VALID_TRANSITIONS`. Invalid transitions are rejected with descriptive `ValueError`s.
+- **Comprehensive Workflow Schemas (`agents.orchestration.workflow_schemas`)**:
+  - `AgentState`: 26 typed fields maintaining end-to-end execution context (`session_id`, `step`, `plan`, `execution_result`, `analysis_result`, `healing_recommendation`, `validation_feedback`, `healing_attempts`, `events`, `metadata`, etc.).
+  - `ExecutionResult`: Member 2 execution handoff contract with `ExecutionResultStatus` (`PASSED`, `FAILED`, `ERROR`, `TIMEOUT`, `SKIPPED`), step results, duration, error messages, and DOM context snapshot.
+  - `WorkflowEvent`: Structured event logging with `WorkflowEventType`, timestamp, from/to steps, details, and message.
+  - `OrchestratorConfig`: Configurable settings for `max_healing_attempts` (default: 3), `auto_learn_on_feedback`, `history_weight`, `strict_mode`, and `store_execution_records`.
+- **Autonomous Lifecycle Coordination (`AgentOrchestrator`)**:
+  - `start_planning(app_context)`: Triggers `TestPlannerAgent`, stores generated `TestPlan` in `AgentState`, and transitions to `PLANNED`.
+  - `submit_execution_result(result, app_context)`: Ingests Member 2 execution outcomes. If `PASSED`, transitions to `COMPLETED`. If `FAILED`, invokes `FailureAnalysisAgent` (root cause, confidence, evidence), transitions through `ANALYZING` $\to$ `ANALYZED`, and automatically triggers `HealingDecisionEngine` if eligible.
+  - `submit_healing_result(feedback, app_context)`: Ingests Member 2 healing validation feedback. Automatically invokes `HealingResultFeedbackProcessor` to update `MemoryStore` stability and replacement stats. On `SUCCESS`, transitions to `COMPLETED`. On failure with remaining budget, safely loops back to `HEALING` or transitions to `FAILED`.
+  - `get_state()`: Provides inspection of current state, transition history, and audit log.
+- **Safety Constraints & Resilience**:
+  - Configurable `max_healing_attempts` prevents infinite healing loops.
+  - Strict input validation: non-healable failures (`BUG`, `ENVIRONMENT_ISSUE`) terminate cleanly in `FAILED`.
+  - Missing DOM or recommendations safely transition to `NO_HEALING_AVAILABLE`.
+  - Safe error recovery without crashing the host process.
+- **61 Comprehensive Day 13 Tests (`tests/test_day13_agent_orchestrator.py`)**:
+  - State machine transitions & transition validation.
+  - Test planning flow & error handling.
+  - Execution result handling (pass, fail, healable vs non-healable).
+  - End-to-end healing lifecycle (analyze $\to$ heal $\to$ validate $\to$ learn).
+  - Retry handling and max attempts limits.
+  - Memory recording & feedback processor integration.
+  - Edge cases, safety guards, and contract integrity.
+  - Test suite expanded from 738 to **799 passing tests** (100% offline, 0 failures, 0 regressions).
+
+---
+
 ## 📂 Project Structure (`agents/`)
 
 ```
@@ -690,8 +796,10 @@ HealingResultFeedbackProcessor (Day 12)
 │   │   ├── memory_interface.py# Storage-independent MemoryStore ABC
 │   │   ├── memory_schemas.py  # TestExecutionRecord, FailureInfo, ElementRecord, HealingRecord
 │   │   └── pattern_detector.py# HealingPatternDetector for recurring selector patterns (Day 12)
-│   ├── orchestration/         # Pipeline Controller
-│   │   └── agent_controller.py# Abstract AgentController
+│   ├── orchestration/         # Autonomous Agent Orchestration (Day 13)
+│   │   ├── agent_controller.py# Abstract AgentController
+│   │   ├── agent_orchestrator.py# AgentOrchestrator state machine coordinating Plan → Execute → Analyze → Heal → Validate
+│   │   └── workflow_schemas.py# WorkflowStep, AgentState, ExecutionResult, WorkflowEvent, OrchestratorConfig
 │   ├── planner/               # Test Planner Agent & Generation Pipeline (Day 4 + Day 5 + Day 7)
 │   │   ├── langchain_adapter.py # LangChain adapter bridging templates to LLMClientSession
 │   │   ├── langchain_prompts.py # LangChain ChatPromptTemplate management for test planning
@@ -715,6 +823,7 @@ HealingResultFeedbackProcessor (Day 12)
 │   ├── test_day10_healing_decision.py # Day 10 self-healing decision & candidate generator tests (50 tests)
 │   ├── test_day11_healing_intelligence.py # Day 11 AI-assisted healing decision & candidate ranking tests (45 tests)
 │   ├── test_day12_healing_feedback.py # Day 12 healing result feedback & memory learning tests (50 tests)
+│   ├── test_day13_agent_orchestrator.py # Day 13 AI agent orchestrator & workflow coordination tests (61 tests)
 │   ├── test_fixtures.py           # Reusable test factories & sample data (Day 5)
 │   ├── test_imports.py            # Module import validation tests
 │   ├── test_llm_client.py         # Day 2 LLM foundation & mock provider tests
@@ -785,8 +894,10 @@ python3 -m pytest tests/ -v
 - [x] **Day 8**: Historical Memory and Context Management Layer: storage-independent `MemoryStore` interface, `InMemoryStore` implementation with filtering/pagination/element snapshots/healing lookups, Pydantic memory schemas (`TestExecutionRecord`, `FailureInfo`, `ElementRecord`, `HealingRecord`, `FieldChange`, `ContextComparisonResult`), `ContextComparator` element diff engine, and 57 tests (532 tests total).
 - [x] **Day 9**: Failure Analyzer Agent: multi-signal root cause diagnosis, Pydantic failure schemas (`FailureContext`, `FailureAnalysisResult`, `FailureEvidence`, `ElementContextSnapshot`), `FailureCategory` & `ConfidenceLevel` enums, self-healing eligibility evaluation, `MemoryStore` historical context correlation, backwards-compatible schemas/agent signatures, and 61 tests (593 tests total).
 - [x] **Day 10**: Self-Healing Decision Layer & Candidate Generation foundation: candidate generation (DOM + history), weighted multi-signal scoring, confidence thresholds, safety rules, action mapping, optional LLM disambiguation, Member 1 ↔ Member 2 contract bridge, and 50 tests (643 tests total).
+- [x] **Day 11**: AI-Assisted Healing Decision & Candidate Ranking: `LLMHealingEvaluator` with strict DOM grounding, ambiguity detection, stable attribute evidence, confidence-calibrated decision engine, and 45 tests (688 tests total).
 - [x] **Day 12**: Healing Result Feedback & Memory Learning: validation feedback ingestion (`HealingResultFeedback`, `HealingResultFeedbackProcessor`), historical evidence retrieval (`HealingEvidenceRetriever`), pattern detection (`HealingPatternDetector`), feedback loop enrichment in `HealingDecisionEngine`, and 50 tests (738 tests total).
-- [ ] **Day 13–15**: Persistent Healing Memory & Vector Storage integration.
+- [x] **Day 13**: Autonomous AI Agent Orchestrator: end-to-end workflow state machine (`AgentOrchestrator`, `WorkflowStep`, `AgentState`), coordination across Planner, Failure Analyzer, Healer, Memory, and Validation, safety constraints (max attempts, terminal states), structured event audit trail, and 61 tests (799 tests total).
+- [ ] **Day 14–15**: Persistent Healing Memory & Vector Storage integration.
 - [ ] **Day 16–18**: Full pipeline orchestration & integration with Member 2 & 3.
 
 

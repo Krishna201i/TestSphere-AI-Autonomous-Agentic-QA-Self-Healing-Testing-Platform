@@ -41,6 +41,15 @@ from agents.memory.pattern_detector import (
     HealingPattern,
     HealingPatternDetector,
 )
+from agents.orchestration.workflow_schemas import (
+    AgentState,
+    ExecutionResult,
+    ExecutionResultStatus,
+    OrchestratorConfig,
+    WorkflowEvent,
+    WorkflowEventType,
+    WorkflowStep,
+)
 from agents.planner.schemas import (
     ApplicationContext,
     Assertion,
@@ -122,4 +131,12 @@ __all__ = [
     "ConfidenceLevel",
     "RecommendedAction",
     "ValidationStatus",
+    # Day 13 — Orchestration contracts
+    "AgentState",
+    "WorkflowStep",
+    "WorkflowEventType",
+    "ExecutionResult",
+    "ExecutionResultStatus",
+    "WorkflowEvent",
+    "OrchestratorConfig",
 ]
