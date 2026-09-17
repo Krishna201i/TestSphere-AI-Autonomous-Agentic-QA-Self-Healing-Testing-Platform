@@ -41,6 +41,12 @@ from agents.memory.pattern_detector import (
     HealingPattern,
     HealingPatternDetector,
 )
+from agents.orchestration.recovery_policy import (
+    RecoveryAction,
+    RecoveryDecision,
+    RecoveryPolicy,
+    RecoveryPolicyConfig,
+)
 from agents.orchestration.workflow_schemas import (
     AgentState,
     ExecutionResult,
@@ -139,4 +145,9 @@ __all__ = [
     "ExecutionResultStatus",
     "WorkflowEvent",
     "OrchestratorConfig",
+    # Day 14 — Recovery Policy contracts
+    "RecoveryPolicy",
+    "RecoveryPolicyConfig",
+    "RecoveryDecision",
+    "RecoveryAction",
 ]

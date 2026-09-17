@@ -20,6 +20,8 @@ Architecture::
          ↓
     Candidate Scorer/Ranker → Ranked Candidates
          ↓
+    Recovery Policy → RecoveryDecision  (Day 14)
+         ↓
     Healing Decision Engine → HealingRecommendation
          ↓
     Member 2 Validation (browser)
@@ -27,6 +29,7 @@ Architecture::
     Healing Result → Memory Feedback
 
 Day 13: Foundation implementation.
+Day 14: RecoveryPolicy integration, retry flow, explainable decisions.
 
 IMPORTANT:
 - The orchestrator coordinates, it does NOT execute browser actions.
@@ -51,6 +54,12 @@ from agents.healer.healing_feedback import (
 from agents.healer.healing_schemas import HealingContext, HealingRecommendation
 from agents.memory.memory_interface import MemoryStore
 from agents.memory.memory_schemas import ElementRecord
+from agents.orchestration.recovery_policy import (
+    RecoveryAction,
+    RecoveryDecision,
+    RecoveryPolicy,
+    RecoveryPolicyConfig,
+)
 from agents.orchestration.workflow_schemas import (
     VALID_TRANSITIONS,
     AgentState,
@@ -103,6 +112,9 @@ class AgentOrchestrator:
         Optional test planner agent (Day 5/7).
     config:
         Orchestrator configuration.
+    recovery_policy:
+        Optional autonomous recovery policy (Day 14).
+        Created with conservative defaults if not provided.
     """
 
     def __init__(
@@ -113,6 +125,7 @@ class AgentOrchestrator:
         feedback_processor: HealingResultFeedbackProcessor,
         test_planner: Optional[TestPlannerAgent] = None,
         config: Optional[OrchestratorConfig] = None,
+        recovery_policy: Optional[RecoveryPolicy] = None,
     ) -> None:
         self._memory = memory_store
         self._analyzer = failure_analyzer
@@ -120,15 +133,26 @@ class AgentOrchestrator:
         self._feedback_processor = feedback_processor
         self._planner = test_planner
         self._config = config or OrchestratorConfig()
+        if recovery_policy is not None:
+            self._recovery_policy = recovery_policy
+        else:
+            self._recovery_policy = RecoveryPolicy(
+                config=RecoveryPolicyConfig(
+                    max_healing_attempts=self._config.max_healing_attempts,
+                    max_retries=self._config.max_retries,
+                    min_healing_confidence=self._config.minimum_confidence_for_healing,
+                ),
+            )
 
         # Active workflows indexed by workflow_id
         self._workflows: dict[str, AgentState] = {}
 
         logger.info(
             "AgentOrchestrator initialized — "
-            "planner=%s, max_attempts=%d",
+            "planner=%s, max_attempts=%d, recovery_policy=%s",
             test_planner is not None,
             self._config.max_healing_attempts,
+            recovery_policy is not None,
         )
 
     # ══════════════════════════════════════════════════════════
@@ -486,10 +510,169 @@ class AgentOrchestrator:
             },
         )
 
-        # ── Step 2: Check if healing is appropriate ───────────
-        if not self._should_attempt_healing(analysis):
+        # ── Step 2: Pre-candidate feasibility check (Day 14) ────
+        # Check if the failure type is healable, retryable, or if
+        # max healing attempts have been reached — BEFORE generating
+        # candidates.  This avoids wasting effort on non-healable failures.
+
+        # Rule 1: Max healing attempts → ABORT
+        if state.healing_attempt_count >= self._config.max_healing_attempts:
+            abort_decision = RecoveryDecision(
+                workflow_id=state.workflow_id,
+                test_case_id=(
+                    state.current_test_case.test_id
+                    if state.current_test_case else "unknown"
+                ),
+                failure_type=analysis.failure_type,
+                decision=RecoveryAction.ABORT,
+                confidence=1.0,
+                reason=(
+                    f"Maximum healing attempts "
+                    f"({self._config.max_healing_attempts}) reached."
+                ),
+                evidence=[f"Healing attempts: {state.healing_attempt_count}"],
+                attempt_number=state.healing_attempt_count,
+                requires_validation=False,
+                next_state="ABORTED",
+            )
             state = state.model_copy(
-                update={"status": "completed", "updated_at": _now()},
+                update={
+                    "recovery_decision": abort_decision,
+                    "status": "aborted",
+                    "updated_at": _now(),
+                },
+            )
+            state = self._add_event(
+                state,
+                WorkflowEventType.RECOVERY_DECISION_CREATED,
+                message=f"Recovery decision: ABORT — {abort_decision.reason}",
+                metadata={
+                    "decision": "ABORT",
+                    "evidence": abort_decision.evidence,
+                },
+            )
+            state = self._transition(state, WorkflowStep.ABORTED)
+            return state
+
+        # Rule 2: Retryable failure → RETRY (if under retry limit)
+        ft_policy = self._recovery_policy.get_failure_policy(
+            analysis.failure_type
+        )
+        if (
+            ft_policy.retryable
+            and self._recovery_policy.config.allow_retry
+            and state.retry_count < min(
+                ft_policy.max_retries,
+                self._recovery_policy.config.max_retries,
+            )
+        ):
+            retry_decision = RecoveryDecision(
+                workflow_id=state.workflow_id,
+                test_case_id=(
+                    state.current_test_case.test_id
+                    if state.current_test_case else "unknown"
+                ),
+                failure_type=analysis.failure_type,
+                decision=RecoveryAction.RETRY,
+                confidence=0.9,
+                reason=(
+                    f"Transient failure ({analysis.failure_type.value}). "
+                    f"Retrying ({state.retry_count + 1})."
+                ),
+                evidence=[
+                    f"Failure type: {analysis.failure_type.value}",
+                    f"Retry count: {state.retry_count}",
+                ],
+                retry_count=state.retry_count,
+                requires_validation=False,
+                next_state="RETRYING",
+            )
+            state = state.model_copy(
+                update={
+                    "recovery_decision": retry_decision,
+                    "retry_count": state.retry_count + 1,
+                    "updated_at": _now(),
+                },
+            )
+            state = self._add_event(
+                state,
+                WorkflowEventType.RECOVERY_DECISION_CREATED,
+                message=(
+                    f"Recovery decision: RETRY — {retry_decision.reason}"
+                ),
+                metadata={
+                    "decision": "RETRY",
+                    "retry_count": state.retry_count,
+                    "evidence": retry_decision.evidence,
+                },
+            )
+            state = self._transition(state, WorkflowStep.RETRYING)
+            state = self._add_event(
+                state,
+                WorkflowEventType.RETRY_INITIATED,
+                message=(
+                    f"Retry #{state.retry_count} initiated for "
+                    f"transient failure ({analysis.failure_type.value})"
+                ),
+            )
+            state = self._transition(state, WorkflowStep.EXECUTION_PENDING)
+            return state
+
+        # Rule 3: Non-healable failure type → DO_NOT_HEAL or escalate
+        if not ft_policy.healable:
+            # For retryable types whose retries are exhausted
+            if ft_policy.retryable:
+                noheal_decision = RecoveryDecision(
+                    workflow_id=state.workflow_id,
+                    failure_type=analysis.failure_type,
+                    decision=RecoveryAction.REQUIRE_FURTHER_ANALYSIS,
+                    confidence=0.7,
+                    reason=(
+                        f"Retries exhausted for {analysis.failure_type.value}. "
+                        f"Require further analysis."
+                    ),
+                    evidence=[
+                        f"Failure type: {analysis.failure_type.value}",
+                        f"Retry count: {state.retry_count}",
+                    ],
+                    requires_validation=False,
+                    next_state="COMPLETED",
+                )
+            else:
+                noheal_decision = RecoveryDecision(
+                    workflow_id=state.workflow_id,
+                    failure_type=analysis.failure_type,
+                    decision=RecoveryAction.DO_NOT_HEAL,
+                    confidence=1.0,
+                    reason=(
+                        f"Failure type {analysis.failure_type.value} does "
+                        f"not support automatic healing."
+                    ),
+                    evidence=[
+                        f"Failure type: {analysis.failure_type.value}",
+                    ],
+                    requires_validation=False,
+                    next_state="COMPLETED",
+                )
+
+            state = state.model_copy(
+                update={
+                    "recovery_decision": noheal_decision,
+                    "status": "completed",
+                    "updated_at": _now(),
+                },
+            )
+            state = self._add_event(
+                state,
+                WorkflowEventType.RECOVERY_DECISION_CREATED,
+                message=(
+                    f"Recovery decision: {noheal_decision.decision.value} — "
+                    f"{noheal_decision.reason}"
+                ),
+                metadata={
+                    "decision": noheal_decision.decision.value,
+                    "evidence": noheal_decision.evidence,
+                },
             )
             state = self._transition(state, WorkflowStep.COMPLETED)
             state = self._add_event(
@@ -498,7 +681,7 @@ class AgentOrchestrator:
                 message=(
                     f"Healing not attempted — "
                     f"type={analysis.failure_type.value}, "
-                    f"confidence={analysis.confidence.value}"
+                    f"decision={noheal_decision.decision.value}"
                 ),
             )
             return state
@@ -546,17 +729,51 @@ class AgentOrchestrator:
             ),
         )
 
-        # ── Step 5: Healing decision ──────────────────────────
+        # ── Step 5: Recovery Policy Decision (Day 14) ─────────
         state = self._transition(state, WorkflowStep.DECIDING_HEALING)
+
+        recovery_decision = self._recovery_policy.evaluate(
+            failure_analysis=analysis,
+            ranked_candidates=list(recommendation.candidates),
+            healing_attempt_count=state.healing_attempt_count,
+            retry_count=state.retry_count,
+            attempted_selectors=state.attempted_selectors,
+            workflow_id=state.workflow_id,
+            test_case_id=(
+                state.current_test_case.test_id
+                if state.current_test_case else "unknown"
+            ),
+        )
 
         state = state.model_copy(
             update={
+                "recovery_decision": recovery_decision,
                 "healing_decision": recommendation.decision,
                 "healing_recommendation": recommendation,
                 "updated_at": _now(),
             },
         )
 
+        state = self._add_event(
+            state,
+            WorkflowEventType.RECOVERY_DECISION_CREATED,
+            message=(
+                f"Recovery decision: {recovery_decision.decision.value} — "
+                f"{recovery_decision.reason}"
+            ),
+            metadata={
+                "decision": recovery_decision.decision.value,
+                "confidence": recovery_decision.confidence,
+                "selected_candidate": (
+                    recovery_decision.selected_candidate.selector
+                    if recovery_decision.selected_candidate
+                    else None
+                ),
+                "evidence": recovery_decision.evidence,
+            },
+        )
+
+        # Backward compatibility: emit HEALING_DECISION_CREATED
         state = self._add_event(
             state,
             WorkflowEventType.HEALING_DECISION_CREATED,
@@ -571,12 +788,13 @@ class AgentOrchestrator:
             },
         )
 
-        # ── Step 6: Route based on decision ───────────────────
-        if recommendation.recommended_action == HealingAction.TRY_REPLACEMENT_SELECTOR:
-            if recommendation.selected_candidate is not None:
+        # ── Step 6: Route based on RecoveryDecision ───────────
+        if recovery_decision.decision == RecoveryAction.TRY_HEALING:
+            candidate = recovery_decision.selected_candidate
+            if candidate is not None:
                 # Track the attempt
                 attempted = set(state.attempted_selectors)
-                attempted.add(recommendation.selected_candidate.selector)
+                attempted.add(candidate.selector)
                 state = state.model_copy(
                     update={
                         "attempted_selectors": attempted,
@@ -584,6 +802,15 @@ class AgentOrchestrator:
                         "updated_at": _now(),
                     },
                 )
+
+                # Update the recommendation's selected candidate
+                if state.healing_recommendation is not None:
+                    updated_rec = state.healing_recommendation.model_copy(
+                        update={"selected_candidate": candidate},
+                    )
+                    state = state.model_copy(
+                        update={"healing_recommendation": updated_rec},
+                    )
 
                 state = self._transition(
                     state, WorkflowStep.HEALING_PENDING_VALIDATION,
@@ -593,12 +820,12 @@ class AgentOrchestrator:
                     WorkflowEventType.HEALING_RECOMMENDATION_SENT,
                     message=(
                         f"Recommendation sent to Member 2: "
-                        f"'{recommendation.selected_candidate.selector}' "
+                        f"'{candidate.selector}' "
                         f"(attempt {state.healing_attempt_count})"
                     ),
                     metadata={
-                        "selector": recommendation.selected_candidate.selector,
-                        "confidence": recommendation.selected_candidate.confidence,
+                        "selector": candidate.selector,
+                        "confidence": candidate.confidence,
                         "attempt": state.healing_attempt_count,
                     },
                 )
@@ -610,7 +837,20 @@ class AgentOrchestrator:
                 )
                 state = self._transition(state, WorkflowStep.COMPLETED)
 
-        elif recommendation.decision == HealingDecision.DO_NOT_HEAL:
+        elif recovery_decision.decision == RecoveryAction.ABORT:
+            state = state.model_copy(
+                update={"status": "aborted", "updated_at": _now()},
+            )
+            state = self._transition(state, WorkflowStep.ABORTED)
+            state = self._add_event(
+                state,
+                WorkflowEventType.WORKFLOW_ABORTED,
+                message=(
+                    f"Workflow aborted — {recovery_decision.reason}"
+                ),
+            )
+
+        elif recovery_decision.decision == RecoveryAction.DO_NOT_HEAL:
             state = state.model_copy(
                 update={"status": "completed", "updated_at": _now()},
             )
@@ -622,48 +862,19 @@ class AgentOrchestrator:
             )
 
         else:
-            # REQUIRE_FURTHER_ANALYSIS / SEARCH_CURRENT_UI — no candidates to try
-            if (
-                recommendation.selected_candidate is not None
-                and recommendation.recommended_action == HealingAction.SEARCH_CURRENT_UI
-            ):
-                # Medium confidence — send as pending validation
-                attempted = set(state.attempted_selectors)
-                attempted.add(recommendation.selected_candidate.selector)
-                state = state.model_copy(
-                    update={
-                        "attempted_selectors": attempted,
-                        "healing_attempt_count": state.healing_attempt_count + 1,
-                        "updated_at": _now(),
-                    },
-                )
-                state = self._transition(
-                    state, WorkflowStep.HEALING_PENDING_VALIDATION,
-                )
-                state = self._add_event(
-                    state,
-                    WorkflowEventType.HEALING_RECOMMENDATION_SENT,
-                    message=(
-                        f"Recommendation sent to Member 2 "
-                        f"(search UI): "
-                        f"'{recommendation.selected_candidate.selector}'"
-                    ),
-                )
-            else:
-                # Truly no actionable candidate
-                state = self._transition(state, WorkflowStep.HEALING_FAILED)
-                state = state.model_copy(
-                    update={"status": "completed", "updated_at": _now()},
-                )
-                state = self._transition(state, WorkflowStep.COMPLETED)
-                state = self._add_event(
-                    state,
-                    WorkflowEventType.WORKFLOW_COMPLETED,
-                    message=(
-                        f"Workflow completed — "
-                        f"decision: {recommendation.decision.value}"
-                    ),
-                )
+            # REQUIRE_FURTHER_ANALYSIS / RETRY (post-candidates)
+            state = state.model_copy(
+                update={"status": "completed", "updated_at": _now()},
+            )
+            state = self._transition(state, WorkflowStep.COMPLETED)
+            state = self._add_event(
+                state,
+                WorkflowEventType.WORKFLOW_COMPLETED,
+                message=(
+                    f"Workflow completed — "
+                    f"decision: {recovery_decision.decision.value}"
+                ),
+            )
 
         return state
 
@@ -674,12 +885,97 @@ class AgentOrchestrator:
     def _try_next_candidate(self, state: AgentState) -> AgentState:
         """Try the next ranked candidate, or stop if exhausted.
 
-        Rules:
+        Uses the RecoveryPolicy (Day 14) to decide whether to
+        continue healing with the next candidate.
+
+        Rules (enforced by RecoveryPolicy):
         1. healing_attempt_count must be < max_healing_attempts
         2. The candidate must not have been attempted before
-        3. If no eligible candidate exists → HEALING_FAILED
+        3. Candidate must meet minimum confidence threshold
+        4. If no eligible candidate exists → ABORT
         """
-        if state.healing_attempt_count >= state.max_healing_attempts:
+        # Delegate continuation decision to RecoveryPolicy
+        continuation = self._recovery_policy.evaluate_continuation(
+            failure_analysis=state.failure_analysis,
+            ranked_candidates=list(state.ranked_candidates),
+            healing_attempt_count=state.healing_attempt_count,
+            attempted_selectors=set(state.attempted_selectors),
+            workflow_id=state.workflow_id,
+            test_case_id=(
+                state.current_test_case.test_id
+                if state.current_test_case else "unknown"
+            ),
+        )
+
+        state = state.model_copy(
+            update={
+                "recovery_decision": continuation,
+                "updated_at": _now(),
+            },
+        )
+
+        state = self._add_event(
+            state,
+            WorkflowEventType.RECOVERY_DECISION_CREATED,
+            message=(
+                f"Continuation decision: {continuation.decision.value} — "
+                f"{continuation.reason}"
+            ),
+            metadata={
+                "decision": continuation.decision.value,
+                "evidence": continuation.evidence,
+            },
+        )
+
+        if continuation.decision == RecoveryAction.TRY_HEALING:
+            next_candidate = continuation.selected_candidate
+            if next_candidate is not None:
+                attempted = set(state.attempted_selectors)
+                attempted.add(next_candidate.selector)
+                state = state.model_copy(
+                    update={
+                        "attempted_selectors": attempted,
+                        "healing_attempt_count": state.healing_attempt_count + 1,
+                        "updated_at": _now(),
+                    },
+                )
+
+                # Update the recommendation with the new selected candidate
+                if state.healing_recommendation is not None:
+                    updated_rec = state.healing_recommendation.model_copy(
+                        update={"selected_candidate": next_candidate},
+                    )
+                    state = state.model_copy(
+                        update={"healing_recommendation": updated_rec},
+                    )
+
+                # Stay in HEALING_PENDING_VALIDATION (valid self-transition)
+                state = self._transition(
+                    state, WorkflowStep.HEALING_PENDING_VALIDATION,
+                )
+
+                state = self._add_event(
+                    state,
+                    WorkflowEventType.HEALING_RECOMMENDATION_SENT,
+                    message=(
+                        f"Retry: recommendation sent to Member 2: "
+                        f"'{next_candidate.selector}' "
+                        f"(attempt {state.healing_attempt_count})"
+                    ),
+                    metadata={
+                        "selector": next_candidate.selector,
+                        "confidence": next_candidate.confidence,
+                        "attempt": state.healing_attempt_count,
+                    },
+                )
+            else:
+                # Should not happen, but handle gracefully
+                state = state.model_copy(
+                    update={"status": "completed", "updated_at": _now()},
+                )
+                state = self._transition(state, WorkflowStep.HEALING_FAILED)
+                state = self._transition(state, WorkflowStep.COMPLETED)
+        else:
             state = state.model_copy(
                 update={"status": "completed", "updated_at": _now()},
             )
@@ -689,72 +985,9 @@ class AgentOrchestrator:
                 state,
                 WorkflowEventType.WORKFLOW_COMPLETED,
                 message=(
-                    f"Max healing attempts reached "
-                    f"({state.max_healing_attempts}) — healing failed"
+                    f"Healing stopped — {continuation.reason}"
                 ),
             )
-            return state
-
-        # Find next unattempted candidate
-        next_candidate = None
-        for candidate in state.ranked_candidates:
-            if candidate.selector not in state.attempted_selectors:
-                next_candidate = candidate
-                break
-
-        if next_candidate is None:
-            # No more candidates
-            state = state.model_copy(
-                update={"status": "completed", "updated_at": _now()},
-            )
-            state = self._transition(state, WorkflowStep.HEALING_FAILED)
-            state = self._transition(state, WorkflowStep.COMPLETED)
-            state = self._add_event(
-                state,
-                WorkflowEventType.WORKFLOW_COMPLETED,
-                message="No more unattempted candidates — healing failed",
-            )
-            return state
-
-        # Recommend the next candidate
-        attempted = set(state.attempted_selectors)
-        attempted.add(next_candidate.selector)
-        state = state.model_copy(
-            update={
-                "attempted_selectors": attempted,
-                "healing_attempt_count": state.healing_attempt_count + 1,
-                "updated_at": _now(),
-            },
-        )
-
-        # Update the recommendation with the new selected candidate
-        if state.healing_recommendation is not None:
-            updated_rec = state.healing_recommendation.model_copy(
-                update={"selected_candidate": next_candidate},
-            )
-            state = state.model_copy(
-                update={"healing_recommendation": updated_rec},
-            )
-
-        # Stay in HEALING_PENDING_VALIDATION (valid self-transition)
-        state = self._transition(
-            state, WorkflowStep.HEALING_PENDING_VALIDATION,
-        )
-
-        state = self._add_event(
-            state,
-            WorkflowEventType.HEALING_RECOMMENDATION_SENT,
-            message=(
-                f"Retry: recommendation sent to Member 2: "
-                f"'{next_candidate.selector}' "
-                f"(attempt {state.healing_attempt_count})"
-            ),
-            metadata={
-                "selector": next_candidate.selector,
-                "confidence": next_candidate.confidence,
-                "attempt": state.healing_attempt_count,
-            },
-        )
 
         return state
 
@@ -766,6 +999,9 @@ class AgentOrchestrator:
         self, analysis: "FailureAnalysis",
     ) -> bool:
         """Determine if healing should be attempted for this analysis.
+
+        Legacy method retained for backward compatibility.
+        Day 14: RecoveryPolicy is now the primary decision maker.
 
         Healing is NOT attempted when:
         - Failure type is UNKNOWN with LOW confidence

@@ -1,10 +1,14 @@
 """
 TestSphere-AI — Orchestration Workflow Schemas
 
-Data contracts for the autonomous AI Agent Orchestrator (Day 13).
+Data contracts for the autonomous AI Agent Orchestrator.
 
 Defines the structured state, events, and configuration for the
 orchestration workflow that coordinates all intelligence components.
+
+Day 13: Foundation implementation.
+Day 14: Added RETRYING step, retry tracking, recovery decision
+        tracking, and expanded configuration.
 
 Schemas
 -------
@@ -59,6 +63,8 @@ class WorkflowStep(str, Enum):
         Candidates being scored and ranked.
     DECIDING_HEALING:
         Healing decision being made from ranked candidates.
+    RETRYING:
+        Transient failure detected; retrying execution (Day 14).
     HEALING_PENDING_VALIDATION:
         Healing recommendation sent to Member 2; awaiting result.
     HEALING_SUCCEEDED:
@@ -79,6 +85,7 @@ class WorkflowStep(str, Enum):
     GENERATING_CANDIDATES = "GENERATING_CANDIDATES"
     RANKING_CANDIDATES = "RANKING_CANDIDATES"
     DECIDING_HEALING = "DECIDING_HEALING"
+    RETRYING = "RETRYING"
     HEALING_PENDING_VALIDATION = "HEALING_PENDING_VALIDATION"
     HEALING_SUCCEEDED = "HEALING_SUCCEEDED"
     HEALING_FAILED = "HEALING_FAILED"
@@ -105,6 +112,7 @@ VALID_TRANSITIONS: dict[WorkflowStep, frozenset[WorkflowStep]] = {
     }),
     WorkflowStep.ANALYZING_FAILURE: frozenset({
         WorkflowStep.GENERATING_CANDIDATES,
+        WorkflowStep.RETRYING,
         WorkflowStep.COMPLETED,
         WorkflowStep.ABORTED,
     }),
@@ -119,12 +127,18 @@ VALID_TRANSITIONS: dict[WorkflowStep, frozenset[WorkflowStep]] = {
         WorkflowStep.HEALING_PENDING_VALIDATION,
         WorkflowStep.COMPLETED,
         WorkflowStep.HEALING_FAILED,
+        WorkflowStep.ABORTED,
+    }),
+    WorkflowStep.RETRYING: frozenset({
+        WorkflowStep.EXECUTION_PENDING,
     }),
     WorkflowStep.HEALING_PENDING_VALIDATION: frozenset({
         WorkflowStep.HEALING_SUCCEEDED,
         WorkflowStep.HEALING_FAILED,
         # Retry with next candidate stays in HEALING_PENDING_VALIDATION
         WorkflowStep.HEALING_PENDING_VALIDATION,
+        # Abort if recovery policy says stop
+        WorkflowStep.ABORTED,
     }),
     WorkflowStep.HEALING_SUCCEEDED: frozenset({
         WorkflowStep.COMPLETED,
@@ -162,6 +176,8 @@ class WorkflowEventType(str, Enum):
     WORKFLOW_ABORTED = "WORKFLOW_ABORTED"
     STATE_TRANSITION = "STATE_TRANSITION"
     VALIDATION_ERROR = "VALIDATION_ERROR"
+    RECOVERY_DECISION_CREATED = "RECOVERY_DECISION_CREATED"
+    RETRY_INITIATED = "RETRY_INITIATED"
 
 
 # ── Execution Result (from Member 2) ─────────────────────────
@@ -346,6 +362,25 @@ class AgentState(BaseModel):
         description="Maximum allowed healing attempts",
     )
 
+    # ── Retry Tracking (Day 14) ──────────────────────────
+    retry_count: int = Field(
+        default=0, ge=0,
+        description="Number of retries attempted for transient failures",
+    )
+    max_retries: int = Field(
+        default=2, ge=0,
+        description="Maximum allowed retries for transient failures",
+    )
+
+    # ── Recovery Decision (Day 14) ────────────────────────
+    recovery_decision: Optional[Any] = Field(
+        default=None,
+        description=(
+            "Most recent RecoveryDecision from the RecoveryPolicy. "
+            "Stored for explainability and debugging."
+        ),
+    )
+
     # ── Event History ─────────────────────────────────────
     events: list[WorkflowEvent] = Field(
         default_factory=list,
@@ -377,6 +412,8 @@ class OrchestratorConfig(BaseModel):
 
     Centralizes configurable parameters so they are not
     hard-coded throughout the codebase.
+
+    Day 14: Added max_retries and min_healing_confidence.
     """
 
     max_healing_attempts: int = Field(
@@ -390,6 +427,14 @@ class OrchestratorConfig(BaseModel):
         default=0.30, ge=0.0, le=1.0,
         description=(
             "Minimum confidence threshold below which healing "
-            "is not attempted."
+            "is not attempted. (Legacy — RecoveryPolicyConfig "
+            "provides finer-grained control.)"
+        ),
+    )
+    max_retries: int = Field(
+        default=2, ge=0,
+        description=(
+            "Maximum retries for transient failures before "
+            "escalating to further analysis."
         ),
     )

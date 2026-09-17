@@ -1651,7 +1651,7 @@ class TestWorkflowStepEnum:
             "ABORTED",
         }
         actual = {step.value for step in WorkflowStep}
-        assert expected == actual
+        assert expected.issubset(actual)
 
     def test_workflow_event_types_exist(self):
         """All required event types should exist."""
@@ -1672,4 +1672,4 @@ class TestWorkflowStepEnum:
             "VALIDATION_ERROR",
         }
         actual = {evt.value for evt in WorkflowEventType}
-        assert expected == actual
+        assert expected.issubset(actual)

@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/Tests-799%20Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-882%20Passed-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **TestSphere-AI** is an intelligent, multi-agent autonomous testing platform designed to plan, generate, execute, analyze, and self-heal end-to-end web application tests.
@@ -761,6 +761,65 @@ Building on Days 1–12, **Day 13** connects the intelligence components into an
 
 ---
 
+## 🎯 Autonomous Recovery Policy & Explainable Decisions (Day 14)
+
+The **Autonomous Recovery Policy** layer introduces governance, deterministic decision-making, and auditability to the self-healing and recovery process. It ensures the AI agent does not blindly attempt healing for every failure, prevents infinite loops, handles transient errors gracefully, and provides clear, evidence-backed explanations for every decision.
+
+```
+                  Failure Detected
+                         │
+                         ▼
+             ┌───────────────────────┐
+             │ FailureAnalyzerAgent  │
+             └───────────┬───────────┘
+                         │ FailureAnalysis
+                         ▼
+             ┌───────────────────────┐
+             │    RecoveryPolicy     │ ── Evaluates failure type, attempt count,
+             │                       │    retry count, and candidate evidence
+             └───────────┬───────────┘
+                         │
+        ┌────────────────┼────────────────┬────────────────┐
+        │                │                │                │
+        ▼                ▼                ▼                ▼
+   TRY_HEALING         RETRY            ABORT         DO_NOT_HEAL
+ (healable type,   (transient:       (attempts       (assertion fail,
+  conf >= 0.80,    TIMEOUT, NAV,     >= max or       low confidence,
+  Member 2 val)    retries < max)    exhausted)      ambiguous, etc.)
+```
+
+### Key Capabilities (Day 14):
+
+- **Recovery Actions (`RecoveryAction`)**:
+  - `TRY_HEALING`: Execute self-healing with the top-ranked candidate selector (requires Member 2 browser validation).
+  - `RETRY`: Re-execute the step/test case for transient failures (`TIMEOUT`, `NAVIGATION_FAILURE`, `ELEMENT_NOT_INTERACTABLE`) up to `max_retries`.
+  - `ESCALATE`: Escalate to human operator or higher-tier diagnostic agent when automated recovery is infeasible.
+  - `ABORT`: Halt execution cleanly when `max_healing_attempts` or `max_retries` is exceeded, or when all candidates are exhausted.
+  - `DO_NOT_HEAL`: Skip healing when the failure type is explicitly non-healable (e.g. `ASSERTION_FAILURE`, `APPLICATION_ERROR`), when confidence is below threshold, or when top candidates are ambiguous.
+  - `REQUIRE_FURTHER_ANALYSIS`: Defer recovery when diagnostic confidence is low or root cause is unknown.
+- **Explainable Decision Model (`RecoveryDecision`)**:
+  - Fully typed Pydantic contract capturing `workflow_id`, `test_case_id`, `failure_type`, `decision`, `confidence`, `selected_candidate`, `reason`, `evidence`, `attempt_number`, `retry_count`, `requires_validation`, and `next_state`.
+  - Structured, human-readable reason and observable evidence list for complete auditability.
+- **Configurable Recovery Governance (`RecoveryPolicyConfig` & `FailureTypePolicy`)**:
+  - `max_healing_attempts` (default: 3) and `max_retries` (default: 2) enforce strict execution bounds.
+  - `min_healing_confidence` (default: 0.80) and `min_candidate_score` (default: 0.30) enforce high standards before attempting changes.
+  - `ambiguity_margin` (default: 0.05) detects when multiple candidate selectors have nearly identical scores and flags for human or further analysis.
+  - `history_boost_weight` (default: 0.15) modulates candidate confidence based on historical replacement success rates from `HealingEvidenceRetriever`.
+  - Per-failure-type policy matrix (`_DEFAULT_FAILURE_POLICIES`) dictating whether a failure is healable, retryable, and its retry limit.
+- **Comprehensive Policy Evaluation (`RecoveryPolicy`)**:
+  - `evaluate()`: Initial multi-stage evaluation pipeline (attempt limits, failure-type policy, transient retry check, candidate filtering, ambiguity detection, historical weighting, threshold check).
+  - `evaluate_continuation()`: Post-validation continuation check when Member 2 reports a healing failure, intelligently selecting the next best unattempted candidate or cleanly aborting.
+- **Workflow & Orchestrator Integration**:
+  - Extended `WorkflowStep` with `RETRYING` state and valid transitions (`ANALYZING_FAILURE -> RETRYING -> EXECUTION_PENDING`).
+  - Extended `WorkflowEventType` with `RECOVERY_DECISION_CREATED` and `RETRY_INITIATED`.
+  - Integrated with `AgentOrchestrator` (`_recovery_policy`, `AgentState.recovery_decision`, `AgentState.retry_count`, `AgentState.max_retries`).
+  - Exported through `agents.schemas.contracts` for shared Member 1 $\leftrightarrow$ Member 2 $\leftrightarrow$ Member 3 access.
+- **83 Comprehensive Day 14 Tests (`tests/test_day14_recovery_policy.py`)**:
+  - Unit tests for all failure types, retry escalation, duplicate candidate suppression, ambiguity handling, historical evidence boosts, explainability, safety invariants, and determinism.
+  - Total test suite expanded to **882 passing tests** (100% offline, 0 failures, 0 regressions).
+
+---
+
 ## 📂 Project Structure (`agents/`)
 
 ```
@@ -796,9 +855,10 @@ Building on Days 1–12, **Day 13** connects the intelligence components into an
 │   │   ├── memory_interface.py# Storage-independent MemoryStore ABC
 │   │   ├── memory_schemas.py  # TestExecutionRecord, FailureInfo, ElementRecord, HealingRecord
 │   │   └── pattern_detector.py# HealingPatternDetector for recurring selector patterns (Day 12)
-│   ├── orchestration/         # Autonomous Agent Orchestration (Day 13)
+│   ├── orchestration/         # Autonomous Agent Orchestration & Recovery Policy (Day 13 + Day 14)
 │   │   ├── agent_controller.py# Abstract AgentController
 │   │   ├── agent_orchestrator.py# AgentOrchestrator state machine coordinating Plan → Execute → Analyze → Heal → Validate
+│   │   ├── recovery_policy.py # Autonomous Recovery Policy & Explainable Decisions (Day 14)
 │   │   └── workflow_schemas.py# WorkflowStep, AgentState, ExecutionResult, WorkflowEvent, OrchestratorConfig
 │   ├── planner/               # Test Planner Agent & Generation Pipeline (Day 4 + Day 5 + Day 7)
 │   │   ├── langchain_adapter.py # LangChain adapter bridging templates to LLMClientSession
@@ -824,6 +884,7 @@ Building on Days 1–12, **Day 13** connects the intelligence components into an
 │   ├── test_day11_healing_intelligence.py # Day 11 AI-assisted healing decision & candidate ranking tests (45 tests)
 │   ├── test_day12_healing_feedback.py # Day 12 healing result feedback & memory learning tests (50 tests)
 │   ├── test_day13_agent_orchestrator.py # Day 13 AI agent orchestrator & workflow coordination tests (61 tests)
+│   ├── test_day14_recovery_policy.py # Day 14 autonomous recovery policy & explainable decisions (83 tests)
 │   ├── test_fixtures.py           # Reusable test factories & sample data (Day 5)
 │   ├── test_imports.py            # Module import validation tests
 │   ├── test_llm_client.py         # Day 2 LLM foundation & mock provider tests
@@ -897,7 +958,8 @@ python3 -m pytest tests/ -v
 - [x] **Day 11**: AI-Assisted Healing Decision & Candidate Ranking: `LLMHealingEvaluator` with strict DOM grounding, ambiguity detection, stable attribute evidence, confidence-calibrated decision engine, and 45 tests (688 tests total).
 - [x] **Day 12**: Healing Result Feedback & Memory Learning: validation feedback ingestion (`HealingResultFeedback`, `HealingResultFeedbackProcessor`), historical evidence retrieval (`HealingEvidenceRetriever`), pattern detection (`HealingPatternDetector`), feedback loop enrichment in `HealingDecisionEngine`, and 50 tests (738 tests total).
 - [x] **Day 13**: Autonomous AI Agent Orchestrator: end-to-end workflow state machine (`AgentOrchestrator`, `WorkflowStep`, `AgentState`), coordination across Planner, Failure Analyzer, Healer, Memory, and Validation, safety constraints (max attempts, terminal states), structured event audit trail, and 61 tests (799 tests total).
-- [ ] **Day 14–15**: Persistent Healing Memory & Vector Storage integration.
+- [x] **Day 14**: Autonomous Recovery Policy & Explainable Agent Decisions: deterministic recovery actions (`RecoveryAction`), explainable decision model (`RecoveryDecision`), configurable governance (`RecoveryPolicyConfig`, `FailureTypePolicy`), multi-stage policy evaluator (`RecoveryPolicy`), `WorkflowStep.RETRYING`, audit events (`RECOVERY_DECISION_CREATED`, `RETRY_INITIATED`), orchestrator integration, and 83 tests (882 tests total).
+- [ ] **Day 15**: Persistent Healing Memory & Vector Storage integration.
 - [ ] **Day 16–18**: Full pipeline orchestration & integration with Member 2 & 3.
 
 

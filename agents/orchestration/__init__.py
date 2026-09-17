@@ -9,10 +9,20 @@ Components
 - ExecutionResult      — Structured execution result (Day 13)
 - WorkflowEvent        — Audit log event (Day 13)
 - OrchestratorConfig   — Orchestrator configuration (Day 13)
+- RecoveryPolicy       — Autonomous recovery policy engine (Day 14)
+- RecoveryPolicyConfig — Recovery policy configuration (Day 14)
+- RecoveryDecision     — Structured recovery decision (Day 14)
+- RecoveryAction       — Recovery action enum (Day 14)
 """
 
 from agents.orchestration.agent_controller import AgentController
 from agents.orchestration.agent_orchestrator import AgentOrchestrator
+from agents.orchestration.recovery_policy import (
+    RecoveryAction,
+    RecoveryDecision,
+    RecoveryPolicy,
+    RecoveryPolicyConfig,
+)
 from agents.orchestration.workflow_schemas import (
     VALID_TRANSITIONS,
     AgentState,
@@ -38,4 +48,10 @@ __all__ = [
     "WorkflowEvent",
     "OrchestratorConfig",
     "VALID_TRANSITIONS",
+    # Day 14 — Recovery Policy
+    "RecoveryPolicy",
+    "RecoveryPolicyConfig",
+    "RecoveryDecision",
+    "RecoveryAction",
 ]
+
