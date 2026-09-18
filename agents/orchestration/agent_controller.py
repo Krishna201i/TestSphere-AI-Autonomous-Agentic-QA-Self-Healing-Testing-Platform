@@ -8,7 +8,9 @@ Orchestrates the AI agent pipeline:
 The controller is the main entry point for Member 3's backend to
 invoke the AI intelligence layer.
 
-Implementation will be added on Day 2+.
+.. note::
+    For the full stateful orchestration engine, see
+    :class:`~agents.orchestration.agent_orchestrator.AgentOrchestrator` (Days 13-15).
 """
 
 from __future__ import annotations
@@ -29,6 +31,10 @@ class AgentController(ABC):
 
     This is the primary interface between the AI layer (Member 1)
     and the rest of the system (Members 2 and 3).
+
+    For the concrete production implementation with state machine,
+    recovery policy, and event streaming, use
+    :class:`~agents.orchestration.agent_orchestrator.AgentOrchestrator`.
 
     The controller coordinates:
     1. Test generation via the Test Planner Agent

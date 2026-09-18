@@ -14,6 +14,9 @@ from agents.analyzer.schemas import (
     HistoricalContext,
     TestFailure,
 )
+from agents.healer.healing_decision import (
+    HealingDecisionEngine,
+)
 from agents.healer.healing_feedback import (
     HealingResultFeedback,
     HealingResultFeedbackProcessor,
@@ -74,6 +77,7 @@ from agents.schemas.enums import (
     ExecutionStatus,
     FailureType,
     HealingAction,
+    HealingDecision,
     HealingPatternType,
     HealingStatus,
     RecommendedAction,
@@ -106,6 +110,7 @@ __all__ = [
     "ScoredCandidate",
     "HealingRecommendation",
     "HealingContext",
+    "HealingDecisionEngine",
     # Healer contracts (Day 12)
     "HealingResultFeedback",
     "HealingResultFeedbackProcessor",
@@ -126,6 +131,7 @@ __all__ = [
     "FailureType",
     "HealingStatus",
     "HealingAction",
+    "HealingDecision",
     "HealingPatternType",
     "CandidateSource",
     "TestCategory",

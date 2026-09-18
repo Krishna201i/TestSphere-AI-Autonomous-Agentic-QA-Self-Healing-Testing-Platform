@@ -5,11 +5,15 @@ Abstract base class for the Healing Memory store.
 Tracks past healing attempts so the AI can learn from previous
 successes and failures, and avoid repeating failed strategies.
 
-Implementation will be added on Day 2+.
+.. deprecated:: Day 8
+    Superseded by :class:`~agents.memory.store.MemoryStore` and
+    :class:`~agents.memory.store.BaseMemoryStore`. Retained for
+    backward compatibility with Day 1 prototypes.
 """
 
 from __future__ import annotations
 
+import warnings
 from abc import ABC, abstractmethod
 
 from agents.healer.schemas import HealingResult
@@ -17,6 +21,9 @@ from agents.healer.schemas import HealingResult
 
 class HealingMemory(ABC):
     """Abstract Healing Memory store.
+
+    .. deprecated:: Day 8
+        Use :class:`~agents.memory.store.MemoryStore` instead.
 
     Responsibilities:
     - Record healing outcomes (success and failure)

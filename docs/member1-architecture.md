@@ -1176,3 +1176,248 @@ HealingResult ──> MemoryStore Update
 | `README.md` | Modified | Updated test count, Day 11 feature section, roadmap |
 
 ---
+
+## 13. Day 15 — Complete Autonomous Intelligence Pipeline Integration & Stabilization
+
+### 13.1 Complete End-to-End Pipeline Architecture
+
+On Day 15, all Member 1 components (Days 1–14) were integrated, stabilized, validated, and documented into a single coherent, production-ready autonomous intelligence pipeline.
+
+```
+                    ┌───────────────────────────────┐
+                    │      Application Context      │
+                    └───────────────┬───────────────┘
+                                    │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │      Test Planner Agent       │  (LLMTestPlanner)
+                    └───────────────┬───────────────┘
+                                    │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │           Test Plan           │  (TestPlan: list[TestCase])
+                    └───────────────┬───────────────┘
+                                    │
+                                    ▼ [Member 1 → Member 2]
+                    ┌───────────────────────────────┐
+                    │   Member 2: Test Execution    │  (Browser Automation / Playwright)
+                    └───────────────┬───────────────┘
+                                    │
+                         ┌──────────┴──────────┐
+                         │                     │
+                    [SUCCESS]              [FAILED]
+                         │                     │
+                         ▼                     ▼
+               ┌──────────────────┐   ┌───────────────────────────────┐
+               │ WORKFLOW COMPLETE│   │        Execution Result       │  (ExecutionResult + FailureContext)
+               └──────────────────┘   └───────────────┬───────────────┘
+                                                      │
+                                                      ▼ [Member 2 → Member 1]
+                                      ┌───────────────────────────────┐
+                                      │    Failure Analyzer Agent     │  (FailureAnalyzerAgent)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                      ┌───────────────────────────────┐
+                                      │       Historical Memory       │  (InMemoryStore / HealingEvidenceRetriever)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                      ┌───────────────────────────────┐
+                                      │      Candidate Generator      │  (DOM + Historical Records)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                      ┌───────────────────────────────┐
+                                      │       Candidate Scorer        │  (Deterministic Multi-Factor Scoring)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                      ┌───────────────────────────────┐
+                                      │       Candidate Ranking       │  (Sorted by Confidence)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                      ┌───────────────────────────────┐
+                                      │        Recovery Policy        │  (RecoveryPolicy: TRY_HEALING, RETRY,
+                                      │                               │   DO_NOT_HEAL, REQUIRE_FURTHER_ANALYSIS, ABORT)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼ [Member 1 → Member 2]
+                                      ┌───────────────────────────────┐
+                                      │    Healing Recommendation     │  (HealingRecommendation / Selected Candidate)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼ [Member 2: Validation]
+                                      ┌───────────────────────────────┐
+                                      │       Healing Feedback        │  (HealingResultFeedback: SUCCESS / FAILURE)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                           ┌──────────┴──────────┐
+                                           │                     │
+                                      [SUCCESS]              [FAILURE]
+                                           │                     │
+                                           ▼                     ▼
+                               ┌──────────────────────┐  ┌─────────────────────────┐
+                               │   Record in Memory   │  │ Try Next Candidate?     │
+                               │   Workflow COMPLETE  │  │ (up to max_attempts)    │
+                               └──────────────────────┘  └─────────────────────────┘
+                                           │
+                                           ▼ [Member 1 → Member 3]
+                               ┌──────────────────────┐
+                               │ Dashboard / SSE / WS │  (DashboardWorkflowSummary, WorkflowEvent)
+                               └──────────────────────┘
+```
+
+---
+
+### 13.2 Member 1 ↔ Member 2 Contract Specification
+
+Defined in `agents/schemas/member2_contract.py`:
+
+#### 1. Member 2 Execution Result (`ExecutionResult`)
+```json
+{
+  "workflow_id": "wf-e2e-001",
+  "test_case_id": "tc-login-01",
+  "status": "FAILED",
+  "failure_context": {
+    "test_id": "tc-login-01",
+    "execution_id": "exec-001",
+    "failed_step": 3,
+    "action": "click",
+    "target_selector": "#submit-btn",
+    "error_message": "Element not found: #submit-btn",
+    "current_page_url": "http://localhost:3000/login",
+    "current_element": {
+      "element_id": "el-btn-new",
+      "selector": "button[data-testid='login-btn']",
+      "text": "Log In",
+      "role": "button",
+      "attributes": {
+        "type": "submit",
+        "data-testid": "login-btn",
+        "class": "btn primary"
+      }
+    }
+  }
+}
+```
+
+#### 2. Member 1 Healing Recommendation (`HealingRecommendation`)
+```json
+{
+  "test_id": "tc-login-01",
+  "execution_id": "exec-001",
+  "failed_step": 3,
+  "original_selector": "#submit-btn",
+  "failure_type": "SELECTOR_CHANGED",
+  "confidence": "HIGH",
+  "decision": "RECOMMEND_HEALING",
+  "recommended_action": "TRY_REPLACEMENT_SELECTOR",
+  "selected_candidate": {
+    "selector": "button[data-testid='login-btn']",
+    "confidence": 0.95,
+    "source": "CURRENT_DOM"
+  },
+  "candidates": [
+    {
+      "selector": "button[data-testid='login-btn']",
+      "confidence": 0.95,
+      "source": "CURRENT_DOM"
+    }
+  ],
+  "evidence": ["Stable attribute match data-testid='login-btn'"],
+  "requires_validation": true
+}
+```
+
+#### 3. Member 2 Healing Validation Feedback (`HealingResultFeedback`)
+```json
+{
+  "test_case_id": "tc-login-01",
+  "original_selector": "#submit-btn",
+  "attempted_selector": "button[data-testid='login-btn']",
+  "healing_status": "VALIDATED_SUCCESS",
+  "validation_status": "SUCCESS",
+  "confidence": 0.95,
+  "execution_attempt": 1,
+  "target_element_text": "Log In",
+  "validation_time_ms": 142.5
+}
+```
+
+---
+
+### 13.3 Member 1 ↔ Member 3 Contract Specification
+
+Defined in `agents/schemas/member3_contract.py`:
+
+#### 1. Dashboard Workflow Summary (`DashboardWorkflowSummary`)
+- `workflow_id`: Workflow identifier
+- `current_step`: Current `WorkflowStep`
+- `status`: Lifecycle status (`"running"`, `"completed"`, `"aborted"`)
+- `is_terminal`: Whether workflow has concluded
+- `total_tests`: Total planned test cases
+- `passed_tests`: Tests executed successfully
+- `failed_tests`: Unhealed failures
+- `healed_tests`: Successfully healed tests
+- `healing_attempts`: Attempt count
+- `retry_count`: Retry count
+- `error_info`: Optional human-readable error description
+- `updated_at`: Timestamp
+
+#### 2. Streaming Real-Time Events
+- **Server-Sent Events (SSE):** Formatted via `format_sse_event(event) -> str` (`event: <TYPE>\ndata: {...}\n\n`).
+- **WebSocket Messages:** Formatted via `format_websocket_message(event) -> str` (JSON payload containing workflow metadata).
+
+---
+
+### 13.4 Comprehensive Recovery Policy Matrix
+
+| Failure Type | Healable | Retryable | Max Retries | Policy Action | Criteria / Transition |
+|---|---|---|---|---|---|
+| `SELECTOR_CHANGED` | Yes | No | 0 | `TRY_HEALING` | Top candidate confidence $\ge 0.80$, unambiguous |
+| `ELEMENT_NOT_FOUND` | Yes | No | 0 | `TRY_HEALING` | Top candidate confidence $\ge 0.80$, unambiguous |
+| `TIMEOUT` | No | Yes | 2 | `RETRY` | If `retry_count < 2` $\rightarrow$ `RETRYING` |
+| `TIMEOUT` (Exhausted) | No | Yes | 2 | `REQUIRE_FURTHER_ANALYSIS` | If `retry_count >= 2` $\rightarrow$ `COMPLETED` |
+| `NAVIGATION_FAILURE`| No | Yes | 2 | `RETRY` | If `retry_count < 2` $\rightarrow$ `RETRYING` |
+| `ELEMENT_NOT_INTERACTABLE` | No | Yes | 2 | `RETRY` | If `retry_count < 2` $\rightarrow$ `RETRYING` |
+| `ASSERTION_FAILURE` | No | No | 0 | `DO_NOT_HEAL` | Regression / logic defect $\rightarrow$ `COMPLETED` |
+| `NETWORK_ERROR` | No | No | 0 | `DO_NOT_HEAL` | Infrastructure fault $\rightarrow$ `COMPLETED` |
+| `APPLICATION_ERROR`| No | No | 0 | `DO_NOT_HEAL` | 500 / unhandled crash $\rightarrow$ `COMPLETED` |
+| `UNKNOWN` (Low Conf)| No | No | 0 | `DO_NOT_HEAL` | Insufficient evidence $\rightarrow$ `COMPLETED` |
+| Any (Max Attempts) | - | - | - | `ABORT` | `healing_attempt_count >= max_healing_attempts` $\rightarrow$ `ABORTED` |
+| Any (Ambiguous Gap) | Yes | - | - | `REQUIRE_FURTHER_ANALYSIS` | Gap between top 2 candidates $\le 0.02$ |
+
+---
+
+### 13.5 Complete Day 15 Final Test Matrix (15 Scenarios)
+
+All 15 scenarios are verified in `tests/test_day15_pipeline_integration.py`:
+
+1. **Scenario 1:** Clean pass execution (`SUCCESS` $\rightarrow$ `COMPLETED`, 0 healing attempts).
+2. **Scenario 2:** Single healable failure with first-attempt validation success (`TRY_HEALING` $\rightarrow$ `HEALING_PENDING_VALIDATION` $\rightarrow$ `VALIDATED_SUCCESS` $\rightarrow$ `COMPLETED`).
+3. **Scenario 3:** Healable failure where candidate 1 fails validation, second candidate succeeds (continuation $\rightarrow$ `VALIDATED_SUCCESS`).
+4. **Scenario 4:** Healable failure where all candidates fail validation (continuation abort $\rightarrow$ `COMPLETED`).
+5. **Scenario 5:** Timeout failure triggers transient retry (`RETRY` $\rightarrow$ `RETRYING` $\rightarrow$ `EXECUTION_PENDING`).
+6. **Scenario 6:** Assertion failure triggers non-healable routing (`DO_NOT_HEAL` $\rightarrow$ `COMPLETED`).
+7. **Scenario 7:** Low-confidence candidate ($< 0.80$) safely triggers `DO_NOT_HEAL`.
+8. **Scenario 8:** Ambiguous candidates (score gap $\le 0.02$) triggers `REQUIRE_FURTHER_ANALYSIS`.
+9. **Scenario 9:** Candidate matching historical success pattern receives positive score boost (+0.15).
+10. **Scenario 10:** Candidate matching historical failures receives penalty (-0.20), preventing flaky re-use.
+11. **Scenario 11:** Max retries exceeded triggers escalation (`REQUIRE_FURTHER_ANALYSIS`).
+12. **Scenario 12:** Event stream audit trail verifies every state transition is logged with monotonic timestamps.
+13. **Scenario 13:** Invalid state transitions strictly rejected by state machine.
+14. **Scenario 14:** Full AgentState serialization & deserialization roundtrip validation.
+15. **Scenario 15:** Benchmark verification: entire pipeline executes under 500ms (measured $< 50\text{ms}$).
+
+---
+
+### 13.6 Test Suite Metrics & Verification
+
+- **Total Passing Tests:** 920 passed (0 failed).
+- **Day 15 Integration Tests:** 38 passed in `tests/test_day15_pipeline_integration.py`.
+- **Latency Benchmark:** Entire autonomous cycle executes in $< 50\text{ms}$ (limit: $< 500\text{ms}$).
+- **Environment:** 100% offline, zero browser automation dependencies, zero external API keys.
+
