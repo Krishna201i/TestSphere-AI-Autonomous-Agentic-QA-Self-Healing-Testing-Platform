@@ -1,0 +1,233 @@
+{
+  "$defs": {
+    "HealingCandidate": {
+      "description": "One live-DOM candidate evaluated during a healing attempt.",
+      "properties": {
+        "locator": {
+          "description": "CSS/XPath locator for this candidate",
+          "title": "Locator",
+          "type": "string"
+        },
+        "score": {
+          "description": "Weighted composite score",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Score",
+          "type": "number"
+        },
+        "signals": {
+          "$ref": "#/$defs/HealingSignals",
+          "description": "Per-signal breakdown"
+        }
+      },
+      "required": [
+        "locator",
+        "score",
+        "signals"
+      ],
+      "title": "HealingCandidate",
+      "type": "object"
+    },
+    "HealingReport": {
+      "description": "Full record of a locator-healing attempt.\n\nReturned even when healing fails (all scores below threshold), so that\nMember 1's agent can make a decision and Member 3 can display it.",
+      "properties": {
+        "original_locator": {
+          "description": "The locator that failed",
+          "title": "Original Locator",
+          "type": "string"
+        },
+        "candidates": {
+          "description": "All evaluated candidates, sorted best-first",
+          "items": {
+            "$ref": "#/$defs/HealingCandidate"
+          },
+          "title": "Candidates",
+          "type": "array"
+        },
+        "selected_locator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Locator accepted automatically (None = healing failed / deferred to agent)",
+          "title": "Selected Locator"
+        },
+        "confidence": {
+          "default": 0.0,
+          "description": "Score of the selected locator (0 if none selected)",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "strategy_used": {
+          "default": "",
+          "description": "Short description of healing strategy (e.g. 'fallback[1]', 'fingerprint')",
+          "title": "Strategy Used",
+          "type": "string"
+        }
+      },
+      "required": [
+        "original_locator"
+      ],
+      "title": "HealingReport",
+      "type": "object"
+    },
+    "HealingSignals": {
+      "description": "Per-signal similarity scores contributing to overall candidate score.",
+      "properties": {
+        "attribute": {
+          "default": 0.0,
+          "description": "Score from id/class/attribute comparison",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Attribute",
+          "type": "number"
+        },
+        "text": {
+          "default": 0.0,
+          "description": "Score from visible text comparison (rapidfuzz)",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Text",
+          "type": "number"
+        },
+        "position": {
+          "default": 0.0,
+          "description": "Score from bounding-box proximity",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Position",
+          "type": "number"
+        },
+        "structure": {
+          "default": 0.0,
+          "description": "Score from DOM structural comparison (parent chain, sibling index)",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Structure",
+          "type": "number"
+        }
+      },
+      "title": "HealingSignals",
+      "type": "object"
+    },
+    "StepStatus": {
+      "description": "Outcome of a single step execution.",
+      "enum": [
+        "passed",
+        "failed",
+        "healed"
+      ],
+      "title": "StepStatus",
+      "type": "string"
+    }
+  },
+  "description": "Outcome of executing a single Step.",
+  "properties": {
+    "step_id": {
+      "title": "Step Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/StepStatus"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Error message if status is failed",
+      "title": "Error"
+    },
+    "duration_ms": {
+      "minimum": 0,
+      "title": "Duration Ms",
+      "type": "integer"
+    },
+    "locator_used": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The locator that ultimately succeeded (or None for non-element actions)",
+      "title": "Locator Used"
+    },
+    "healing": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HealingReport"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Present whenever a healing attempt was made (success or failure)"
+    },
+    "screenshot_path": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Absolute path to PNG screenshot (captured on failure or always, per config)",
+      "title": "Screenshot Path"
+    },
+    "dom_snapshot_path": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Absolute path to saved HTML DOM snapshot",
+      "title": "Dom Snapshot Path"
+    },
+    "console_logs": {
+      "description": "Browser console messages collected during this step",
+      "items": {
+        "type": "string"
+      },
+      "title": "Console Logs",
+      "type": "array"
+    },
+    "network_errors": {
+      "description": "Failed network requests observed during this step",
+      "items": {
+        "type": "string"
+      },
+      "title": "Network Errors",
+      "type": "array"
+    }
+  },
+  "required": [
+    "step_id",
+    "status",
+    "duration_ms"
+  ],
+  "title": "StepResult",
+  "type": "object"
+}

@@ -1,0 +1,33 @@
+{
+  "description": "Pixel coordinates and dimensions of an element in the viewport.",
+  "properties": {
+    "x": {
+      "description": "Left edge, pixels from viewport origin",
+      "title": "X",
+      "type": "number"
+    },
+    "y": {
+      "description": "Top edge, pixels from viewport origin",
+      "title": "Y",
+      "type": "number"
+    },
+    "width": {
+      "minimum": 0,
+      "title": "Width",
+      "type": "number"
+    },
+    "height": {
+      "minimum": 0,
+      "title": "Height",
+      "type": "number"
+    }
+  },
+  "required": [
+    "x",
+    "y",
+    "width",
+    "height"
+  ],
+  "title": "BoundingBox",
+  "type": "object"
+}

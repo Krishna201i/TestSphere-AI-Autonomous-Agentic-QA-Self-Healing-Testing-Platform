@@ -1,0 +1,54 @@
+{
+  "description": "Global engine configuration.\n\nSet once at engine start; individual runs may override a subset via\nRunOptions.",
+  "properties": {
+    "heal_threshold": {
+      "default": 0.75,
+      "description": "Minimum similarity score (0-1) for automatic locator acceptance",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Heal Threshold",
+      "type": "number"
+    },
+    "default_timeout_ms": {
+      "default": 5000,
+      "description": "Default per-step timeout when Step.timeout_ms is not set",
+      "minimum": 0,
+      "title": "Default Timeout Ms",
+      "type": "integer"
+    },
+    "headless": {
+      "default": true,
+      "description": "Run Chromium in headless mode",
+      "title": "Headless",
+      "type": "boolean"
+    },
+    "artifacts_dir": {
+      "default": "artifacts",
+      "description": "Root directory for screenshots, DOM snapshots, and traces",
+      "title": "Artifacts Dir",
+      "type": "string"
+    },
+    "slow_mo_ms": {
+      "default": 0,
+      "description": "Playwright slowMo delay in milliseconds (useful for debugging)",
+      "minimum": 0,
+      "title": "Slow Mo Ms",
+      "type": "integer"
+    },
+    "tracing_enabled": {
+      "default": false,
+      "description": "Capture Playwright traces (.zip) per test; increases disk usage",
+      "title": "Tracing Enabled",
+      "type": "boolean"
+    },
+    "max_candidates": {
+      "default": 20,
+      "description": "Maximum live-DOM candidates to evaluate during healing",
+      "minimum": 1,
+      "title": "Max Candidates",
+      "type": "integer"
+    }
+  },
+  "title": "EngineConfig",
+  "type": "object"
+}
