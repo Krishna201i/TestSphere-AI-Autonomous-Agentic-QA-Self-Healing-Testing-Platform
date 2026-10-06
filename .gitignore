@@ -37,8 +37,11 @@ htmlcov/
 .coverage
 coverage.xml
 
-# --- Logs ---
+# --- Logs & Test Artifacts ---
 *.log
+artifacts/
+*.db
+*.sqlite3
 
 # --- OS ---
 Thumbs.db
