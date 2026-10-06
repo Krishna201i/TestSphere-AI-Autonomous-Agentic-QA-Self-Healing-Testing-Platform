@@ -2,36 +2,47 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
-<<<<<<< HEAD
-[![Tests](https://img.shields.io/badge/Tests-920%20Passed-brightgreen.svg)]()
-[![Member 1 Status](https://img.shields.io/badge/Member%201-100%25%20Completed-brightgreen.svg)]()
-=======
-[![Tests](https://img.shields.io/badge/Tests-339%20Passed-brightgreen.svg)]()
->>>>>>> origin/main
+[![Tests](https://img.shields.io/badge/Tests-1102%20Passed-brightgreen.svg)]()
+[![Engine](https://img.shields.io/badge/Engine-Playwright-orange.svg)]()
+[![Backend](https://img.shields.io/badge/Backend-FastAPI-teal.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **TestSphere-AI** is an intelligent, multi-agent autonomous testing platform designed to plan, generate, execute, analyze, and self-heal end-to-end web application tests.
 
 ---
 
-## 👥 Team Responsibilities & Division of Labor
+## 📚 Technical Documentation Index
 
-- **Member 1 (AI Agent & Intelligence Layer - `vinamra-branch`)**:
+For in-depth architectural and developer documentation, explore our detailed guides:
+
+- 📖 **[Backend Architecture & API Specification](docs/backend-architecture.md)**: Database schemas (SQLAlchemy 2.0), FastAPI REST routes, service transaction boundaries, and SSE streaming.
+- 🎭 **[Browser Execution Engine Guide](docs/engine-architecture.md)**: Playwright lifecycle, `BrowserSession`, multi-tier `LocatorResolver`, and forensic screenshot/DOM artifact extraction.
+- 🔄 **[Self-Healing & Autonomous Orchestration](docs/self-healing-orchestration.md)**: Closed-loop self-healing lifecycle, failure categorization, candidate generation, and dynamic schema bridging.
+- 🔌 **[End-to-End Integration Guide](docs/integration-guide.md)**: Multi-agent coordination, offline mock vs cloud LLM providers, and real-time frontend streaming.
+- 🚢 **[Deployment & Operations Guide](docs/deployment-operations.md)**: Docker containerization, environment variables, GitHub Actions CI/CD, and production observability.
+- 🧠 **[Member 1 AI Agent Architecture](docs/member1-architecture.md)**: Deep dive into LLM prompt engineering, schema validation, and planner contracts.
+
+---
+
+## 👥 Architecture & Division of Labor
+
+- **Member 1 (AI Agent & Intelligence Layer)**:
   - LLM integration & provider-independent client abstraction (`LLMClientSession`, `LLMClient`)
   - Test Planner Agent (test generation, controlled actions/assertions, prioritization, validation)
   - Failure Analyzer Agent (classification & root cause analysis)
   - Self-Healing Agent (selector ranking & confidence scoring)
   - Healing Memory & historical learning
   - Agent Orchestration & pipeline controller
-- **Member 2 (Execution Engine)**:
-  - Playwright browser automation
+- **Member 2 (Browser Execution Engine)**:
+  - Playwright browser automation (Chromium, Firefox, WebKit)
   - DOM snapshot & screenshot extraction
-  - Test execution engine
+  - Deterministic step execution engine (`PlaywrightRunner`)
   - Selector healing execution & validation
-- **Member 3 (Platform & Infrastructure)**:
-  - Backend API & database
-  - Frontend dashboard & reporting
-  - Application-level workflow orchestration
+- **Member 3 (Backend & Orchestration)**:
+  - Backend API (FastAPI) & relational persistence (SQLAlchemy)
+  - Real-time Server-Sent Events (SSE) telemetry stream
+  - Cross-layer orchestration bridge (`PlatformWorkflowOrchestrator`)
+  - Application-level workflow coordination
 
 ---
 
