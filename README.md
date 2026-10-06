@@ -26,23 +26,38 @@ For in-depth architectural and developer documentation, explore our detailed gui
 
 ## 👥 Architecture & Division of Labor
 
-- **Member 1 (AI Agent & Intelligence Layer)**:
+- **Member 1: AI Agent & Intelligence Layer**:
   - LLM integration & provider-independent client abstraction (`LLMClientSession`, `LLMClient`)
   - Test Planner Agent (test generation, controlled actions/assertions, prioritization, validation)
   - Failure Analyzer Agent (classification & root cause analysis)
   - Self-Healing Agent (selector ranking & confidence scoring)
   - Healing Memory & historical learning
   - Agent Orchestration & pipeline controller
-- **Member 2 (Browser Execution Engine)**:
+
+- **Member 2: Browser Execution Engine**:
   - Playwright browser automation (Chromium, Firefox, WebKit)
   - DOM snapshot & screenshot extraction
   - Deterministic step execution engine (`PlaywrightRunner`)
   - Selector healing execution & validation
-- **Member 3 (Backend & Orchestration)**:
-  - Backend API (FastAPI) & relational persistence (SQLAlchemy)
-  - Real-time Server-Sent Events (SSE) telemetry stream
-  - Cross-layer orchestration bridge (`PlatformWorkflowOrchestrator`)
-  - Application-level workflow coordination
+
+- **Member 3: Platform Backend & Multi-Agent Orchestration — Prashansha Maheshwari**:
+  - **Full-Stack Orchestration Bridge**: Architected and developed [`PlatformWorkflowOrchestrator`](backend/orchestration/orchestrator.py), seamlessly binding Member 1's cognitive AI agents and Member 2's browser automation into an automated, self-healing test execution pipeline.
+  - **Bidirectional Schema Converters**: Designed [`converters.py`](backend/orchestration/converters.py) enabling zero-loss data interchange between Member 1 planner schemas and Member 2 Playwright engine representations.
+  - **REST APIs & Real-Time SSE Telemetry**: Engineered high-throughput FastAPI endpoints ([`backend/api/`](backend/api/)) and Server-Sent Events (SSE) streaming for real-time test step monitoring, execution progress, and live healing event notifications.
+  - **Relational Persistence Layer**: Implemented declarative SQLAlchemy models ([`backend/models/`](backend/models/)) and atomic CRUD service architecture ([`backend/services/`](backend/services/)) supporting both SQLite and PostgreSQL.
+  - **Backend Test Suite**: Authored 81 passing unit and integration tests covering database transactions, service boundaries, and REST/SSE API endpoints.
+  - **System Consolidation & Conflict Resolution**: Merged and integrated all member branches into a cohesive production codebase, resolved git merge conflicts, eliminated obsolete duplicate artifacts, and updated [`.gitignore`](.gitignore).
+  - **Technical Documentation & Governance**: Authored comprehensive technical documentation covering backend architecture, engine internals, self-healing lifecycle, integration guide, deployment/DevOps operations, and contributing guidelines.
+
+---
+
+## 🌟 Core Contributors
+
+| Contributor | Role & Domain | Key Contributions & Impact |
+| :--- | :--- | :--- |
+| **Prashansha Maheshwari** | **Member 3: Platform Backend & Orchestration** | FastAPI backend, relational DB models, CRUD services, end-to-end `PlatformWorkflowOrchestrator`, bidirectional schema converters, SSE live streaming, architecture documentation, multi-branch conflict resolution & repo consolidation |
+| **Vinamra Bhatnagar** | **Member 1: AI Agent & Intelligence Layer** | LLM client abstraction, Test Planner Agent, Failure Analyzer Agent, Self-Healing candidate generator & scoring, memory store |
+| **Krishna Singh** | **Member 2: Browser Execution Engine** | Playwright browser automation, DOM snapshot/screenshot capture, `PlaywrightRunner`, smart locators, failure detector |
 
 ---
 
