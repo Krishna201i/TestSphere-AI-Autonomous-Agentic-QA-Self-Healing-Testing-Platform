@@ -7,8 +7,10 @@ Exposes REST API endpoints and coordinates the TestSphere-AI platform services.
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 import logging
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
 from backend.api import (
@@ -60,6 +62,11 @@ app.include_router(applications_router)
 app.include_router(test_cases_router)
 app.include_router(test_executions_router)
 app.include_router(workflow_router)
+
+# Mount frontend dashboard
+frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
+if frontend_dir.exists():
+    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
 
 
 if __name__ == "__main__":
