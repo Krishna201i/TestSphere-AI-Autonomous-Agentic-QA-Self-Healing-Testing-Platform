@@ -115,6 +115,61 @@ class TestWorkflowAPI(unittest.TestCase):
         response = self.client.post("/workflow/execute/999999")
         self.assertEqual(response.status_code, 404)
 
+    @patch("backend.orchestration.orchestrator.run_test")
+    def test_plan_and_execute_endpoint(self, mock_run_test: AsyncMock) -> None:
+        mock_run_test.return_value = EngineTestResult(
+            test_id="TC-AUTO-1",
+            status=TestStatus.PASSED,
+            started_at=datetime.now(timezone.utc),
+            duration_ms=80,
+            steps=[
+                StepResult(step_id="step-1", status=StepStatus.PASSED, duration_ms=80)
+            ],
+            artifacts_dir="artifacts",
+        )
+
+        # Test both /api/workflow/plan-and-execute and /workflow/plan-and-execute
+        payload = {
+            "app_name": "API Plan App",
+            "app_url": "https://example.com",
+            "test_case_name": "Dynamic Case",
+            "steps": [{"step_number": 1, "action": "NAVIGATE", "value": "https://example.com"}],
+        }
+        res_api = self.client.post("/api/workflow/plan-and-execute", json=payload)
+        self.assertEqual(res_api.status_code, 200)
+        data_api = res_api.json()
+        self.assertEqual(data_api["status"], "PASSED")
+        self.assertIn("execution_id", data_api)
+        self.assertGreaterEqual(len(data_api.get("events", [])), 1)
+
+        res_root = self.client.post("/workflow/plan-and-execute", json=payload)
+        self.assertEqual(res_root.status_code, 200)
+
+    @patch("backend.orchestration.orchestrator.run_test")
+    def test_stream_workflow_events(self, mock_run_test: AsyncMock) -> None:
+        mock_run_test.return_value = EngineTestResult(
+            test_id="TC-FLOW-1",
+            status=TestStatus.PASSED,
+            started_at=datetime.now(timezone.utc),
+            duration_ms=100,
+            steps=[
+                StepResult(step_id="step-1", status=StepStatus.PASSED, duration_ms=100)
+            ],
+            artifacts_dir="artifacts",
+        )
+        self.client.post(f"/api/workflow/execute/{self.execution_id}")
+
+        # Stream via /api and direct endpoint, and via numeric id
+        stream_resp = self.client.get(f"/api/workflow/stream/wf-exec-{self.execution_id}")
+        self.assertEqual(stream_resp.status_code, 200)
+        self.assertIn("text/event-stream", stream_resp.headers.get("content-type", ""))
+        self.assertIn("event: ", stream_resp.text)
+
+        num_stream = self.client.get(f"/api/workflow/stream/{self.execution_id}")
+        self.assertEqual(num_stream.status_code, 200)
+        self.assertIn("event: ", num_stream.text)
+
 
 if __name__ == "__main__":
     unittest.main()
+
