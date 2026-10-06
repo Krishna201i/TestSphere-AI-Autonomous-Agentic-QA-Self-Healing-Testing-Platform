@@ -55,18 +55,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routes
-app.include_router(health_router)
-app.include_router(projects_router)
-app.include_router(applications_router)
-app.include_router(test_cases_router)
-app.include_router(test_executions_router)
-app.include_router(workflow_router)
+# Include API routes (both under /api prefix and root for full compatibility)
+api_routers = [
+    health_router,
+    projects_router,
+    applications_router,
+    test_cases_router,
+    test_executions_router,
+    workflow_router,
+]
+for router in api_routers:
+    app.include_router(router, prefix="/api")
+    app.include_router(router)
 
-# Mount frontend dashboard
+# Mount frontend dashboard (serve React production build if dist exists, else static dir)
 frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
-if frontend_dir.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+frontend_dist = frontend_dir / "dist"
+target_dir = frontend_dist if frontend_dist.exists() else frontend_dir
+if target_dir.exists():
+    app.mount("/", StaticFiles(directory=str(target_dir), html=True), name="frontend")
 
 
 if __name__ == "__main__":
