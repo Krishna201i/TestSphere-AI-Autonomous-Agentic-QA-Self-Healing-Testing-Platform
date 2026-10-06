@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import MetricsOverview from './components/MetricsOverview';
-import PipelineStepper from './components/PipelineStepper';
 import LiveExecutionConsole from './components/LiveExecutionConsole';
 import TestCaseTable from './components/TestCaseTable';
 import PlanExecuteModal from './components/PlanExecuteModal';
@@ -108,6 +107,62 @@ const DEFAULT_TEST_CASES = [
       status: 'Test Passed Cleanly',
     },
   },
+  {
+    id: 'TC_SEARCH_004',
+    name: 'Search Product Catalog',
+    category: 'Search & Filter',
+    priority: 'Medium',
+    version: '1.0',
+    outcome: 'PASSED',
+    duration: '1m 45s',
+    logs: [
+      { time: '09:34:21', text: 'Starting execution for test case: TC_SEARCH_004', type: 'info' },
+      { time: '09:34:25', text: 'Querying catalog with "wireless headphones"', type: 'default' },
+      { time: '09:34:30', text: '12 products returned in catalog grid.', type: 'success' },
+    ],
+    failure: {
+      category: 'None',
+      rootCause: 'Search returned expected result list',
+      details: 'No regression found.',
+      evidenceImg: '/assets/evidence_preview.jpg',
+    },
+    healing: {
+      candidate: 'Not Needed',
+      confidence: '100%',
+      oldSelector: 'N/A',
+      newSelector: 'N/A',
+      validation: 'Original locators validated successfully',
+      status: 'Test Passed Cleanly',
+    },
+  },
+  {
+    id: 'TC_PROFILE_005',
+    name: 'Update User Profile Info',
+    category: 'User Account',
+    priority: 'Low',
+    version: '1.0',
+    outcome: 'FAILED',
+    duration: '2m 11s',
+    logs: [
+      { time: '09:12:07', text: 'Starting execution for test case: TC_PROFILE_005', type: 'info' },
+      { time: '09:12:15', text: 'Navigating to /account/profile', type: 'default' },
+      { time: '09:12:20', text: 'Timeout waiting for avatar upload button', type: 'error' },
+    ],
+    failure: {
+      category: 'Timeout Error',
+      rootCause: 'Profile form unresponsive',
+      details: 'Avatar button failed to respond to click event within 3000ms.',
+      evidenceImg: '/assets/evidence_preview.jpg',
+    },
+    healing: {
+      candidate: 'Increase Timeout or Retry',
+      confidence: '45%',
+      oldSelector: 'button#avatar-upload',
+      newSelector: 'input[type="file"]',
+      validation: 'Validation pending',
+      status: 'Pending Verification',
+    },
+  },
 ];
 
 export default function App() {
@@ -131,7 +186,6 @@ export default function App() {
         setBackendStatus(true);
         const liveCases = await getTestCases();
         if (liveCases && liveCases.length > 0) {
-          // Merge live test cases with sample rich data
           const merged = liveCases.map((lc, idx) => ({
             id: lc.external_id || `TC-${lc.id}`,
             name: lc.name,
@@ -185,15 +239,14 @@ export default function App() {
     setTimerSeconds(0);
     setCurrentStepIndex(5); // Completed (Persist)
 
-    // If result has execution_id, subscribe to SSE stream
     if (result.execution_id) {
       subscribeToWorkflowStream(
         result.execution_id,
         (event) => {
           console.log('Live SSE Event:', event);
         },
-        (err) => {
-          console.log('Stream ended or closed.');
+        () => {
+          console.log('Stream ended.');
         }
       );
     }
@@ -204,10 +257,9 @@ export default function App() {
     const tc = testCases.find(t => t.id === id);
     if (!tc) return;
 
-    // Set stepper state based on outcome
-    if (tc.outcome === 'HEALED') setCurrentStepIndex(3); // HEAL
-    else if (tc.outcome === 'PASSED') setCurrentStepIndex(5); // PERSIST
-    else setCurrentStepIndex(2); // DIAGNOSE
+    if (tc.outcome === 'HEALED') setCurrentStepIndex(3);
+    else if (tc.outcome === 'PASSED') setCurrentStepIndex(5);
+    else setCurrentStepIndex(2);
   }
 
   function handleRunTest(tc) {
@@ -216,52 +268,81 @@ export default function App() {
     setIsRunning(true);
     setCurrentStepIndex(0); // PLAN
 
-    // Animate stepper through stages
     setTimeout(() => setCurrentStepIndex(1), 600); // EXECUTE
     setTimeout(() => {
       if (tc.outcome === 'HEALED') {
-        setCurrentStepIndex(2); // DIAGNOSE
-        setTimeout(() => setCurrentStepIndex(3), 800); // HEAL
-        setTimeout(() => setCurrentStepIndex(4), 1600); // VALIDATE
-        setTimeout(() => setCurrentStepIndex(5), 2400); // PERSIST
+        setCurrentStepIndex(2);
+        setTimeout(() => setCurrentStepIndex(3), 800);
+        setTimeout(() => setCurrentStepIndex(4), 1600);
+        setTimeout(() => setCurrentStepIndex(5), 2400);
       } else if (tc.outcome === 'PASSED') {
-        setTimeout(() => setCurrentStepIndex(5), 1200); // PERSIST
+        setTimeout(() => setCurrentStepIndex(5), 1200);
       } else {
-        setCurrentStepIndex(2); // DIAGNOSE
+        setCurrentStepIndex(2);
       }
     }, 1200);
   }
 
   return (
-    <div className="app-layout">
+    <div className="app-container">
       <Sidebar 
         activeNav={activeNav} 
         setActiveNav={setActiveNav}
-        backendStatus={backendStatus}
-        onNewRunClick={() => setIsModalOpen(true)}
       />
 
-      <div className="main-content">
+      <main className="main-content">
         <Header 
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
-          onNewRunClick={() => setIsModalOpen(true)}
           backendStatus={backendStatus}
         />
 
-        <main className="content-container">
+        <div className="dashboard-body">
+          {/* Page Header Title */}
+          <div className="page-title-row">
+            <div className="page-title-box">
+              <div className="page-icon-badge">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <circle cx="12" cy="12" r="6"></circle>
+                  <circle cx="12" cy="12" r="2"></circle>
+                </svg>
+              </div>
+              <div>
+                <h2>Dashboard</h2>
+                <p>Monitor and manage your autonomous QA testing workflows</p>
+              </div>
+            </div>
+
+            <button 
+              className="btn-run-small" 
+              style={{ 
+                padding: '0.65rem 1.25rem', 
+                fontSize: '0.84rem', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.45rem',
+                cursor: 'pointer' 
+              }}
+              onClick={() => setIsModalOpen(true)}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              <span>+ Plan & Execute Test</span>
+            </button>
+          </div>
+
+          {/* 5 KPI METRICS CARDS */}
           <MetricsOverview stats={{
             totalTests: testCases.length,
             passRate: 97.4,
             healedCount: testCases.filter(c => c.outcome === 'HEALED').length,
-            avgDuration: '1.45s',
+            avgDuration: '2m 34s',
           }} />
 
-          <PipelineStepper 
-            currentStepIndex={currentStepIndex}
-            onStepClick={(index) => setCurrentStepIndex(index)}
-          />
-
+          {/* Live Execution & Diagnostics Grid */}
           <LiveExecutionConsole 
             activeRun={activeTestCase}
             logs={activeTestCase?.logs || []}
@@ -269,16 +350,19 @@ export default function App() {
             isRunning={isRunning}
             onTogglePlay={() => setIsRunning(!isRunning)}
             onReset={() => handleRunTest(activeTestCase)}
+            currentStepIndex={currentStepIndex}
+            onStepClick={(index) => setCurrentStepIndex(index)}
           />
 
+          {/* Bottom Data Tables */}
           <TestCaseTable 
             testCases={testCases}
             activeTestCaseId={activeTestCaseId}
             onSelectTestCase={handleSelectTestCase}
             onRunTest={handleRunTest}
           />
-        </main>
-      </div>
+        </div>
+      </main>
 
       <PlanExecuteModal 
         isOpen={isModalOpen}

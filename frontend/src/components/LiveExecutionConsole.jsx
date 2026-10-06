@@ -1,32 +1,23 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Play, 
-  Pause, 
-  RotateCcw, 
-  Terminal, 
-  Clock, 
-  ShieldCheck, 
-  Sparkles,
-  Download,
-  Filter
-} from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { Play, Pause, RotateCcw, Clock } from 'lucide-react';
+import PipelineStepper from './PipelineStepper';
 import DiagnosticsPanel from './DiagnosticsPanel';
 
 export default function LiveExecutionConsole({ 
   activeRun, 
-  logs, 
-  timerSeconds, 
-  isRunning, 
+  logs = [], 
+  timerSeconds = 0, 
+  isRunning = true, 
   onTogglePlay, 
-  onReset 
+  onReset,
+  currentStepIndex = 1,
+  onStepClick,
 }) {
-  const [filterType, setFilterType] = useState('all');
-  const logContainerRef = useRef(null);
+  const terminalRef = useRef(null);
 
-  // Auto scroll logs
   useEffect(() => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
     }
   }, [logs]);
 
@@ -36,115 +27,72 @@ export default function LiveExecutionConsole({
     return `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
   }
 
-  const filteredLogs = logs.filter(log => {
-    if (filterType === 'all') return true;
-    if (filterType === 'info') return log.type === 'info' || log.type === 'default';
-    if (filterType === 'warn') return log.type === 'warn';
-    if (filterType === 'error') return log.type === 'error';
-    if (filterType === 'agent') return log.type === 'agent' || log.type === 'success';
-    return true;
-  });
-
   return (
-    <div className="live-console-grid">
-      {/* Left Column: Live Terminal Stream */}
-      <div className="terminal-panel card-glass">
-        <div className="terminal-header">
-          <div className="terminal-meta-left">
-            <div className="terminal-title">
-              <Terminal size={17} className="text-cyan" />
-              <span>Live Telemetry & Execution Log</span>
-            </div>
-            <div className="terminal-run-id">
-              <span className="mono">{activeRun?.id || 'TC_LOGIN_001'}</span>
-              <span className="run-name">• {activeRun?.name || 'User Login Flow'}</span>
-            </div>
+    <section className="execution-grid">
+      {/* Left: Live Execution Card */}
+      <div className="live-execution-card">
+        <div className="live-card-header">
+          <div className="live-title-area">
+            <h3>Live Test Execution</h3>
+            <span className="live-status-pill">
+              <span className="dot-indicator passed" style={{ width: 8, height: 8 }}></span>
+              <span>Running Simulation</span>
+            </span>
           </div>
 
-          <div className="terminal-controls-right">
-            <div className="elapsed-timer-badge">
-              <Clock size={14} />
+          <div className="live-actions-area">
+            <span className="exec-id-tag mono" id="current-exec-id">
+              {activeRun?.id || 'TC_LOGIN_001'}
+            </span>
+            <div className="live-timer-badge">
+              <Clock size={14} style={{ color: '#38bdf8' }} />
               <span id="execution-timer">{formatTime(timerSeconds)}</span>
             </div>
-
             <button 
-              className={`control-btn ${isRunning ? 'pause' : 'resume'}`}
+              className="btn-stop" 
+              id="btn-toggle-execution"
               onClick={onTogglePlay}
-              title={isRunning ? 'Pause Simulation' : 'Resume Simulation'}
+              title={isRunning ? 'Pause simulation' : 'Resume simulation'}
             >
               {isRunning ? <Pause size={14} /> : <Play size={14} />}
               <span>{isRunning ? 'Pause' : 'Resume'}</span>
             </button>
-
-            <button className="control-icon-btn" onClick={onReset} title="Rerun Simulation">
+            <button 
+              className="btn-stop" 
+              onClick={onReset}
+              title="Rerun test"
+              style={{ background: 'rgba(56, 189, 248, 0.15)', borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+            >
               <RotateCcw size={14} />
             </button>
           </div>
         </div>
 
-        {/* Filter Bar */}
-        <div className="terminal-filter-bar">
-          <div className="filter-group">
-            <button 
-              className={`filter-pill ${filterType === 'all' ? 'active' : ''}`}
-              onClick={() => setFilterType('all')}
-            >
-              All Events ({logs.length})
-            </button>
-            <button 
-              className={`filter-pill ${filterType === 'info' ? 'active' : ''}`}
-              onClick={() => setFilterType('info')}
-            >
-              Info
-            </button>
-            <button 
-              className={`filter-pill ${filterType === 'warn' ? 'active' : ''}`}
-              onClick={() => setFilterType('warn')}
-            >
-              Warnings
-            </button>
-            <button 
-              className={`filter-pill ${filterType === 'error' ? 'active' : ''}`}
-              onClick={() => setFilterType('error')}
-            >
-              Errors
-            </button>
-            <button 
-              className={`filter-pill ${filterType === 'agent' ? 'active' : ''}`}
-              onClick={() => setFilterType('agent')}
-            >
-              AI Agents
-            </button>
-          </div>
+        {/* 6-Stage Autonomous Pipeline Stepper */}
+        <PipelineStepper 
+          currentStepIndex={currentStepIndex} 
+          onStepClick={onStepClick} 
+        />
 
-          <div className="filter-status">
-            <span className="status-pill healed">
-              <Sparkles size={13} />
-              <span>{activeRun?.outcome || 'HEALED'}</span>
-            </span>
-          </div>
-        </div>
-
-        {/* Scrollable Logs Output */}
-        <div className="terminal-body" ref={logContainerRef} id="logs-terminal">
-          {filteredLogs.map((item, idx) => (
-            <div key={idx} className={`log-entry log-${item.type || 'default'}`}>
-              <span className="log-time mono">{item.time || '10:24:00'}</span>
-              <span className={`log-badge badge-${item.type || 'default'}`}>
-                {(item.type || 'INFO').toUpperCase()}
-              </span>
-              <span className="log-msg mono">{item.text}</span>
+        {/* Live Terminal Window */}
+        <div className="terminal-window" id="terminal-logs" ref={terminalRef}>
+          {logs.map((log, idx) => (
+            <div className="log-line" key={idx}>
+              <span className="log-time">[{log.time || '10:24:00'}]</span>
+              <span className={`log-text ${log.type || 'default'}`}>{log.text}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Right Column: AI Diagnostics & Self-Healing Cards */}
-      <DiagnosticsPanel 
-        failureData={activeRun?.failure}
-        healingData={activeRun?.healing}
-        outcome={activeRun?.outcome}
-      />
-    </div>
+      {/* Right Column: Diagnostics (Failure Analysis & Healing Solution) */}
+      <div className="diagnostics-col">
+        <DiagnosticsPanel 
+          failureData={activeRun?.failure}
+          healingData={activeRun?.healing}
+          outcome={activeRun?.outcome}
+        />
+      </div>
+    </section>
   );
 }
