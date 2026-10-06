@@ -1,138 +1,131 @@
 import React from 'react';
-import { AlertTriangle, Sparkles, CheckCircle2, XCircle, Eye, ArrowRight } from 'lucide-react';
 
 export default function DiagnosticsPanel({ failureData, healingData, outcome }) {
-  const isHealed = outcome === 'HEALED' || outcome === 'PASSED';
+  const isHealed = outcome === 'HEALED';
+  const isPassed = outcome === 'PASSED';
 
   return (
-    <div className="diagnostics-column">
-      {/* Failure Analysis Card */}
-      <div className="diag-card failure-card card-glass">
-        <div className="card-top">
-          <div className="card-title-group">
-            <AlertTriangle size={18} className="text-rose" />
-            <span className="card-heading">AI Failure Analysis</span>
+    <>
+      {/* Card 1: Failure Analysis */}
+      <div className="diag-card">
+        <div className="diag-header">
+          <div className="diag-header-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" strokeWidth="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <span>Failure Analysis</span>
           </div>
-          <span className={`pill-badge ${failureData?.category === 'None' ? 'green' : 'red'}`} id="failure-status-badge">
+          <span 
+            className={`pill-badge ${isPassed ? 'purple' : 'red'}`} 
+            id="failure-status-badge"
+            style={isPassed ? { background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.4)' } : {}}
+          >
             {outcome || 'FAILED'}
           </span>
         </div>
 
-        <div className="diag-content">
-          <div className="diag-row">
-            <span className="row-label">Category:</span>
-            <span className="row-value highlight-rose" id="failure-category">
-              {failureData?.category || 'Element Not Found (Locator Changed)'}
-            </span>
-          </div>
-
-          <div className="diag-row">
-            <span className="row-label">Root Cause:</span>
-            <span className="row-value" id="failure-root-cause">
-              {failureData?.rootCause || 'Target selector `#login-btn` timed out in DOM'}
-            </span>
-          </div>
-
-          <div className="diag-row">
-            <span className="row-label">Details:</span>
-            <p className="row-details-text" id="failure-details">
-              {failureData?.details || 'Playwright engine timed out after 5000ms waiting for `#login-btn`. Triggered FailureAnalyzerAgent.'}
-            </p>
-          </div>
-
-          {/* Screenshot Evidence */}
-          <div className="evidence-preview-wrap">
-            <div className="evidence-header">
-              <span className="evidence-label">Visual Failure Evidence</span>
-              <span className="evidence-zoom">
-                <Eye size={13} /> Inspect Frame
-              </span>
-            </div>
-            <div className="evidence-img-container">
-              <img 
-                src={failureData?.evidenceImg || '/assets/evidence_preview.jpg'} 
-                alt="Failure Screenshot" 
-                className="evidence-screenshot"
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                }}
-              />
-              <div className="evidence-overlay">
-                <span className="evidence-tag">Step #1 Failure Captured</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Self-Healing Card */}
-      <div className="diag-card healing-card card-glass">
-        <div className="card-top">
-          <div className="card-title-group">
-            <Sparkles size={18} className="text-purple" />
-            <span className="card-heading">Autonomous Self-Healing</span>
-          </div>
-          <span className="pill-badge purple">
-            {isHealed ? 'Healing Verified' : 'AI Analysis'}
+        <div className="diag-row">
+          <span className="diag-label">Category</span>
+          <span className={`diag-value ${isPassed ? '' : 'red-text'}`} id="failure-category">
+            {failureData?.category || 'Element Not Found'}
           </span>
         </div>
 
-        <div className="diag-content">
-          <div className="confidence-meter-wrap">
-            <div className="confidence-meta">
-              <span className="confidence-label">AI Confidence Score</span>
-              <span className="confidence-score" id="healing-confidence">
-                {healingData?.confidence || '92%'}
-              </span>
-            </div>
-            <div className="progress-bar-bg">
+        <div className="diag-row">
+          <span className="diag-label">Root Cause</span>
+          <span className="diag-value" id="failure-root-cause">
+            {failureData?.rootCause || 'Login button selector changed'}
+          </span>
+        </div>
+
+        <div className="diag-row" style={{ flexDirection: 'column', gap: '0.35rem' }}>
+          <span className="diag-label">Evidence</span>
+          <div className="evidence-thumbnail" id="evidence-box">
+            <img 
+              src={failureData?.evidenceImg || '/assets/evidence_preview.jpg'} 
+              alt="Evidence Screenshot Preview" 
+              id="evidence-img" 
+            />
+          </div>
+        </div>
+
+        <div className="diag-row">
+          <span className="diag-label">Details</span>
+          <span className="diag-value" style={{ fontSize: '0.76rem', color: '#94a3b8' }} id="failure-details">
+            {failureData?.details || "Element with selector '#login-btn' not found on the page"}
+          </span>
+        </div>
+      </div>
+
+      {/* Card 2: Healing Solution */}
+      <div className="diag-card healing-card">
+        <div className="diag-header">
+          <div className="diag-header-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c084fc" strokeWidth="2">
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+            </svg>
+            <span>Healing Solution</span>
+          </div>
+          <span className="pill-badge purple" id="healing-status-badge">
+            {isHealed ? 'HEALED' : (isPassed ? 'VERIFIED' : 'ANALYZED')}
+          </span>
+        </div>
+
+        <div className="diag-row">
+          <span className="diag-label">Candidate</span>
+          <span className="diag-value" id="healing-candidate">
+            {healingData?.candidate || 'CSS Selector Update'}
+          </span>
+        </div>
+
+        <div className="diag-row">
+          <span className="diag-label">Confidence</span>
+          <div className="confidence-bar-wrapper">
+            <span className="confidence-percent" id="healing-confidence">
+              {healingData?.confidence || '92%'}
+            </span>
+            <div className="confidence-bar">
               <div 
-                className="progress-bar-fill" 
+                className="confidence-fill" 
                 id="confidence-fill" 
                 style={{ width: healingData?.confidence || '92%' }}
               />
             </div>
           </div>
+        </div>
 
-          <div className="selector-diff-box">
-            <div className="diff-item old-selector">
-              <div className="diff-tag">Original Locator:</div>
-              <code className="mono text-rose" id="healing-old-selector">
-                {healingData?.oldSelector || '#login-btn'}
-              </code>
-            </div>
+        <div className="diag-row">
+          <span className="diag-label">Old Selector</span>
+          <code className="code-pill red" id="healing-old-selector">
+            {healingData?.oldSelector || '#login-btn'}
+          </code>
+        </div>
 
-            <div className="diff-arrow">
-              <ArrowRight size={16} />
-            </div>
+        <div className="diag-row">
+          <span className="diag-label">New Selector</span>
+          <code className="code-pill green" id="healing-new-selector">
+            {healingData?.newSelector || 'button[type="submit"]'}
+          </code>
+        </div>
 
-            <div className="diff-item new-selector">
-              <div className="diff-tag">Healed Candidate:</div>
-              <code className="mono text-emerald" id="healing-new-selector">
-                {healingData?.newSelector || 'button[type="submit"]'}
-              </code>
-            </div>
-          </div>
+        <div className="diag-row">
+          <span className="diag-label">Validation</span>
+          <span className="diag-value" style={{ fontSize: '0.78rem' }} id="healing-validation">
+            {healingData?.validation || 'Successfully validated by browser'}
+          </span>
+        </div>
 
-          <div className="validation-status-box">
-            <div className="val-icon-wrap">
-              {isHealed ? (
-                <CheckCircle2 size={16} className="text-emerald" />
-              ) : (
-                <XCircle size={16} className="text-rose" />
-              )}
-            </div>
-            <div className="val-text">
-              <span className="val-title" id="healing-validation">
-                {healingData?.validation || 'Successfully Validated by Engine'}
-              </span>
-              <span className="val-subtitle" id="healing-outcome-text">
-                {healingData?.status || 'Replacement selector passed browser assertion'}
-              </span>
-            </div>
-          </div>
+        <div className="healing-status-line">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          <span id="healing-outcome-text">
+            {healingData?.status || 'Healing Successful'}
+          </span>
         </div>
       </div>
-    </div>
+    </>
   );
 }

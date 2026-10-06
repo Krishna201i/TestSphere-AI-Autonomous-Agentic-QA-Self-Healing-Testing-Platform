@@ -1,14 +1,12 @@
-import React, { useState } from 'react';
-import { 
-  FlaskConical, 
-  Play, 
-  CheckCircle2, 
-  XCircle, 
-  Sparkles, 
-  Clock, 
-  ArrowUpDown,
-  ExternalLink
-} from 'lucide-react';
+import React from 'react';
+
+const RECENT_EXECUTIONS = [
+  { id: 'exec_20250429_102432', testCaseId: 'TC_LOGIN_001', status: 'healed', duration: '2m 34s', time: '10:24:32' },
+  { id: 'exec_20250429_101215', testCaseId: 'TC_CART_002', status: 'failed', duration: '1m 12s', time: '10:12:15' },
+  { id: 'exec_20250429_095843', testCaseId: 'TC_CHECKOUT_003', status: 'passed', duration: '3m 18s', time: '09:58:43' },
+  { id: 'exec_20250429_093421', testCaseId: 'TC_SEARCH_004', status: 'passed', duration: '1m 45s', time: '09:34:21' },
+  { id: 'exec_20250429_091207', testCaseId: 'TC_PROFILE_005', status: 'failed', duration: '2m 11s', time: '09:12:07' },
+];
 
 export default function TestCaseTable({ 
   testCases, 
@@ -16,125 +14,82 @@ export default function TestCaseTable({
   onSelectTestCase, 
   onRunTest 
 }) {
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  function renderStatusPill(outcome) {
+    const status = (outcome || 'PASSED').toLowerCase();
+    let display = 'Passed';
+    let pillClass = 'passed';
 
-  const filteredCases = testCases.filter(tc => {
-    if (statusFilter === 'ALL') return true;
-    return tc.outcome === statusFilter;
-  });
+    if (status === 'healed') {
+      display = 'Healed';
+      pillClass = 'healed';
+    } else if (status === 'failed') {
+      display = 'Failed';
+      pillClass = 'failed';
+    } else if (status === 'pending') {
+      display = 'Pending';
+      pillClass = 'pending';
+    }
 
-  function getStatusBadge(outcome) {
-    if (outcome === 'HEALED') {
-      return (
-        <span className="pill-badge purple">
-          <Sparkles size={12} />
-          <span>Healed</span>
-        </span>
-      );
-    }
-    if (outcome === 'PASSED') {
-      return (
-        <span className="pill-badge green">
-          <CheckCircle2 size={12} />
-          <span>Passed</span>
-        </span>
-      );
-    }
     return (
-      <span className="pill-badge red">
-        <XCircle size={12} />
-        <span>Failed</span>
+      <span className={`status-pill-small ${pillClass}`}>
+        <span className={`dot-indicator ${pillClass}`} />
+        <span>{display}</span>
       </span>
     );
   }
 
-  function getPriorityBadge(priority) {
-    const p = (priority || 'Medium').toLowerCase();
-    return <span className={`priority-tag ${p}`}>{priority || 'Medium'}</span>;
-  }
-
   return (
-    <div className="table-panel card-glass">
-      <div className="table-header">
-        <div className="table-title-group">
-          <FlaskConical size={18} className="text-indigo" />
-          <h3 className="table-heading">Test Suite Inventory & Execution History</h3>
+    <section className="tables-grid">
+      {/* Left Table: Test Cases */}
+      <div className="data-table-card">
+        <div className="table-card-header">
+          <div className="table-title-area">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
+            <h3>Test Cases</h3>
+          </div>
+          <a href="#view-all-tests" className="view-all-link" onClick={(e) => e.preventDefault()}>View All</a>
         </div>
 
-        <div className="table-filter-tabs">
-          <button 
-            className={`tab-btn ${statusFilter === 'ALL' ? 'active' : ''}`}
-            onClick={() => setStatusFilter('ALL')}
-          >
-            All Tests ({testCases.length})
-          </button>
-          <button 
-            className={`tab-btn ${statusFilter === 'HEALED' ? 'active' : ''}`}
-            onClick={() => setStatusFilter('HEALED')}
-          >
-            Healed ({testCases.filter(c => c.outcome === 'HEALED').length})
-          </button>
-          <button 
-            className={`tab-btn ${statusFilter === 'PASSED' ? 'active' : ''}`}
-            onClick={() => setStatusFilter('PASSED')}
-          >
-            Passed ({testCases.filter(c => c.outcome === 'PASSED').length})
-          </button>
-          <button 
-            className={`tab-btn ${statusFilter === 'FAILED' ? 'active' : ''}`}
-            onClick={() => setStatusFilter('FAILED')}
-          >
-            Failed ({testCases.filter(c => c.outcome === 'FAILED').length})
-          </button>
-        </div>
-      </div>
-
-      <div className="table-wrapper">
-        <table className="custom-table">
+        <table className="styled-table" id="test-cases-table">
           <thead>
             <tr>
-              <th>Status</th>
-              <th>Test ID</th>
-              <th>Scenario Name</th>
+              <th>ID</th>
+              <th>Test Name</th>
               <th>Category</th>
               <th>Priority</th>
-              <th>Duration</th>
-              <th className="text-right">Quick Actions</th>
+              <th>Version</th>
+              <th>Status</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody id="test-cases-tbody">
-            {filteredCases.map((tc) => {
+            {testCases.map((tc) => {
               const isSelected = tc.id === activeTestCaseId;
+              const priorityClass = (tc.priority || 'Medium').toLowerCase();
+
               return (
                 <tr 
                   key={tc.id} 
-                  className={`table-row ${isSelected ? 'row-selected' : ''}`}
+                  style={isSelected ? { background: 'rgba(99, 102, 241, 0.15)' } : {}}
                   onClick={() => onSelectTestCase(tc.id)}
                 >
-                  <td>{getStatusBadge(tc.outcome)}</td>
-                  <td className="mono text-muted">{tc.id}</td>
-                  <td className="test-name-cell">
-                    <span className="name-primary">{tc.name}</span>
-                    <span className="name-sub">v{tc.version || '1.0'}</span>
-                  </td>
-                  <td>
-                    <span className="category-pill">{tc.category || 'Functional'}</span>
-                  </td>
-                  <td>{getPriorityBadge(tc.priority)}</td>
-                  <td className="mono text-muted">
-                    <div className="duration-cell">
-                      <Clock size={13} />
-                      <span>{tc.duration || '1m 24s'}</span>
-                    </div>
-                  </td>
-                  <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                  <td><code className="mono" style={{ color: '#cbd5e1' }}>{tc.id}</code></td>
+                  <td><strong>{tc.name}</strong></td>
+                  <td>{tc.category || 'Functional'}</td>
+                  <td><span className={`priority-badge ${priorityClass}`}>{tc.priority || 'Medium'}</span></td>
+                  <td>{tc.version || '1.0'}</td>
+                  <td>{renderStatusPill(tc.outcome)}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <button 
-                      className="table-action-btn"
+                      className="btn-run-small" 
                       onClick={() => onRunTest(tc)}
-                      title="Run with Autonomous Agents"
                     >
-                      <Play size={13} />
-                      <span>Run</span>
+                      Run
                     </button>
                   </td>
                 </tr>
@@ -143,6 +98,43 @@ export default function TestCaseTable({
           </tbody>
         </table>
       </div>
-    </div>
+
+      {/* Right Table: Recent Executions */}
+      <div className="data-table-card">
+        <div className="table-card-header">
+          <div className="table-title-area">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polygon points="10 8 16 12 10 16 10 8"></polygon>
+            </svg>
+            <h3>Recent Executions</h3>
+          </div>
+          <a href="#view-all-executions" className="view-all-link" onClick={(e) => e.preventDefault()}>View All</a>
+        </div>
+
+        <table className="styled-table" id="executions-table">
+          <thead>
+            <tr>
+              <th>Execution ID</th>
+              <th>Test Case</th>
+              <th>Status</th>
+              <th>Duration</th>
+              <th>Started At</th>
+            </tr>
+          </thead>
+          <tbody id="executions-tbody">
+            {RECENT_EXECUTIONS.map((ex) => (
+              <tr key={ex.id} onClick={() => onSelectTestCase(ex.testCaseId)}>
+                <td><code className="mono" style={{ color: '#cbd5e1' }}>{ex.id}</code></td>
+                <td>{ex.testCaseId}</td>
+                <td>{renderStatusPill(ex.status)}</td>
+                <td>{ex.duration}</td>
+                <td>{ex.time}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
