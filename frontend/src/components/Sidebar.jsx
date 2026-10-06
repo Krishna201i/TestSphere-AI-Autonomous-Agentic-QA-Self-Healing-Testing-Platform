@@ -1,93 +1,53 @@
 import React from 'react';
-import { 
-  LayoutDashboard, 
-  FlaskConical, 
-  PlayCircle, 
-  AlertTriangle, 
-  Wand2, 
-  BarChart3, 
-  Settings, 
-  Bot,
-  Activity,
-  Layers
-} from 'lucide-react';
 
-export default function Sidebar({ activeNav, setActiveNav, backendStatus, onNewRunClick }) {
+export default function Sidebar({ activeNav, setActiveNav }) {
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'test-cases', label: 'Test Cases', icon: FlaskConical },
-    { id: 'executions', label: 'Executions', icon: PlayCircle },
-    { id: 'diagnostics', label: 'Failure Analyzer', icon: AlertTriangle },
-    { id: 'healing', label: 'Self-Healing Hub', icon: Wand2 },
-    { id: 'analytics', label: 'Analytics & KPIs', icon: BarChart3 },
-    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'projects', label: 'Projects' },
+    { id: 'applications', label: 'Applications' },
+    { id: 'test-cases', label: 'Test Cases' },
+    { id: 'executions', label: 'Executions' },
+    { id: 'failures', label: 'Failures & Healing' },
+    { id: 'reports', label: 'Reports' },
+    { id: 'system', label: 'System Status' },
   ];
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand">
-        <div className="brand-logo-container">
-          <img 
-            src="/assets/ai_robot_mascot.jpg" 
-            alt="AI Robot" 
-            className="brand-mascot-img"
-            onError={(e) => {
-              // fallback if missing
-              e.target.style.display = 'none';
-            }} 
-          />
-          <div className="brand-icon-fallback">
-            <Bot size={22} color="#818cf8" />
-          </div>
+      <div className="brand">
+        <div className="brand-icon-wrapper">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="7"></circle>
+            <ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-30 12 12)"></ellipse>
+          </svg>
         </div>
-        <div className="brand-titles">
-          <span className="brand-name">TestSphere-AI</span>
-          <span className="brand-subtitle">Autonomous QA Agent</span>
+        <div className="brand-text">
+          <h1>TestSphere<span>-AI</span></h1>
+          <p>Autonomous Agentic QA Platform</p>
         </div>
       </div>
 
-      <div className="sidebar-context">
-        <label className="context-label">ACTIVE WORKSPACE</label>
-        <div className="context-card">
-          <Layers size={16} className="context-icon" />
-          <div className="context-info">
-            <span className="context-project">E-Commerce Webapp</span>
-            <span className="context-app">Staging v2.4.1</span>
-          </div>
-        </div>
-      </div>
-
-      <nav className="sidebar-nav">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeNav === item.id;
-          return (
-            <button
-              key={item.id}
-              className={`nav-item ${isActive ? 'active' : ''}`}
-              onClick={() => setActiveNav(item.id)}
-            >
-              <Icon size={18} className="nav-icon" />
+      <nav className="nav-menu">
+        {navItems.map((item) => (
+          <li 
+            key={item.id} 
+            className={`nav-item ${activeNav === item.id ? 'active' : ''}`}
+            onClick={() => setActiveNav(item.id)}
+          >
+            <a href={`#${item.id}`} onClick={(e) => e.preventDefault()}>
               <span>{item.label}</span>
-              {item.id === 'healing' && <span className="nav-pill">AI Auto</span>}
-            </button>
-          );
-        })}
+            </a>
+          </li>
+        ))}
       </nav>
 
-      <div className="sidebar-footer">
-        <button className="primary-action-btn" onClick={onNewRunClick}>
-          <PlayCircle size={18} />
-          <span>Plan & Execute</span>
-        </button>
-
-        <div className="engine-status-pill">
-          <span className={`status-dot ${backendStatus ? 'online' : 'offline'}`} />
-          <div className="status-meta">
-            <span className="status-label">Engine & Agents</span>
-            <span className="status-sub">{backendStatus ? 'Connected (Playwright/FastAPI)' : 'Standalone Preview'}</span>
-          </div>
+      {/* Bottom AI Mascot Card */}
+      <div className="sidebar-ai-widget">
+        <div className="mascot-avatar">
+          <img src="/assets/ai_robot_mascot.jpg" alt="AI Agent Mascot" id="mascot-img" />
         </div>
+        <div className="widget-title">AI-Powered Self-Healing Testing</div>
+        <div className="widget-subtitle">Plan • Execute • Diagnose<br />Heal • Validate • Persist</div>
       </div>
     </aside>
   );
