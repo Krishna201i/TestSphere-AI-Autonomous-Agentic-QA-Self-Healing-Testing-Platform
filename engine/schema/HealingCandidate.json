@@ -1,0 +1,69 @@
+{
+  "$defs": {
+    "HealingSignals": {
+      "description": "Per-signal similarity scores contributing to overall candidate score.",
+      "properties": {
+        "attribute": {
+          "default": 0.0,
+          "description": "Score from id/class/attribute comparison",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Attribute",
+          "type": "number"
+        },
+        "text": {
+          "default": 0.0,
+          "description": "Score from visible text comparison (rapidfuzz)",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Text",
+          "type": "number"
+        },
+        "position": {
+          "default": 0.0,
+          "description": "Score from bounding-box proximity",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Position",
+          "type": "number"
+        },
+        "structure": {
+          "default": 0.0,
+          "description": "Score from DOM structural comparison (parent chain, sibling index)",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Structure",
+          "type": "number"
+        }
+      },
+      "title": "HealingSignals",
+      "type": "object"
+    }
+  },
+  "description": "One live-DOM candidate evaluated during a healing attempt.",
+  "properties": {
+    "locator": {
+      "description": "CSS/XPath locator for this candidate",
+      "title": "Locator",
+      "type": "string"
+    },
+    "score": {
+      "description": "Weighted composite score",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Score",
+      "type": "number"
+    },
+    "signals": {
+      "$ref": "#/$defs/HealingSignals",
+      "description": "Per-signal breakdown"
+    }
+  },
+  "required": [
+    "locator",
+    "score",
+    "signals"
+  ],
+  "title": "HealingCandidate",
+  "type": "object"
+}
