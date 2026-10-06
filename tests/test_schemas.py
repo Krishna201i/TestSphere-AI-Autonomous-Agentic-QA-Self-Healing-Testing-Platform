@@ -40,6 +40,7 @@ class TestFailureTypeEnum:
 
     def test_all_failure_types_exist(self):
         expected = {
+            "SELECTOR_CHANGED",
             "ELEMENT_NOT_FOUND",
             "ELEMENT_NOT_INTERACTABLE",
             "TIMEOUT",
@@ -53,7 +54,7 @@ class TestFailureTypeEnum:
         assert actual == expected
 
     def test_failure_type_count(self):
-        assert len(FailureType) == 8
+        assert len(FailureType) == 9
 
     def test_failure_type_is_string(self):
         assert FailureType.ELEMENT_NOT_FOUND == "ELEMENT_NOT_FOUND"
@@ -235,51 +236,51 @@ class TestAnalyzerSchemas:
     """Validate Failure Analyzer data contracts."""
 
     def test_create_test_failure(self):
-        """Match the failure contract from the requirements."""
+        """Match the failure contract — Day 9 FailureContext schema."""
         failure = TestFailure(
             test_id="TC001",
+            execution_id="exec-001",
             failed_step=3,
             action="click",
-            selector="#login-button",
-            error="Element not found",
-            url="/login",
-            dom_snapshot="<html>...</html>",
-            screenshot_path="/tmp/screenshot.png",
-            expected="Element should be clickable",
-            actual="Element not found in DOM",
+            target_selector="#login-button",
+            error_message="Element not found",
+            current_page_url="/login",
+            expected_result="Element should be clickable",
+            actual_result="Element not found in DOM",
         )
         assert failure.test_id == "TC001"
         assert failure.failed_step == 3
-        assert failure.selector == "#login-button"
+        assert failure.target_selector == "#login-button"
 
     def test_create_failure_analysis(self):
-        """Match the analysis contract from the requirements."""
+        """Match the analysis contract — Day 9 FailureAnalysis schema."""
+        from agents.schemas.enums import ConfidenceLevel, RecommendedAction
+
         analysis = FailureAnalysis(
+            test_id="TC001",
+            execution_id="exec-001",
             failure_type=FailureType.ELEMENT_NOT_FOUND,
             root_cause="The original selector no longer identifies the intended element.",
-            healable=True,
-            confidence=0.94,
+            confidence=ConfidenceLevel.HIGH,
+            failed_step=3,
+            recommended_action=RecommendedAction.INSPECT_CURRENT_UI,
         )
         assert analysis.failure_type == FailureType.ELEMENT_NOT_FOUND
-        assert analysis.healable is True
-        assert analysis.confidence == 0.94
+        assert analysis.confidence == ConfidenceLevel.HIGH
 
-    def test_confidence_bounds(self):
-        """Confidence must be between 0.0 and 1.0."""
-        with pytest.raises(Exception):
-            FailureAnalysis(
-                failure_type=FailureType.UNKNOWN,
-                root_cause="test",
-                healable=False,
-                confidence=1.5,  # Invalid: > 1.0
-            )
+    def test_confidence_is_enum(self):
+        """Confidence must be a valid ConfidenceLevel."""
+        from agents.schemas.enums import ConfidenceLevel, RecommendedAction
 
         with pytest.raises(Exception):
             FailureAnalysis(
+                test_id="TC001",
+                execution_id="exec-001",
                 failure_type=FailureType.UNKNOWN,
                 root_cause="test",
-                healable=False,
-                confidence=-0.1,  # Invalid: < 0.0
+                confidence="SUPER_HIGH",  # Invalid
+                failed_step=1,
+                recommended_action=RecommendedAction.REQUIRE_FURTHER_ANALYSIS,
             )
 
 

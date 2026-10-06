@@ -1,8 +1,8 @@
 # TestSphere-AI — Member 1: AI Intelligence Layer Architecture
 
-> **Version:** 0.5.0 (Day 5 — Test Planner Generation Pipeline)
+> **Version:** 1.0.0 (Day 15 — Autonomous Intelligence Pipeline Complete)
 > **Author:** Member 1
-> **Date:** 2026-09-03
+> **Date:** 2026-10-02
 
 ---
 
@@ -849,4 +849,575 @@ No changes to `planner.py`, `validation.py`, `prompts.py`, or
 ---
 
 *This document will be updated as the architecture evolves on future development days.*
+
+
+---
+
+## Day 10 — Self-Healing Decision & Candidate Generation Foundation
+
+> **Version:** 0.10.0 (Day 10)
+> **Date:** 2026-09-11
+
+### Overview
+
+Day 10 implements the **Healing Decision Layer** — the intelligence component that sits
+between the Failure Analyzer (Day 9) and Member 2's Self-Healing Engine. It takes a
+`FailureAnalysis`, generates candidate replacement selectors, scores and ranks them
+deterministically, and produces a structured `HealingRecommendation`.
+
+**IMPORTANT:** This layer does NOT execute browser actions or modify selectors. It only
+produces structured recommendations that Member 2 can consume.
+
+### Architecture
+
+```
+Failed Test
+     ↓
+Failure Analyzer (Day 9)
+     ↓
+FailureAnalysis
+     ↓
+Healing Decision Engine (Day 10)
+     ├── Safety Rules Check
+     ├── Candidate Generation
+     │   ├── From current UI elements
+     │   └── From historical healing memory
+     ├── Candidate Scoring (deterministic weights)
+     ├── Candidate Ranking
+     ├── Confidence Threshold Evaluation
+     └── Optional LLM Disambiguation
+     ↓
+HealingRecommendation
+     ↓
+recommendation_to_healing_candidate()
+     ↓
+HealingCandidate (Member 2 contract)
+     ↓
+Member 2: Browser Validation
+     ↓
+HealingResult
+     ↓
+healing_result_to_memory_update()
+     ↓
+MemoryStore update
+```
+
+### New Enums
+
+| Enum              | Values                                                                          |
+|-------------------|---------------------------------------------------------------------------------|
+| `HealingAction`   | `TRY_REPLACEMENT_SELECTOR`, `SEARCH_CURRENT_UI`, `REQUIRE_FURTHER_ANALYSIS`, `DO_NOT_HEAL` |
+| `CandidateSource` | `HISTORICAL_MEMORY`, `CURRENT_DOM`, `LLM_SUGGESTION`                            |
+
+### New Schemas
+
+#### `ScoredCandidate`
+
+Internal candidate evaluation with individual similarity scores:
+
+| Field                  | Type            | Description                         |
+|------------------------|-----------------|-------------------------------------|
+| `selector`             | `str`           | Candidate replacement selector      |
+| `selector_type`        | `str`           | "id", "css", "xpath", etc.          |
+| `source`               | `CandidateSource` | Where the candidate originated   |
+| `confidence`           | `float [0,1]`   | Computed weighted confidence        |
+| `evidence`             | `list[str]`     | Observable evidence strings         |
+| `text_similarity`      | `float [0,1]`   | Text content match score            |
+| `role_similarity`      | `float [0,1]`   | ARIA/semantic role match score      |
+| `type_similarity`      | `float [0,1]`   | Element type match score            |
+| `page_similarity`      | `float [0,1]`   | Page context match score            |
+| `historical_similarity`| `float [0,1]`   | Historical relationship score       |
+| `name_similarity`      | `float [0,1]`   | Name attribute match score          |
+
+#### `HealingRecommendation`
+
+Primary output of the Healing Decision Engine:
+
+| Field                | Type                        | Description                          |
+|----------------------|-----------------------------|--------------------------------------|
+| `test_id`            | `str`                       | Failed test case ID                  |
+| `execution_id`       | `str`                       | Execution identifier                 |
+| `failed_step`        | `int`                       | 1-based failed step number           |
+| `original_selector`  | `str`                       | The selector that failed             |
+| `failure_type`       | `FailureType`               | Classified failure type              |
+| `candidates`         | `list[ScoredCandidate]`     | Ranked candidates (highest first)    |
+| `selected_candidate` | `Optional[ScoredCandidate]` | Top candidate if above threshold     |
+| `confidence`         | `ConfidenceLevel`           | Overall recommendation confidence    |
+| `recommended_action` | `HealingAction`             | Recommended action for Member 2      |
+| `evidence`           | `list[str]`                 | Summary evidence                     |
+| `requires_validation`| `bool` (always `True`)      | Member 2 must validate               |
+
+#### `HealingContext`
+
+Input context aggregation:
+
+| Field              | Type                   | Description                    |
+|--------------------|------------------------|--------------------------------|
+| `failure_analysis` | `FailureAnalysis`      | From the Failure Analyzer      |
+| `current_elements` | `list[ElementRecord]`  | Current UI candidate elements  |
+| `page_url`         | `Optional[str]`        | Current page URL               |
+| `page_title`       | `Optional[str]`        | Current page title             |
+
+### Candidate Generation
+
+`CandidateGenerator` uses two sources:
+
+1. **Current UI Elements** — compares each element against the historical element record
+   using text, role, type, page, and name similarity.
+2. **Historical Healing Records** — looks up previously successful healings for the same
+   selector via `MemoryStore.get_healing_history()`.
+
+### Scoring Weights
+
+`CandidateScorer` applies configurable `ScoringWeights` (all sum to 1.0):
+
+| Component   | Default Weight | Strength |
+|-------------|---------------|----------|
+| Text        | 0.30          | Strong   |
+| Role        | 0.25          | Strong   |
+| Page        | 0.15          | Moderate |
+| Historical  | 0.15          | Bonus    |
+| Type        | 0.10          | Moderate |
+| Name        | 0.05          | Light    |
+
+**Design Principle:** A perfect match on all current-DOM observable attributes
+(text+role+type+page+name = 0.85) achieves HIGH confidence even without historical data.
+
+### Confidence Thresholds
+
+| Level    | Range         | Default Threshold |
+|----------|---------------|-------------------|
+| HIGH     | ≥ threshold   | 0.80              |
+| MEDIUM   | ≥ threshold   | 0.50              |
+| LOW      | < medium      | —                 |
+| Minimum  | Below = block | 0.30              |
+
+### Safety Rules
+
+Healing is **blocked** (DO_NOT_HEAL) for:
+- `ASSERTION_FAILURE` — application logic errors should not be masked
+- `NETWORK_ERROR` — infrastructure issues, not selector problems
+- `APPLICATION_ERROR` — backend errors, not UI selector issues
+- No candidates available
+- Confidence below minimum threshold (0.30)
+
+### Action Mapping
+
+| Condition                                  | Action                        |
+|--------------------------------------------|-------------------------------|
+| High/Medium confidence + candidate found   | `TRY_REPLACEMENT_SELECTOR`    |
+| Low confidence + candidate exists          | `SEARCH_CURRENT_UI`           |
+| No candidates + UNKNOWN failure            | `REQUIRE_FURTHER_ANALYSIS`    |
+| Non-healable failure or below threshold    | `DO_NOT_HEAL`                 |
+
+### Member 1 ↔ Member 2 Interface
+
+```
+MEMBER 1 produces:         MEMBER 2 consumes:
+HealingRecommendation  →   HealingCandidate
+                              ↓
+                           Browser execution
+                              ↓
+                           Validation
+                              ↓
+HealingResult          ←   HealingResult
+                              ↓
+healing_result_to_memory_update()
+                              ↓
+MemoryStore.store_healing_record()
+```
+
+Helper functions:
+- `recommendation_to_healing_candidate()` — maps recommendation to the existing `HealingCandidate` inter-member contract
+- `healing_result_to_memory_update()` — prepares validated results for memory storage
+
+### Optional LLM Support
+
+The LLM is used **only** when:
+1. Multiple candidates exist with tied/close scores (within 0.1)
+2. No clear deterministic winner
+3. LLM client is available
+
+The LLM never runs for obvious cases. Uses existing `LLMClientSession.generate_json()`.
+
+### Files Created/Modified
+
+| File                                        | Status   | Description                           |
+|---------------------------------------------|----------|---------------------------------------|
+| `agents/schemas/enums.py`                   | Modified | Added `HealingAction`, `CandidateSource` |
+| `agents/schemas/__init__.py`                | Modified | New enum exports                      |
+| `agents/schemas/contracts.py`               | Modified | New schema exports                    |
+| `agents/healer/healing_schemas.py`          | New      | `ScoredCandidate`, `HealingRecommendation`, `HealingContext` |
+| `agents/healer/candidate_generator.py`      | New      | Candidate generation engine           |
+| `agents/healer/candidate_scorer.py`         | New      | Scoring weights and ranking           |
+| `agents/healer/healing_decision.py`         | New      | `HealingDecisionEngine` orchestrator  |
+| `agents/healer/healing_result_mapper.py`    | New      | Member 1 ↔ Member 2 mapping          |
+| `agents/healer/__init__.py`                 | Modified | Day 10 exports                        |
+| `tests/test_day10_healing_decision.py`      | New      | 50 comprehensive tests                |
+| `docs/member1-architecture.md`              | Modified | Day 10 documentation                  |
+
+### Test Summary
+
+50 new tests covering:
+- Schema validation (5 tests)
+- Recommendation schema (3 tests)
+- Context schema (2 tests)
+- Candidate generation (7 tests)
+- Candidate scoring (9 tests)
+- Candidate ranking (3 tests)
+- Confidence thresholds (4 tests)
+- Decision engine (4 tests)
+- Safety rules (4 tests)
+- LLM disambiguation (2 tests)
+- Member 2 interface (4 tests)
+- End-to-end integration (3 tests)
+
+---
+
+## Day 11 — AI-Assisted Healing Decision & Candidate Ranking
+
+> **Version:** 0.11.0 (Day 11)  
+> **Date:** 2026-09-12
+
+### Overview
+
+Day 11 advances Member 1's intelligence layer by implementing **AI-assisted candidate evaluation**, **ambiguity detection**, **strict LLM grounding validation**, and a standardized **HealingDecision lifecycle**.
+
+Building on Day 10's foundation, Day 11 ensures that:
+1. Candidate evidence includes stable HTML attributes (`data-testid`, `aria-label`, `data-qa`, etc.).
+2. Scoring remains deterministic and configurable.
+3. Ambiguity (candidates with score gaps $\le$ `ambiguity_threshold`) is explicitly detected rather than making arbitrary choices.
+4. An optional LLM evaluation layer (`LLMHealingEvaluator`) provides structured disambiguation with strict grounding validation (rejecting hallucinated/invented selectors).
+5. A high-level `HealingDecision` enum categorizes the outcome for Member 2 (`RECOMMEND_HEALING`, `REQUIRE_VALIDATION`, `REQUIRE_FURTHER_ANALYSIS`, `DO_NOT_HEAL`).
+6. The Member 1 ↔ Member 2 contract is formalized with bidirectional mapping and `prepare_healing_result()` for browser feedback ingestion.
+
+### Architecture
+
+```
+Failed Test
+     │
+Failure Analyzer (Day 9)
+     │
+FailureAnalysis + Historical Context
+     │
+Candidate Generator (Day 10 + Day 11)
+     │ (DOM + History + Stable Attributes)
+Candidates with Observable Evidence
+     │
+Candidate Scorer (Deterministic)
+     │
+Candidate Ranking (Confidence Sort)
+     │
+Ambiguity Detection (Gap ≤ ambiguity_threshold?)
+    ├── NO  ──> Select Top Candidate ──> Classify Decision
+    └── YES ──> Is LLM Available?
+                 ├── YES ──> LLMHealingEvaluator
+                 │            ├── Structured Prompt (Observable Evidence Only)
+                 │            ├── Response Normalization & Schema Validation
+                 │            └── Grounding Validation (Selector in Context?)
+                 │                 ├── VALID   ──> Resolved Candidate
+                 │                 └── INVALID ──> Fallback / Escalate
+                 └── NO  ──> REQUIRE_FURTHER_ANALYSIS
+     │
+Final HealingRecommendation (with HealingDecision)
+     │
+Member 1 ↔ Member 2 Contract Bridge
+     │
+Member 2 (Browser Execution & Validation)
+     │
+prepare_healing_result()
+     │
+HealingResult ──> MemoryStore Update
+```
+
+### Key Components
+
+#### 1. Stable Attribute Evidence & Scoring
+- `_STABLE_ATTRIBUTES`: `data-testid`, `data-test-id`, `data-qa`, `data-cy`, `aria-label`, `aria-labelledby`, `class`.
+- `ScoredCandidate.stable_attribute_similarity`: Fractional match score for stable attributes.
+- `ScoringWeights.stable_attribute_weight`: Configurable weight dimension in deterministic scoring.
+
+#### 2. Ambiguity Detection
+- `ConfidenceThresholds.ambiguity_threshold`: Configurable gap threshold (default `0.05`).
+- When the gap between the top two candidates is $\le$ `ambiguity_threshold`, the decision engine detects ambiguity and marks the action as `REQUIRE_FURTHER_ANALYSIS` (or triggers LLM evaluation).
+
+#### 3. LLM Healing Evaluator with Grounding Validation
+- `LLMHealingEvaluator` (`agents/healer/llm_healing_evaluator.py`):
+  - Ingests only observable evidence (failure type, target selector, candidates, text, roles, attributes).
+  - Prompts LLM for structured JSON (`selected_candidate`, `confidence`, `reason`).
+  - Strict grounding validation: verifies `selected_candidate` exists in the provided candidate list. Rejects any invented selectors.
+  - Zero chain-of-thought stored; only clean, verifiable recommendations.
+
+#### 4. Final Healing Decision (`HealingDecision`)
+- `RECOMMEND_HEALING`: High confidence (score $\ge 0.80$), clear winner.
+- `REQUIRE_VALIDATION`: Medium confidence ($0.50 \le \text{score} < 0.80$), requires browser validation.
+- `REQUIRE_FURTHER_ANALYSIS`: Ambiguous candidates or low confidence ($0.30 \le \text{score} < 0.50$).
+- `DO_NOT_HEAL`: Non-healable failure type (`ASSERTION_FAILURE`, `NETWORK_ERROR`, `APPLICATION_ERROR`), no candidates, or score $< 0.30$.
+
+#### 5. Member 2 Inter-Member Contract
+- Clear input/output specification documented in `agents/healer/healing_result_mapper.py`.
+- `prepare_healing_result()` convenience function for transforming Member 2 browser feedback into a standardized `HealingResult`.
+
+### Files Created/Modified on Day 11
+
+| File | Status | Description |
+|---|---|---|
+| `agents/schemas/enums.py` | Modified | Added `HealingDecision` enum |
+| `agents/schemas/__init__.py` | Modified | Exported `HealingDecision` |
+| `agents/healer/healing_schemas.py` | Modified | Added `stable_attribute_similarity`, `LLMEvaluationResult`, `decision` field |
+| `agents/healer/candidate_generator.py` | Modified | Added stable attribute similarity computation & evidence strings |
+| `agents/healer/candidate_scorer.py` | Modified | Added `stable_attribute_weight` to `ScoringWeights` and scoring formula |
+| `agents/healer/healing_decision.py` | Modified | Added ambiguity detection, LLM evaluator delegation, and `_determine_decision()` |
+| `agents/healer/llm_healing_evaluator.py` | New | AI-assisted candidate evaluation with strict grounding validation |
+| `agents/healer/healing_result_mapper.py` | Modified | Added contract documentation and `prepare_healing_result()` |
+| `agents/healer/__init__.py` | Modified | Exported Day 11 classes |
+| `tests/test_day11_healing_intelligence.py` | New | Comprehensive 45-test suite covering Day 11 features & all 6 scenarios |
+| `docs/member1-architecture.md` | Modified | Day 11 architectural documentation |
+| `README.md` | Modified | Updated test count, Day 11 feature section, roadmap |
+
+---
+
+## 13. Day 15 — Complete Autonomous Intelligence Pipeline Integration & Stabilization
+
+### 13.1 Complete End-to-End Pipeline Architecture
+
+On Day 15, all Member 1 components (Days 1–14) were integrated, stabilized, validated, and documented into a single coherent, production-ready autonomous intelligence pipeline.
+
+```
+                    ┌───────────────────────────────┐
+                    │      Application Context      │
+                    └───────────────┬───────────────┘
+                                    │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │      Test Planner Agent       │  (LLMTestPlanner)
+                    └───────────────┬───────────────┘
+                                    │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │           Test Plan           │  (TestPlan: list[TestCase])
+                    └───────────────┬───────────────┘
+                                    │
+                                    ▼ [Member 1 → Member 2]
+                    ┌───────────────────────────────┐
+                    │   Member 2: Test Execution    │  (Browser Automation / Playwright)
+                    └───────────────┬───────────────┘
+                                    │
+                         ┌──────────┴──────────┐
+                         │                     │
+                    [SUCCESS]              [FAILED]
+                         │                     │
+                         ▼                     ▼
+               ┌──────────────────┐   ┌───────────────────────────────┐
+               │ WORKFLOW COMPLETE│   │        Execution Result       │  (ExecutionResult + FailureContext)
+               └──────────────────┘   └───────────────┬───────────────┘
+                                                      │
+                                                      ▼ [Member 2 → Member 1]
+                                      ┌───────────────────────────────┐
+                                      │    Failure Analyzer Agent     │  (FailureAnalyzerAgent)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                      ┌───────────────────────────────┐
+                                      │       Historical Memory       │  (InMemoryStore / HealingEvidenceRetriever)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                      ┌───────────────────────────────┐
+                                      │      Candidate Generator      │  (DOM + Historical Records)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                      ┌───────────────────────────────┐
+                                      │       Candidate Scorer        │  (Deterministic Multi-Factor Scoring)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                      ┌───────────────────────────────┐
+                                      │       Candidate Ranking       │  (Sorted by Confidence)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                      ┌───────────────────────────────┐
+                                      │        Recovery Policy        │  (RecoveryPolicy: TRY_HEALING, RETRY,
+                                      │                               │   DO_NOT_HEAL, REQUIRE_FURTHER_ANALYSIS, ABORT)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼ [Member 1 → Member 2]
+                                      ┌───────────────────────────────┐
+                                      │    Healing Recommendation     │  (HealingRecommendation / Selected Candidate)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                                      ▼ [Member 2: Validation]
+                                      ┌───────────────────────────────┐
+                                      │       Healing Feedback        │  (HealingResultFeedback: SUCCESS / FAILURE)
+                                      └───────────────┬───────────────┘
+                                                      │
+                                           ┌──────────┴──────────┐
+                                           │                     │
+                                      [SUCCESS]              [FAILURE]
+                                           │                     │
+                                           ▼                     ▼
+                               ┌──────────────────────┐  ┌─────────────────────────┐
+                               │   Record in Memory   │  │ Try Next Candidate?     │
+                               │   Workflow COMPLETE  │  │ (up to max_attempts)    │
+                               └──────────────────────┘  └─────────────────────────┘
+                                           │
+                                           ▼ [Member 1 → Member 3]
+                               ┌──────────────────────┐
+                               │ Dashboard / SSE / WS │  (DashboardWorkflowSummary, WorkflowEvent)
+                               └──────────────────────┘
+```
+
+---
+
+### 13.2 Member 1 ↔ Member 2 Contract Specification
+
+Defined in `agents/schemas/member2_contract.py`:
+
+#### 1. Member 2 Execution Result (`ExecutionResult`)
+```json
+{
+  "workflow_id": "wf-e2e-001",
+  "test_case_id": "tc-login-01",
+  "status": "FAILED",
+  "failure_context": {
+    "test_id": "tc-login-01",
+    "execution_id": "exec-001",
+    "failed_step": 3,
+    "action": "click",
+    "target_selector": "#submit-btn",
+    "error_message": "Element not found: #submit-btn",
+    "current_page_url": "http://localhost:3000/login",
+    "current_element": {
+      "element_id": "el-btn-new",
+      "selector": "button[data-testid='login-btn']",
+      "text": "Log In",
+      "role": "button",
+      "attributes": {
+        "type": "submit",
+        "data-testid": "login-btn",
+        "class": "btn primary"
+      }
+    }
+  }
+}
+```
+
+#### 2. Member 1 Healing Recommendation (`HealingRecommendation`)
+```json
+{
+  "test_id": "tc-login-01",
+  "execution_id": "exec-001",
+  "failed_step": 3,
+  "original_selector": "#submit-btn",
+  "failure_type": "SELECTOR_CHANGED",
+  "confidence": "HIGH",
+  "decision": "RECOMMEND_HEALING",
+  "recommended_action": "TRY_REPLACEMENT_SELECTOR",
+  "selected_candidate": {
+    "selector": "button[data-testid='login-btn']",
+    "confidence": 0.95,
+    "source": "CURRENT_DOM"
+  },
+  "candidates": [
+    {
+      "selector": "button[data-testid='login-btn']",
+      "confidence": 0.95,
+      "source": "CURRENT_DOM"
+    }
+  ],
+  "evidence": ["Stable attribute match data-testid='login-btn'"],
+  "requires_validation": true
+}
+```
+
+#### 3. Member 2 Healing Validation Feedback (`HealingResultFeedback`)
+```json
+{
+  "test_case_id": "tc-login-01",
+  "original_selector": "#submit-btn",
+  "attempted_selector": "button[data-testid='login-btn']",
+  "healing_status": "VALIDATED_SUCCESS",
+  "validation_status": "SUCCESS",
+  "confidence": 0.95,
+  "execution_attempt": 1,
+  "target_element_text": "Log In",
+  "validation_time_ms": 142.5
+}
+```
+
+---
+
+### 13.3 Member 1 ↔ Member 3 Contract Specification
+
+Defined in `agents/schemas/member3_contract.py`:
+
+#### 1. Dashboard Workflow Summary (`DashboardWorkflowSummary`)
+- `workflow_id`: Workflow identifier
+- `current_step`: Current `WorkflowStep`
+- `status`: Lifecycle status (`"running"`, `"completed"`, `"aborted"`)
+- `is_terminal`: Whether workflow has concluded
+- `total_tests`: Total planned test cases
+- `passed_tests`: Tests executed successfully
+- `failed_tests`: Unhealed failures
+- `healed_tests`: Successfully healed tests
+- `healing_attempts`: Attempt count
+- `retry_count`: Retry count
+- `error_info`: Optional human-readable error description
+- `updated_at`: Timestamp
+
+#### 2. Streaming Real-Time Events
+- **Server-Sent Events (SSE):** Formatted via `format_sse_event(event) -> str` (`event: <TYPE>\ndata: {...}\n\n`).
+- **WebSocket Messages:** Formatted via `format_websocket_message(event) -> str` (JSON payload containing workflow metadata).
+
+---
+
+### 13.4 Comprehensive Recovery Policy Matrix
+
+| Failure Type | Healable | Retryable | Max Retries | Policy Action | Criteria / Transition |
+|---|---|---|---|---|---|
+| `SELECTOR_CHANGED` | Yes | No | 0 | `TRY_HEALING` | Top candidate confidence $\ge 0.80$, unambiguous |
+| `ELEMENT_NOT_FOUND` | Yes | No | 0 | `TRY_HEALING` | Top candidate confidence $\ge 0.80$, unambiguous |
+| `TIMEOUT` | No | Yes | 2 | `RETRY` | If `retry_count < 2` $\rightarrow$ `RETRYING` |
+| `TIMEOUT` (Exhausted) | No | Yes | 2 | `REQUIRE_FURTHER_ANALYSIS` | If `retry_count >= 2` $\rightarrow$ `COMPLETED` |
+| `NAVIGATION_FAILURE`| No | Yes | 2 | `RETRY` | If `retry_count < 2` $\rightarrow$ `RETRYING` |
+| `ELEMENT_NOT_INTERACTABLE` | No | Yes | 2 | `RETRY` | If `retry_count < 2` $\rightarrow$ `RETRYING` |
+| `ASSERTION_FAILURE` | No | No | 0 | `DO_NOT_HEAL` | Regression / logic defect $\rightarrow$ `COMPLETED` |
+| `NETWORK_ERROR` | No | No | 0 | `DO_NOT_HEAL` | Infrastructure fault $\rightarrow$ `COMPLETED` |
+| `APPLICATION_ERROR`| No | No | 0 | `DO_NOT_HEAL` | 500 / unhandled crash $\rightarrow$ `COMPLETED` |
+| `UNKNOWN` (Low Conf)| No | No | 0 | `DO_NOT_HEAL` | Insufficient evidence $\rightarrow$ `COMPLETED` |
+| Any (Max Attempts) | - | - | - | `ABORT` | `healing_attempt_count >= max_healing_attempts` $\rightarrow$ `ABORTED` |
+| Any (Ambiguous Gap) | Yes | - | - | `REQUIRE_FURTHER_ANALYSIS` | Gap between top 2 candidates $\le 0.02$ |
+
+---
+
+### 13.5 Complete Day 15 Final Test Matrix (15 Scenarios)
+
+All 15 scenarios are verified in `tests/test_day15_pipeline_integration.py`:
+
+1. **Scenario 1:** Clean pass execution (`SUCCESS` $\rightarrow$ `COMPLETED`, 0 healing attempts).
+2. **Scenario 2:** Single healable failure with first-attempt validation success (`TRY_HEALING` $\rightarrow$ `HEALING_PENDING_VALIDATION` $\rightarrow$ `VALIDATED_SUCCESS` $\rightarrow$ `COMPLETED`).
+3. **Scenario 3:** Healable failure where candidate 1 fails validation, second candidate succeeds (continuation $\rightarrow$ `VALIDATED_SUCCESS`).
+4. **Scenario 4:** Healable failure where all candidates fail validation (continuation abort $\rightarrow$ `COMPLETED`).
+5. **Scenario 5:** Timeout failure triggers transient retry (`RETRY` $\rightarrow$ `RETRYING` $\rightarrow$ `EXECUTION_PENDING`).
+6. **Scenario 6:** Assertion failure triggers non-healable routing (`DO_NOT_HEAL` $\rightarrow$ `COMPLETED`).
+7. **Scenario 7:** Low-confidence candidate ($< 0.80$) safely triggers `DO_NOT_HEAL`.
+8. **Scenario 8:** Ambiguous candidates (score gap $\le 0.02$) triggers `REQUIRE_FURTHER_ANALYSIS`.
+9. **Scenario 9:** Candidate matching historical success pattern receives positive score boost (+0.15).
+10. **Scenario 10:** Candidate matching historical failures receives penalty (-0.20), preventing flaky re-use.
+11. **Scenario 11:** Max retries exceeded triggers escalation (`REQUIRE_FURTHER_ANALYSIS`).
+12. **Scenario 12:** Event stream audit trail verifies every state transition is logged with monotonic timestamps.
+13. **Scenario 13:** Invalid state transitions strictly rejected by state machine.
+14. **Scenario 14:** Full AgentState serialization & deserialization roundtrip validation.
+15. **Scenario 15:** Benchmark verification: entire pipeline executes under 500ms (measured $< 50\text{ms}$).
+
+---
+
+### 13.6 Test Suite Metrics & Verification
+
+- **Total Passing Tests:** 920 passed (0 failed).
+- **Day 15 Integration Tests:** 38 passed in `tests/test_day15_pipeline_integration.py`.
+- **Latency Benchmark:** Entire autonomous cycle executes in $< 50\text{ms}$ (limit: $< 500\text{ms}$).
+- **Environment:** 100% offline, zero browser automation dependencies, zero external API keys.
 
