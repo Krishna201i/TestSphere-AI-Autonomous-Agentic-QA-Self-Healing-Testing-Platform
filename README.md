@@ -2,8 +2,12 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
+<<<<<<< HEAD
 [![Tests](https://img.shields.io/badge/Tests-920%20Passed-brightgreen.svg)]()
 [![Member 1 Status](https://img.shields.io/badge/Member%201-100%25%20Completed-brightgreen.svg)]()
+=======
+[![Tests](https://img.shields.io/badge/Tests-339%20Passed-brightgreen.svg)]()
+>>>>>>> origin/main
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **TestSphere-AI** is an intelligent, multi-agent autonomous testing platform designed to plan, generate, execute, analyze, and self-heal end-to-end web application tests.
@@ -199,12 +203,17 @@ All AI agents interact with models strictly through the provider-independent `LL
 - **Request Validation**: Enforces prompt presence, valid sampling parameters (`temperature` 0.0–2.0, `max_tokens` > 0), and supported response formats.
 - **Response Normalization**: Uniform standard `LLMResponse` models with populated provider/model metadata and token usage stats.
 - **Resilient Retry Logic**: Automatically retries transient errors (`LLMProviderError`, `LLMTimeoutError`, `LLMConnectionError`, `LLMRateLimitError`) up to configured `LLM_MAX_RETRIES`.
+<<<<<<< HEAD
 - **Error Hierarchy**: 10 granular exception types rooted in `LLMError` with `is_retryable` property (including `LLMParsingError` and `LLMSchemaValidationError`).
+=======
+- **Error Hierarchy**: 8 granular exception types rooted in `LLMError` with `is_retryable` property.
+>>>>>>> origin/main
 - **Mock Response Registry**: Flexible offline mocking by prompt pattern matching, custom error injection, and transient failure sequence testing.
 - **Zero Secrets Logged / Committed**: Strict safeguards ensure credentials and raw API keys are never logged or committed.
 
 ---
 
+<<<<<<< HEAD
 ## 🛡️ LLM Response Validation & Hardening (Day 6)
 
 Day 6 focused on hardening the LLM response processing pipeline and resolving mock scenario registry matching issues:
@@ -873,11 +882,14 @@ Healing Recommendation / Decision (Member 2 Contract Bridge)
 
 ---
 
+=======
+>>>>>>> origin/main
 ## 📂 Project Structure (`agents/`)
 
 ```
 .
 ├── agents/
+<<<<<<< HEAD
 │   ├── analyzer/              # Failure Analysis Agent & Schemas (Day 9)
 │   │   ├── analyzer.py        # FailureAnalysisAgent ABC + RuleBasedFailureAnalyzer
 │   │   └── schemas.py         # FailureContext, FailureAnalysisResult, FailureEvidence, etc.
@@ -889,17 +901,28 @@ Healing Recommendation / Decision (Member 2 Contract Bridge)
 │   │   ├── healing_result_mapper.py # Member 1 ↔ Member 2 contract bridge & prepare_healing_result()
 │   │   ├── healing_schemas.py # ScoredCandidate, HealingRecommendation, HealingContext, LLMEvaluationResult
 │   │   ├── llm_healing_evaluator.py # AI-assisted candidate evaluation with strict grounding validation (Day 11)
+=======
+│   ├── analyzer/              # Failure Analysis Agent & Schemas
+│   │   ├── analyzer.py        # Abstract FailureAnalyzerAgent
+│   │   └── schemas.py         # TestFailure, FailureAnalysis
+│   ├── healer/                # Self-Healing Agent & Schemas
+>>>>>>> origin/main
 │   │   ├── healer.py          # Abstract SelfHealingAgent
 │   │   └── schemas.py         # HealingCandidate, HealingResult
 │   ├── llm/                   # LLM Client Abstraction & Infrastructure
 │   │   ├── client.py          # Abstract LLMClient + Concrete LLMClientSession
 │   │   ├── config.py          # LLMConfig (env-based configuration, defaults to 'mock')
+<<<<<<< HEAD
 │   │   ├── exceptions.py      # LLM exception hierarchy (10 types + is_retryable)
+=======
+│   │   ├── exceptions.py      # LLM exception hierarchy (8 types + is_retryable)
+>>>>>>> origin/main
 │   │   ├── factory.py         # Provider factory (get_llm_provider, create_llm_client)
 │   │   ├── parser.py          # ResponseParser (text, JSON, Pydantic model validation)
 │   │   ├── schemas.py         # LLMRequest, LLMResponse, LLMUsage models + validators
 │   │   └── providers/
 │   │       └── mock.py        # MockLLMProvider with simulations & response registry
+<<<<<<< HEAD
 │   ├── memory/                # Historical Memory & Context Management (Day 8 + Day 12)
 │   │   ├── context_comparator.py # Element diff engine (added, removed, modified elements)
 │   │   ├── healing_evidence.py# HealingEvidenceRetriever & ReplacementStats (Day 12)
@@ -941,6 +964,25 @@ Healing Recommendation / Decision (Member 2 Contract Bridge)
 │   ├── test_day13_agent_orchestrator.py # Day 13 AI agent orchestrator & workflow coordination tests (61 tests)
 │   ├── test_day14_recovery_policy.py # Day 14 autonomous recovery policy & explainable decisions (83 tests)
 │   ├── test_day15_pipeline_integration.py # Day 15 complete pipeline integration & validation matrix (38 tests)
+=======
+│   ├── memory/                # Healing Memory Store
+│   │   └── healing_history.py # Abstract HealingMemory interface
+│   ├── orchestration/         # Pipeline Controller
+│   │   └── agent_controller.py# Abstract AgentController
+│   ├── planner/               # Test Planner Agent & Generation Pipeline (Day 4 + Day 5)
+│   │   ├── mock_scenarios.py  # 9 mock LLM response fixtures for deterministic testing
+│   │   ├── planner.py         # Abstract TestPlannerAgent + LLMTestPlanner with full pipeline
+│   │   ├── prompts.py         # Prompt architecture & reusable prompt templates
+│   │   ├── schemas.py         # ElementContext, PageContext, ApplicationContext, TestCase, TestStep, Assertion, TestPlan
+│   │   └── validation.py      # Business-rule validation + element refs + duplicate detection
+│   └── schemas/               # Shared Enums & Data Contracts
+│       ├── contracts.py       # Re-exported single source of truth
+│       └── enums.py           # FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType
+├── docs/
+│   └── member1-architecture.md# Comprehensive architectural specification (v0.5.0)
+├── tests/
+│   ├── test_config.py             # Config loading & immutability tests
+>>>>>>> origin/main
 │   ├── test_fixtures.py           # Reusable test factories & sample data (Day 5)
 │   ├── test_imports.py            # Module import validation tests
 │   ├── test_llm_client.py         # Day 2 LLM foundation & mock provider tests
@@ -1005,6 +1047,7 @@ python3 -m pytest tests/ -v
 - [x] **Day 2**: Provider-independent LLM abstraction foundation, `MockLLMProvider`, configuration, exception hierarchy, and response parsing.
 - [x] **Day 3**: Reusable `LLMClientSession` layer with request validation, response normalization, retry mechanism, timeout handling, error translation, and mock response registry.
 - [x] **Day 4**: Test Planner Agent foundation: `ElementContext`, `PageContext`, `TestPlan`, controlled action/assertion vocabularies, two-layer validation, prompt architecture, and mock test scenarios.
+<<<<<<< HEAD
 - [x] **Day 5**: Full generation pipeline (`LLMTestPlanner.generate_tests()` / `generate_test_plan()`), duplicate test case detection, and hallucinated element reference validation.
 - [x] **Day 6**: LLM response validation hardening & mock scenario alignment: fixed normalization logic, added explicit `LLMParsingError` and `LLMSchemaValidationError`, case-insensitive mock registry matching, default planner scenario registration helper, and 41 regression tests (380 tests total).
 - [x] **Day 7**: LangChain integration for Test Planner: prompt template management (`ChatPromptTemplate`), structured output handling with field coercion & validation (`StructuredOutputProcessor`), adapter bridging LangChain and `LLMClientSession` (`LangChainPlanningAdapter`), backwards-compatible `LangChainTestPlanner`, and 95 tests (475 tests total).
