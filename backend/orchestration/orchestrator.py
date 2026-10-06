@@ -1,12 +1,3 @@
-"""
-TestSphere-AI — Platform Workflow Orchestration Service.
-
-Coordinates the end-to-end autonomous QA lifecycle between:
-- Member 1: AI Agent & Intelligence Layer (planning, root cause analysis, self-healing)
-- Member 2: Test Execution Engine (Playwright browser automation)
-- Member 3: Platform Backend & Persistence (FastAPI, database models, CRUD)
-"""
-
 from __future__ import annotations
 
 import logging
@@ -14,19 +5,14 @@ from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from sqlalchemy.orm import Session
 
-from agents.healer.candidate_generator import CandidateGenerator
-from agents.healer.candidate_scorer import CandidateScorer
+from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.healer.healing_decision import HealingDecisionEngine
-from agents.healer.healing_feedback import (
-    HealingResultFeedback,
-    HealingResultFeedbackProcessor,
-)
+from agents.healer.healing_feedback import HealingResultFeedbackProcessor
 from agents.llm import LLMClientSession, MockLLMProvider
 from agents.llm.config import LLMConfig
 from agents.memory.in_memory_store import InMemoryStore
 from agents.orchestration.agent_orchestrator import AgentOrchestrator
 from agents.orchestration.recovery_policy import (
-    RecoveryAction,
     RecoveryPolicy,
     RecoveryPolicyConfig,
 )
@@ -53,7 +39,6 @@ from agents.schemas.member3_contract import (
     build_dashboard_summary,
     format_sse_event,
 )
-from agents.analyzer.analyzer import FailureAnalyzerAgent
 
 from backend.models.application import Application
 from backend.models.test_case import TestCase
