@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -7,12 +8,16 @@ from sqlalchemy.orm import Session
 
 from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.healer.healing_decision import HealingDecisionEngine
-from agents.healer.healing_feedback import HealingResultFeedbackProcessor
+from agents.healer.healing_feedback import (
+    HealingResultFeedback,
+    HealingResultFeedbackProcessor,
+)
 from agents.llm import LLMClientSession, MockLLMProvider
 from agents.llm.config import LLMConfig
 from agents.memory.in_memory_store import InMemoryStore
 from agents.orchestration.agent_orchestrator import AgentOrchestrator
 from agents.orchestration.recovery_policy import (
+    RecoveryAction,
     RecoveryPolicy,
     RecoveryPolicyConfig,
 )
@@ -21,6 +26,7 @@ from agents.orchestration.workflow_schemas import (
     ExecutionResultStatus,
     OrchestratorConfig,
     WorkflowEvent,
+    WorkflowEventType,
     WorkflowStep,
 )
 from agents.planner.mock_scenarios import register_planner_scenarios
@@ -144,15 +150,41 @@ class PlatformWorkflowOrchestrator:
             app_url=app.base_url,
         )
 
-        # Build Member 1 TestCase model from DB record
-        m1_steps = [
-            Member1TestStep(
-                step_number=1,
-                action=TestAction.NAVIGATE,
-                value=app.base_url,
-                description=f"Navigate to {app.base_url}",
-            )
-        ]
+        # Build Member 1 TestCase model from DB record or structured description
+        m1_steps: List[Member1TestStep] = []
+        if test_case.description:
+            try:
+                desc_obj = json.loads(test_case.description)
+                raw_steps = desc_obj.get("steps") if isinstance(desc_obj, dict) else desc_obj
+                if isinstance(raw_steps, list):
+                    for idx, s in enumerate(raw_steps, start=1):
+                        act_str = str(s.get("action", "NAVIGATE")).upper()
+                        try:
+                            act_enum = TestAction(act_str)
+                        except Exception:
+                            act_enum = TestAction.NAVIGATE
+                        m1_steps.append(
+                            Member1TestStep(
+                                step_number=s.get("step_number", idx),
+                                action=act_enum,
+                                target=s.get("target") or s.get("target_selector"),
+                                value=s.get("value"),
+                                description=s.get("description", f"Step {idx}"),
+                            )
+                        )
+            except Exception:
+                pass
+
+        if not m1_steps:
+            m1_steps = [
+                Member1TestStep(
+                    step_number=1,
+                    action=TestAction.NAVIGATE,
+                    value=app.base_url,
+                    description=f"Navigate to {app.base_url}",
+                )
+            ]
+
         m1_test_case = Member1TestCase(
             test_id=test_case.external_id or f"tc-{test_case.id}",
             name=test_case.name,
@@ -163,11 +195,34 @@ class PlatformWorkflowOrchestrator:
         # Convert to Member 2 TestPlan
         engine_plan = test_case_to_engine_plan(m1_test_case, app.base_url)
 
+        workflow_id = f"wf-exec-{execution.id}"
+
+        # Initialize AgentState with initial events in AI Orchestrator
+        state = self.ai_orchestrator.get_state(workflow_id)
+        if not state:
+            state = AgentState(
+                workflow_id=workflow_id,
+                current_step=WorkflowStep.EXECUTION_PENDING,
+                max_healing_attempts=self.ai_orchestrator._config.max_healing_attempts,
+            )
+            state = self.ai_orchestrator._add_event(
+                state,
+                WorkflowEventType.WORKFLOW_STARTED,
+                message=f"Autonomous QA workflow initiated for application '{app.name}'",
+                metadata={"app_name": app.name, "app_url": app.base_url, "execution_id": execution.id},
+            )
+            state = self.ai_orchestrator._add_event(
+                state,
+                WorkflowEventType.STATE_TRANSITION,
+                message=f"Executing test plan with {len(engine_plan.steps)} step(s) on browser engine",
+                metadata={"test_case_id": m1_test_case.test_id, "step_count": len(engine_plan.steps)},
+            )
+            self.ai_orchestrator._workflows[workflow_id] = state
+
         # Run test via Member 2
         run_opts = options or RunOptions(headless=True)
         engine_result: EngineTestResult = await run_test(engine_plan, options=run_opts)
 
-        workflow_id = f"wf-exec-{execution.id}"
         exec_result = engine_result_to_execution_result(
             engine_result=engine_result,
             workflow_id=workflow_id,
@@ -181,13 +236,12 @@ class PlatformWorkflowOrchestrator:
 
         if exec_result.status == ExecutionResultStatus.SUCCESS:
             final_status = TestExecutionStatus.PASSED.value
+            state = await self.ai_orchestrator.submit_execution_result(state, exec_result)
         else:
             # Failure detected -> delegate to Member 1 AI intelligence
             logger.info("Test execution failed. Submitting result to AI orchestrator for analysis.")
-            analysis, recommendation = self.ai_orchestrator.submit_execution_result(
-                result=exec_result,
-                app_context=app_context,
-            )
+            state = await self.ai_orchestrator.submit_execution_result(state, exec_result)
+            recommendation = state.healing_recommendation
 
             # Check if self-healing is recommended
             if (
@@ -227,7 +281,7 @@ class PlatformWorkflowOrchestrator:
                     ),
                     execution_time_ms=validation_result.duration_ms,
                 )
-                self.ai_orchestrator.submit_healing_result(feedback, app_context)
+                state = await self.ai_orchestrator.submit_healing_result(state, feedback)
 
                 if validation_success:
                     final_status = TestExecutionStatus.PASSED.value
@@ -276,7 +330,21 @@ class PlatformWorkflowOrchestrator:
         workflow_id: str,
     ) -> AsyncGenerator[str, None]:
         """Stream SSE chunks for active workflow events."""
-        state = self.ai_orchestrator.get_state(workflow_id)
-        if state:
+        target_id = workflow_id
+        state = self.ai_orchestrator.get_state(target_id)
+        if not state and str(target_id).isdigit():
+            state = self.ai_orchestrator.get_state(f"wf-exec-{target_id}")
+        elif not state and str(target_id).startswith("wf-exec-"):
+            state = self.ai_orchestrator.get_state(str(target_id).replace("wf-exec-", ""))
+
+        if state and state.events:
             for event in state.events:
                 yield format_sse_event(event)
+        else:
+            fallback_event = WorkflowEvent(
+                workflow_id=str(target_id),
+                step=WorkflowStep.COMPLETED,
+                event_type=WorkflowEventType.STATE_TRANSITION,
+                message=f"Telemetry stream active for workflow {target_id}",
+            )
+            yield format_sse_event(fallback_event)
