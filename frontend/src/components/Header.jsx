@@ -1,12 +1,19 @@
 import React, { useState, useEffect } from 'react';
+import { Menu, X } from 'lucide-react';
 
-export default function Header({ searchQuery, setSearchQuery, backendStatus }) {
+export default function Header({ 
+  searchQuery, 
+  setSearchQuery, 
+  backendStatus,
+  onToggleMobileMenu,
+  isMobileMenuOpen 
+}) {
   const [clockStr, setClockStr] = useState('');
 
   useEffect(() => {
     function updateTime() {
       const now = new Date();
-      const options = { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' };
+      const options = { weekday: 'short', month: 'short', day: 'numeric' };
       const datePart = now.toLocaleDateString('en-US', options);
       const timePart = now.toLocaleTimeString('en-US', { hour12: true });
       setClockStr(`${datePart} | ${timePart}`);
@@ -18,20 +25,32 @@ export default function Header({ searchQuery, setSearchQuery, backendStatus }) {
 
   return (
     <header className="top-header">
-      <div className="search-wrapper">
-        <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
-        <input 
-          type="text" 
-          className="search-input" 
-          id="global-search" 
-          placeholder="Search projects, test cases, executions..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-        <span className="search-keycap">Ctrl K</span>
+      <div className="header-left-group">
+        {/* Mobile Hamburger Menu Toggle Button */}
+        <button 
+          type="button"
+          className="mobile-menu-toggle"
+          onClick={onToggleMobileMenu}
+          aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+        >
+          {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
+
+        <div className="search-wrapper">
+          <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input 
+            type="text" 
+            className="search-input" 
+            id="global-search" 
+            placeholder="Search projects, test cases, executions..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <span className="search-keycap">Ctrl K</span>
+        </div>
       </div>
 
       <div className="header-right">

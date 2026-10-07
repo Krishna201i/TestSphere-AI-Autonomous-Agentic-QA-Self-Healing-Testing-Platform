@@ -33,10 +33,12 @@ from agents.planner.mock_scenarios import register_planner_scenarios
 from agents.planner.planner import LLMTestPlanner
 from agents.planner.schemas import (
     ApplicationContext,
+    Assertion,
     TestCase as Member1TestCase,
     TestStep as Member1TestStep,
 )
 from agents.schemas.enums import (
+    AssertionType,
     TestAction,
     ValidationStatus,
 )
@@ -57,6 +59,7 @@ from engine.runner import run_test
 from engine.schemas import (
     RunOptions,
     Step as EngineStep,
+    StepStatus,
     TestPlan as EngineTestPlan,
     TestResult as EngineTestResult,
     TestStatus,
@@ -152,26 +155,50 @@ class PlatformWorkflowOrchestrator:
 
         # Build Member 1 TestCase model from DB record or structured description
         m1_steps: List[Member1TestStep] = []
+        m1_assertions: List[Assertion] = []
         if test_case.description:
             try:
                 desc_obj = json.loads(test_case.description)
                 raw_steps = desc_obj.get("steps") if isinstance(desc_obj, dict) else desc_obj
                 if isinstance(raw_steps, list):
                     for idx, s in enumerate(raw_steps, start=1):
-                        act_str = str(s.get("action", "NAVIGATE")).upper()
-                        try:
-                            act_enum = TestAction(act_str)
-                        except Exception:
-                            act_enum = TestAction.NAVIGATE
-                        m1_steps.append(
-                            Member1TestStep(
-                                step_number=s.get("step_number", idx),
-                                action=act_enum,
-                                target=s.get("target") or s.get("target_selector"),
-                                value=s.get("value"),
-                                description=s.get("description", f"Step {idx}"),
+                        act_raw = str(s.get("action", "navigate")).strip().lower()
+                        if "assert" in act_raw or act_raw in ("element_visible", "element_not_visible", "element_contains_text"):
+                            as_type = AssertionType.ELEMENT_VISIBLE
+                            if "text" in act_raw:
+                                as_type = AssertionType.ELEMENT_CONTAINS_TEXT
+                            elif "not" in act_raw:
+                                as_type = AssertionType.ELEMENT_NOT_VISIBLE
+                            m1_assertions.append(
+                                Assertion(
+                                    type=as_type,
+                                    target=s.get("target") or s.get("target_selector") or "",
+                                    expected=s.get("expected") or s.get("value") or "",
+                                    description=s.get("description", f"Assert {idx}"),
+                                )
                             )
-                        )
+                        else:
+                            if act_raw in ("goto", "open"):
+                                act_enum = TestAction.NAVIGATE
+                            else:
+                                try:
+                                    act_enum = TestAction(act_raw)
+                                except Exception:
+                                    act_enum = TestAction.CLICK if (s.get("target") or s.get("target_selector")) else TestAction.NAVIGATE
+
+                            val = s.get("value")
+                            if act_enum == TestAction.NAVIGATE and not val:
+                                val = app.base_url
+
+                            m1_steps.append(
+                                Member1TestStep(
+                                    step_number=s.get("step_number", len(m1_steps) + 1),
+                                    action=act_enum,
+                                    target=s.get("target") or s.get("target_selector"),
+                                    value=val,
+                                    description=s.get("description", f"Step {idx}"),
+                                )
+                            )
             except Exception:
                 pass
 
@@ -190,6 +217,7 @@ class PlatformWorkflowOrchestrator:
             name=test_case.name,
             page_url=app.base_url,
             steps=m1_steps,
+            assertions=m1_assertions,
         )
 
         # Convert to Member 2 TestPlan
@@ -288,10 +316,20 @@ class PlatformWorkflowOrchestrator:
                     error_msg = f"Self-healed selector: {recommendation.target_selector}"
                 else:
                     final_status = TestExecutionStatus.FAILED.value
-                    error_msg = validation_result.error_message or "Healing validation failed"
+                    failed_step = next((st for st in getattr(validation_result, "steps", []) if getattr(st, "status", None) in (StepStatus.FAILED, "failed")), None)
+                    error_msg = (
+                        getattr(validation_result, "error_message", None)
+                        or (getattr(failed_step, "error", None) if failed_step else None)
+                        or "Healing validation failed"
+                    )
             else:
                 final_status = TestExecutionStatus.FAILED.value
-                error_msg = engine_result.error_message or "Test execution failed"
+                failed_step = next((st for st in getattr(engine_result, "steps", []) if getattr(st, "status", None) in (StepStatus.FAILED, "failed")), None)
+                error_msg = (
+                    getattr(engine_result, "error_message", None)
+                    or (getattr(failed_step, "error", None) if failed_step else None)
+                    or "Test execution failed"
+                )
 
         # Update database execution record
         end_time = datetime.now(timezone.utc)

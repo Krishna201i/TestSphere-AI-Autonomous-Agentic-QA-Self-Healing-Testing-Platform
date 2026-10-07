@@ -2,17 +2,61 @@
  * TestSphere-AI — API Client & Telemetry Stream Bridge
  */
 
-const BASE_URL = import.meta.env.VITE_API_URL 
-  ? import.meta.env.VITE_API_URL.replace(/\/$/, '')
-  : (typeof window !== 'undefined' && window.location.port === '3000' 
-      ? '' 
-      : (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000'));
+function getApiBase() {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    // If the browser is on port 8000 or Vite dev server on port 3000 with proxy
+    if (window.location.port === '8000' || window.location.port === '3000') {
+      return '';
+    }
+  }
+  // Otherwise, default directly to the FastAPI backend running on 127.0.0.1:8000
+  return 'http://127.0.0.1:8000';
+}
+
+const BASE_URL = getApiBase();
+
+/**
+ * Fetch with automatic fallback directly to http://127.0.0.1:8000
+ */
+async function fetchWithFallback(endpoint, options = {}) {
+  const url = `${BASE_URL}${endpoint}`;
+  try {
+    const res = await fetch(url, options);
+    if (res.ok) return res;
+  } catch (err) {
+    if (!url.startsWith('http://127.0.0.1:8000')) {
+      const fallbackUrl = `http://127.0.0.1:8000${endpoint}`;
+      try {
+        const res2 = await fetch(fallbackUrl, options);
+        if (res2.ok) return res2;
+      } catch (err2) {
+        throw err2;
+      }
+    }
+    throw err;
+  }
+  // If response not ok, try fallback
+  if (!url.startsWith('http://127.0.0.1:8000')) {
+    try {
+      const fallbackUrl = `http://127.0.0.1:8000${endpoint}`;
+      const res2 = await fetch(fallbackUrl, options);
+      if (res2.ok) return res2;
+    } catch {
+      // ignore
+    }
+  }
+  return await fetch(url, options);
+}
 
 export async function checkBackendHealth() {
   try {
-    const res = await fetch(`${BASE_URL}/api/health`);
+    const res = await fetchWithFallback('/api/health');
     if (!res.ok) throw new Error(`Health check returned status ${res.status}`);
-    return await res.json();
+    const data = await res.json();
+    return data;
   } catch (err) {
     console.warn('Backend health check offline:', err.message);
     return null;
@@ -21,7 +65,7 @@ export async function checkBackendHealth() {
 
 export async function getProjects() {
   try {
-    const res = await fetch(`${BASE_URL}/api/projects`);
+    const res = await fetchWithFallback('/api/projects');
     if (!res.ok) throw new Error(`Failed to fetch projects`);
     return await res.json();
   } catch (err) {
@@ -32,10 +76,10 @@ export async function getProjects() {
 
 export async function getApplications(projectId = null) {
   try {
-    const url = projectId 
-      ? `${BASE_URL}/api/applications?project_id=${projectId}` 
-      : `${BASE_URL}/api/applications`;
-    const res = await fetch(url);
+    const endpoint = projectId 
+      ? `/api/applications?project_id=${projectId}` 
+      : `/api/applications`;
+    const res = await fetchWithFallback(endpoint);
     if (!res.ok) throw new Error(`Failed to fetch applications`);
     return await res.json();
   } catch (err) {
@@ -46,10 +90,10 @@ export async function getApplications(projectId = null) {
 
 export async function getTestCases(appId = null) {
   try {
-    const url = appId 
-      ? `${BASE_URL}/api/test-cases?application_id=${appId}` 
-      : `${BASE_URL}/api/test-cases`;
-    const res = await fetch(url);
+    const endpoint = appId 
+      ? `/api/test-cases?application_id=${appId}` 
+      : `/api/test-cases`;
+    const res = await fetchWithFallback(endpoint);
     if (!res.ok) throw new Error(`Failed to fetch test cases`);
     return await res.json();
   } catch (err) {
@@ -60,7 +104,7 @@ export async function getTestCases(appId = null) {
 
 export async function getTestExecutions() {
   try {
-    const res = await fetch(`${BASE_URL}/api/test-executions`);
+    const res = await fetchWithFallback('/api/test-executions');
     if (!res.ok) throw new Error(`Failed to fetch test executions`);
     return await res.json();
   } catch (err) {
@@ -70,7 +114,7 @@ export async function getTestExecutions() {
 }
 
 export async function planAndExecuteWorkflow(payload) {
-  const res = await fetch(`${BASE_URL}/api/workflow/plan-and-execute`, {
+  const res = await fetchWithFallback('/api/workflow/plan-and-execute', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -87,7 +131,8 @@ export async function planAndExecuteWorkflow(payload) {
 }
 
 export function subscribeToWorkflowStream(workflowId, onEvent, onError) {
-  const sseUrl = `${BASE_URL}/api/workflow/stream/${workflowId}`;
+  const sseBase = BASE_URL || 'http://127.0.0.1:8000';
+  const sseUrl = `${sseBase}/api/workflow/stream/${workflowId}`;
   const eventSource = new EventSource(sseUrl);
 
   const eventTypes = [
