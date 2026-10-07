@@ -1,15 +1,25 @@
 import React from 'react';
+import { 
+  LayoutDashboard, 
+  FolderKanban, 
+  AppWindow, 
+  FileCode2, 
+  PlayCircle, 
+  ShieldAlert, 
+  BarChart3, 
+  Activity 
+} from 'lucide-react';
 
 export default function Sidebar({ activeNav, setActiveNav }) {
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'projects', label: 'Projects' },
-    { id: 'applications', label: 'Applications' },
-    { id: 'test-cases', label: 'Test Cases' },
-    { id: 'executions', label: 'Executions' },
-    { id: 'failures', label: 'Failures & Healing' },
-    { id: 'reports', label: 'Reports' },
-    { id: 'system', label: 'System Status' },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'projects', label: 'Projects', icon: FolderKanban },
+    { id: 'applications', label: 'Applications', icon: AppWindow },
+    { id: 'test-cases', label: 'Test Cases', icon: FileCode2 },
+    { id: 'executions', label: 'Executions', icon: PlayCircle },
+    { id: 'failures', label: 'Failures & Healing', icon: ShieldAlert },
+    { id: 'reports', label: 'Reports', icon: BarChart3 },
+    { id: 'system', label: 'System Status', icon: Activity },
   ];
 
   return (
@@ -28,17 +38,25 @@ export default function Sidebar({ activeNav, setActiveNav }) {
       </div>
 
       <nav className="nav-menu">
-        {navItems.map((item) => (
-          <li 
-            key={item.id} 
-            className={`nav-item ${activeNav === item.id ? 'active' : ''}`}
-            onClick={() => setActiveNav(item.id)}
-          >
-            <a href={`#${item.id}`} onClick={(e) => e.preventDefault()}>
-              <span>{item.label}</span>
-            </a>
-          </li>
-        ))}
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeNav === item.id;
+          return (
+            <li 
+              key={item.id} 
+              className={`nav-item ${isActive ? 'active' : ''}`}
+            >
+              <button 
+                type="button"
+                className="nav-link-btn"
+                onClick={() => setActiveNav(item.id)}
+              >
+                <Icon size={18} />
+                <span>{item.label}</span>
+              </button>
+            </li>
+          );
+        })}
       </nav>
 
       {/* Bottom AI Mascot Card */}
