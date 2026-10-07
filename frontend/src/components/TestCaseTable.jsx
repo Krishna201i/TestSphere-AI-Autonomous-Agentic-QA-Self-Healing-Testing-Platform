@@ -1,29 +1,20 @@
 import React from 'react';
 
-const RECENT_EXECUTIONS = [
-  { id: 'exec_20250429_102432', testCaseId: 'TC_LOGIN_001', status: 'healed', duration: '2m 34s', time: '10:24:32' },
-  { id: 'exec_20250429_101215', testCaseId: 'TC_CART_002', status: 'failed', duration: '1m 12s', time: '10:12:15' },
-  { id: 'exec_20250429_095843', testCaseId: 'TC_CHECKOUT_003', status: 'passed', duration: '3m 18s', time: '09:58:43' },
-  { id: 'exec_20250429_093421', testCaseId: 'TC_SEARCH_004', status: 'passed', duration: '1m 45s', time: '09:34:21' },
-  { id: 'exec_20250429_091207', testCaseId: 'TC_PROFILE_005', status: 'failed', duration: '2m 11s', time: '09:12:07' },
-];
-
 export default function TestCaseTable({ 
-  testCases, 
+  testCases = [], 
   executions = [],
   activeTestCaseId, 
   onSelectTestCase, 
   onRunTest 
 }) {
-  const displayExecutions = executions && executions.length > 0
-    ? [...executions].reverse().slice(0, 5).map(e => ({
-        id: `exec_${e.id}`,
-        testCaseId: `TC_${e.test_case_id}`,
-        status: (e.status || 'PASSED').toLowerCase(),
-        duration: e.duration_ms ? `${(e.duration_ms / 1000).toFixed(1)}s` : '1.2s',
-        time: e.started_at ? new Date(e.started_at).toLocaleTimeString() : 'Recent',
-      }))
-    : RECENT_EXECUTIONS;
+  const displayExecutions = (executions || []).slice().reverse().slice(0, 5).map(e => ({
+    id: `exec_${e.id}`,
+    testCaseId: `TC_${e.test_case_id}`,
+    status: (e.status || 'PASSED').toLowerCase(),
+    duration: e.duration_ms ? `${(e.duration_ms / 1000).toFixed(1)}s` : '1.2s',
+    time: e.started_at ? new Date(e.started_at).toLocaleTimeString() : 'Recent',
+  }));
+
   function renderStatusPill(outcome) {
     const status = (outcome || 'PASSED').toLowerCase();
     let display = 'Passed';
@@ -60,9 +51,11 @@ export default function TestCaseTable({
               <line x1="16" y1="13" x2="8" y2="13"></line>
               <line x1="16" y1="17" x2="8" y2="17"></line>
             </svg>
-            <h3>Test Cases</h3>
+            <h3>Test Cases Repository</h3>
           </div>
-          <a href="#view-all-tests" className="view-all-link" onClick={(e) => e.preventDefault()}>View All</a>
+          <span className="live-status-pill">
+            <span>{testCases.length} Active Cases</span>
+          </span>
         </div>
 
         <table className="styled-table" id="test-cases-table">
@@ -78,33 +71,41 @@ export default function TestCaseTable({
             </tr>
           </thead>
           <tbody id="test-cases-tbody">
-            {testCases.map((tc) => {
-              const isSelected = tc.id === activeTestCaseId;
-              const priorityClass = (tc.priority || 'Medium').toLowerCase();
+            {testCases.length === 0 ? (
+              <tr>
+                <td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 1rem' }}>
+                  No test cases found in database.
+                </td>
+              </tr>
+            ) : (
+              testCases.map((tc) => {
+                const isSelected = tc.id === activeTestCaseId;
+                const priorityClass = (tc.priority || 'Medium').toLowerCase();
 
-              return (
-                <tr 
-                  key={tc.id} 
-                  style={isSelected ? { background: 'rgba(99, 102, 241, 0.15)' } : {}}
-                  onClick={() => onSelectTestCase(tc.id)}
-                >
-                  <td><code className="mono" style={{ color: '#cbd5e1' }}>{tc.id}</code></td>
-                  <td><strong>{tc.name}</strong></td>
-                  <td>{tc.category || 'Functional'}</td>
-                  <td><span className={`priority-badge ${priorityClass}`}>{tc.priority || 'Medium'}</span></td>
-                  <td>{tc.version || '1.0'}</td>
-                  <td>{renderStatusPill(tc.outcome)}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button 
-                      className="btn-run-small" 
-                      onClick={() => onRunTest(tc)}
-                    >
-                      Run
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
+                return (
+                  <tr 
+                    key={tc.id} 
+                    style={isSelected ? { background: 'rgba(99, 102, 241, 0.15)' } : {}}
+                    onClick={() => onSelectTestCase(tc.id)}
+                  >
+                    <td><code className="mono" style={{ color: '#cbd5e1' }}>{tc.id}</code></td>
+                    <td><strong>{tc.name}</strong></td>
+                    <td>{tc.category || 'Functional'}</td>
+                    <td><span className={`priority-badge ${priorityClass}`}>{tc.priority || 'Medium'}</span></td>
+                    <td>{tc.version || '1.0'}</td>
+                    <td>{renderStatusPill(tc.outcome)}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button 
+                        className="btn-run-small" 
+                        onClick={() => onRunTest(tc)}
+                      >
+                        Run
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
@@ -119,7 +120,9 @@ export default function TestCaseTable({
             </svg>
             <h3>Recent Executions</h3>
           </div>
-          <a href="#view-all-executions" className="view-all-link" onClick={(e) => e.preventDefault()}>View All</a>
+          <span className="live-status-pill">
+            <span>{executions.length} Runs Logged</span>
+          </span>
         </div>
 
         <table className="styled-table" id="executions-table">
@@ -133,15 +136,23 @@ export default function TestCaseTable({
             </tr>
           </thead>
           <tbody id="executions-tbody">
-            {displayExecutions.map((ex) => (
-              <tr key={ex.id} onClick={() => onSelectTestCase(ex.testCaseId)}>
-                <td><code className="mono" style={{ color: '#cbd5e1' }}>{ex.id}</code></td>
-                <td>{ex.testCaseId}</td>
-                <td>{renderStatusPill(ex.status)}</td>
-                <td>{ex.duration}</td>
-                <td>{ex.time}</td>
+            {displayExecutions.length === 0 ? (
+              <tr>
+                <td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 1rem' }}>
+                  No executions recorded yet. Click "Run" on any test case to launch an autonomous test.
+                </td>
               </tr>
-            ))}
+            ) : (
+              displayExecutions.map((ex) => (
+                <tr key={ex.id} onClick={() => onSelectTestCase(ex.testCaseId)}>
+                  <td><code className="mono" style={{ color: '#cbd5e1' }}>{ex.id}</code></td>
+                  <td>{ex.testCaseId}</td>
+                  <td>{renderStatusPill(ex.status)}</td>
+                  <td>{ex.duration}</td>
+                  <td>{ex.time}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

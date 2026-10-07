@@ -16,59 +16,8 @@ import {
 } from 'lucide-react';
 import { getApplications } from '../services/api';
 
-const DEFAULT_APPLICATIONS = [
-  {
-    id: 1,
-    name: 'E-Commerce Storefront',
-    baseUrl: 'https://example.com',
-    environment: 'Production',
-    healthStatus: '200 OK',
-    latency: '42ms',
-    casesCount: 12,
-    playwrightMode: 'Chromium Headless',
-    lastTested: '10 mins ago',
-    project: 'E-Commerce Webapp'
-  },
-  {
-    id: 2,
-    name: 'Authentication & SSO Gateway',
-    baseUrl: 'https://example.com/auth',
-    environment: 'Staging',
-    healthStatus: '200 OK',
-    latency: '35ms',
-    casesCount: 8,
-    playwrightMode: 'Chromium Headless',
-    lastTested: '25 mins ago',
-    project: 'FinTech Core Banking'
-  },
-  {
-    id: 3,
-    name: 'Cart & Payment Checkout Flow',
-    baseUrl: 'https://example.com/checkout',
-    environment: 'Production',
-    healthStatus: '200 OK',
-    latency: '58ms',
-    casesCount: 14,
-    playwrightMode: 'Chromium Headless',
-    lastTested: '1 hour ago',
-    project: 'E-Commerce Webapp'
-  },
-  {
-    id: 4,
-    name: 'Customer Account Portal',
-    baseUrl: 'https://example.com/account',
-    environment: 'Staging',
-    healthStatus: '200 OK',
-    latency: '48ms',
-    casesCount: 6,
-    playwrightMode: 'Chromium Headless',
-    lastTested: '3 hours ago',
-    project: 'Healthcare Patient Portal'
-  }
-];
-
 export default function ApplicationsView({ setActiveNav, onOpenPlanModal, searchQuery = '' }) {
-  const [apps, setApps] = useState(DEFAULT_APPLICATIONS);
+  const [apps, setApps] = useState([]);
   const [localSearch, setLocalSearch] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newApp, setNewApp] = useState({
@@ -82,18 +31,18 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
   useEffect(() => {
     async function loadApps() {
       const live = await getApplications();
-      if (live && live.length > 0) {
+      if (Array.isArray(live) && live.length > 0) {
         const mapped = live.map(a => ({
           id: a.id,
           name: a.name,
           baseUrl: a.base_url || 'https://example.com',
           environment: a.description?.includes('Production') ? 'Production' : 'Staging',
           healthStatus: '200 OK',
-          latency: `${Math.floor(Math.random() * 30) + 25}ms`,
-          casesCount: 8,
+          latency: '28ms',
+          casesCount: 2,
           playwrightMode: 'Chromium Headless',
-          lastTested: 'Just now',
-          project: 'Active Target'
+          lastTested: 'Connected',
+          project: 'TestSphere Suite'
         }));
         setApps(mapped);
       }
@@ -108,23 +57,16 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
     a.project.toLowerCase().includes(filterTerm)
   );
 
-  function handlePing(id) {
-    setPingingId(id);
-    setTimeout(() => {
-      setPingingId(null);
-    }, 1200);
-  }
-
-  function handleAddApp(e) {
+  function handleAddApplication(e) {
     e.preventDefault();
-    if (!newApp.name || !newApp.baseUrl) return;
+    if (!newApp.name) return;
     const created = {
       id: Date.now(),
       name: newApp.name,
       baseUrl: newApp.baseUrl,
       environment: newApp.environment,
       healthStatus: '200 OK',
-      latency: '36ms',
+      latency: '30ms',
       casesCount: 0,
       playwrightMode: 'Chromium Headless',
       lastTested: 'Just added',
@@ -135,17 +77,24 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
     setNewApp({ name: '', baseUrl: 'https://', environment: 'Production', project: 'E-Commerce Webapp' });
   }
 
+  function handlePing(appId) {
+    setPingingId(appId);
+    setTimeout(() => {
+      setPingingId(null);
+    }, 1200);
+  }
+
   return (
     <div className="view-container">
       {/* Title Header */}
       <div className="page-title-row">
         <div className="page-title-box">
-          <div className="page-icon-badge">
-            <AppWindow size={22} />
+          <div className="page-icon-badge" style={{ background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.3), rgba(59, 130, 246, 0.3))' }}>
+            <AppWindow size={22} color="#06b6d4" />
           </div>
           <div>
-            <h2>Applications</h2>
-            <p>Target web applications, base URLs, and environment health under test</p>
+            <h2>Target Applications</h2>
+            <p>Target web applications, environments, base URLs, and Playwright browser instances</p>
           </div>
         </div>
 
@@ -162,19 +111,19 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
       {/* KPI Overview Cards */}
       <div className="kpi-grid">
         <div className="kpi-card">
-          <div className="kpi-label">Configured Webapps</div>
+          <div className="kpi-label">Active Applications</div>
           <div className="kpi-value">{apps.length}</div>
-          <div className="kpi-footer text-cyan">Active Targets</div>
+          <div className="kpi-footer text-cyan">Database Targets</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">Health Status</div>
-          <div className="kpi-value">100%</div>
-          <div className="kpi-footer text-success">All Endpoints 200 OK</div>
+          <div className="kpi-label">Health Checks</div>
+          <div className="kpi-value text-success">100%</div>
+          <div className="kpi-footer text-success">All Targets Active</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">Average Response</div>
-          <div className="kpi-value">40ms</div>
-          <div className="kpi-footer text-primary">Ultra-Low Latency</div>
+          <div className="kpi-label">Avg HTTP Latency</div>
+          <div className="kpi-value text-primary">28ms</div>
+          <div className="kpi-footer text-cyan">Fast Response</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Test Scenarios</div>
@@ -206,89 +155,96 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
       </div>
 
       {/* Applications Grid */}
-      <div className="projects-grid">
-        {filteredApps.map((a) => (
-          <div key={a.id} className="project-card">
-            <div className="project-card-header">
-              <div className="project-title-group">
-                <div className="project-badge-icon" style={{ background: 'linear-gradient(135deg, #0284c7, #2563eb)' }}>
-                  <Globe size={18} />
-                </div>
-                <div>
-                  <h3 className="project-title">{a.name}</h3>
-                  <div className="project-meta-row">
-                    <a 
-                      href={a.baseUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="repo-pill"
-                      style={{ color: 'var(--accent-cyan)' }}
-                    >
-                      <Globe size={12} />
-                      {a.baseUrl}
-                    </a>
-                    <span className="env-pill">{a.environment}</span>
+      {filteredApps.length === 0 ? (
+        <div className="data-table-card" style={{ padding: '3rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+          <AppWindow size={36} style={{ margin: '0 auto 1rem', opacity: 0.4 }} />
+          <p>No applications registered in the database yet.</p>
+        </div>
+      ) : (
+        <div className="projects-grid">
+          {filteredApps.map((a) => (
+            <div key={a.id} className="project-card">
+              <div className="project-card-header">
+                <div className="project-title-group">
+                  <div className="project-badge-icon" style={{ background: 'linear-gradient(135deg, #0284c7, #2563eb)' }}>
+                    <Globe size={18} />
+                  </div>
+                  <div>
+                    <h3 className="project-title">{a.name}</h3>
+                    <div className="project-meta-row">
+                      <a 
+                        href={a.baseUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="repo-pill"
+                        style={{ color: 'var(--accent-cyan)' }}
+                      >
+                        <Globe size={12} />
+                        {a.baseUrl}
+                      </a>
+                      <span className="env-pill">{a.environment}</span>
+                    </div>
                   </div>
                 </div>
+
+                <div className="status-pill status-pill-passed">
+                  {pingingId === a.id ? 'Pinging...' : a.healthStatus}
+                </div>
               </div>
 
-              <div className="status-pill status-pill-passed">
-                {pingingId === a.id ? 'Pinging...' : a.healthStatus}
+              <div className="project-stats-row">
+                <div className="project-stat-item">
+                  <span className="stat-label">Project Suite</span>
+                  <span className="stat-val">{a.project}</span>
+                </div>
+                <div className="project-stat-item">
+                  <span className="stat-label">Test Cases</span>
+                  <span className="stat-val">{a.casesCount} linked</span>
+                </div>
+                <div className="project-stat-item">
+                  <span className="stat-label">Latency</span>
+                  <span className="stat-val text-cyan">{a.latency}</span>
+                </div>
+                <div className="project-stat-item">
+                  <span className="stat-label">Browser Mode</span>
+                  <span className="stat-val text-muted">{a.playwrightMode}</span>
+                </div>
+                <div className="project-stat-item">
+                  <span className="stat-label">Last Tested</span>
+                  <span className="stat-val text-muted">{a.lastTested}</span>
+                </div>
+              </div>
+
+              <div className="project-card-actions">
+                <button 
+                  className="btn-card-action"
+                  onClick={() => handlePing(a.id)}
+                  disabled={pingingId === a.id}
+                >
+                  <Activity size={14} />
+                  <span>{pingingId === a.id ? 'Pinging...' : 'Ping Health'}</span>
+                </button>
+
+                <button 
+                  className="btn-card-action"
+                  onClick={() => setActiveNav('test-cases')}
+                >
+                  <FileCode2 size={14} />
+                  <span>View Test Cases</span>
+                </button>
+
+                <button 
+                  className="btn-primary-small"
+                  onClick={onOpenPlanModal}
+                >
+                  <Play size={14} />
+                  <span>Execute Plan</span>
+                </button>
               </div>
             </div>
-
-            <div className="project-stats-row">
-              <div className="project-stat-item">
-                <span className="stat-label">Project Suite</span>
-                <span className="stat-val">{a.project}</span>
-              </div>
-              <div className="project-stat-item">
-                <span className="stat-label">Test Cases</span>
-                <span className="stat-val">{a.casesCount} linked</span>
-              </div>
-              <div className="project-stat-item">
-                <span className="stat-label">Latency</span>
-                <span className="stat-val text-cyan">{a.latency}</span>
-              </div>
-              <div className="project-stat-item">
-                <span className="stat-label">Browser Mode</span>
-                <span className="stat-val text-muted">{a.playwrightMode}</span>
-              </div>
-              <div className="project-stat-item">
-                <span className="stat-label">Last Tested</span>
-                <span className="stat-val text-muted">{a.lastTested}</span>
-              </div>
-            </div>
-
-            <div className="project-card-actions">
-              <button 
-                className="btn-card-action"
-                onClick={() => handlePing(a.id)}
-                disabled={pingingId === a.id}
-              >
-                <Activity size={14} />
-                <span>{pingingId === a.id ? 'Pinging...' : 'Ping Health'}</span>
-              </button>
-
-              <button 
-                className="btn-card-action"
-                onClick={() => setActiveNav('test-cases')}
-              >
-                <FileCode2 size={14} />
-                <span>View Test Cases</span>
-              </button>
-
-              <button 
-                className="btn-primary-small"
-                onClick={onOpenPlanModal}
-              >
-                <Play size={14} />
-                <span>Trigger Run</span>
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Add Application Modal */}
       {isAddModalOpen && (
@@ -297,14 +253,14 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
             <div className="modal-header">
               <div className="modal-title-wrap modal-title-group">
                 <Sparkles size={20} className="text-cyan" />
-                <h3 className="modal-title">Configure Target Application</h3>
+                <h3 className="modal-title">Register Target Application</h3>
               </div>
               <button className="modal-close-btn" onClick={() => setIsAddModalOpen(false)}>
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleAddApp} className="modal-form">
+            <form onSubmit={handleAddApplication} className="modal-form">
               <div className="form-group">
                 <label className="form-label">Application Name</label>
                 <input 
@@ -312,24 +268,21 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
                   className="form-input" 
                   value={newApp.name} 
                   onChange={(e) => setNewApp({ ...newApp, name: e.target.value })}
-                  placeholder="e.g. User Profile Portal"
+                  placeholder="e.g. Shopping Cart & Checkout"
                   required 
                 />
               </div>
 
               <div className="form-group">
-                <label className="form-label">Base URL (Playwright Target)</label>
-                <div className="input-with-icon">
-                  <Globe size={16} className="input-icon" />
-                  <input 
-                    type="url" 
-                    className="form-input with-icon" 
-                    value={newApp.baseUrl} 
-                    onChange={(e) => setNewApp({ ...newApp, baseUrl: e.target.value })}
-                    placeholder="https://example.com"
-                    required
-                  />
-                </div>
+                <label className="form-label">Base URL / Target Host</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={newApp.baseUrl} 
+                  onChange={(e) => setNewApp({ ...newApp, baseUrl: e.target.value })}
+                  placeholder="https://app.staging.example.com"
+                  required 
+                />
               </div>
 
               <div className="form-group">
@@ -342,8 +295,19 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
                   <option value="Production">Production</option>
                   <option value="Staging">Staging</option>
                   <option value="UAT">UAT / Pre-Release</option>
-                  <option value="Development">Development</option>
+                  <option value="Local Dev">Local Dev (localhost)</option>
                 </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Parent Project</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={newApp.project} 
+                  onChange={(e) => setNewApp({ ...newApp, project: e.target.value })}
+                  placeholder="e.g. E-Commerce Webapp"
+                />
               </div>
 
               <div className="modal-footer">
