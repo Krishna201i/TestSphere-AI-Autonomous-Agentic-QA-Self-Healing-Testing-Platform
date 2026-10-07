@@ -5,6 +5,13 @@ import MetricsOverview from './components/MetricsOverview';
 import LiveExecutionConsole from './components/LiveExecutionConsole';
 import TestCaseTable from './components/TestCaseTable';
 import PlanExecuteModal from './components/PlanExecuteModal';
+import ProjectsView from './components/ProjectsView';
+import ApplicationsView from './components/ApplicationsView';
+import TestCasesView from './components/TestCasesView';
+import ExecutionsView from './components/ExecutionsView';
+import FailuresHealingView from './components/FailuresHealingView';
+import ReportsView from './components/ReportsView';
+import SystemStatusView from './components/SystemStatusView';
 import { 
   checkBackendHealth, 
   getTestCases, 
@@ -297,71 +304,122 @@ export default function App() {
           backendStatus={backendStatus}
         />
 
-        <div className="dashboard-body">
-          {/* Page Header Title */}
-          <div className="page-title-row">
-            <div className="page-title-box">
-              <div className="page-icon-badge">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <circle cx="12" cy="12" r="6"></circle>
-                  <circle cx="12" cy="12" r="2"></circle>
+        {activeNav === 'dashboard' && (
+          <div className="dashboard-body">
+            {/* Page Header Title */}
+            <div className="page-title-row">
+              <div className="page-title-box">
+                <div className="page-icon-badge">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <circle cx="12" cy="12" r="6"></circle>
+                    <circle cx="12" cy="12" r="2"></circle>
+                  </svg>
+                </div>
+                <div>
+                  <h2>Dashboard</h2>
+                  <p>Monitor and manage your autonomous QA testing workflows</p>
+                </div>
+              </div>
+
+              <button 
+                className="btn-run-small" 
+                style={{ 
+                  padding: '0.65rem 1.25rem', 
+                  fontSize: '0.84rem', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.45rem',
+                  cursor: 'pointer' 
+                }}
+                onClick={() => setIsModalOpen(true)}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
-              </div>
-              <div>
-                <h2>Dashboard</h2>
-                <p>Monitor and manage your autonomous QA testing workflows</p>
-              </div>
+                <span>+ Plan & Execute Test</span>
+              </button>
             </div>
 
-            <button 
-              className="btn-run-small" 
-              style={{ 
-                padding: '0.65rem 1.25rem', 
-                fontSize: '0.84rem', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '0.45rem',
-                cursor: 'pointer' 
-              }}
-              onClick={() => setIsModalOpen(true)}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-              </svg>
-              <span>+ Plan & Execute Test</span>
-            </button>
+            {/* 5 KPI METRICS CARDS */}
+            <MetricsOverview stats={{
+              totalTests: testCases.length,
+              passRate: 97.4,
+              healedCount: testCases.filter(c => c.outcome === 'HEALED').length,
+              avgDuration: '2m 34s',
+            }} />
+
+            {/* Live Execution & Diagnostics Grid */}
+            <LiveExecutionConsole 
+              activeRun={activeTestCase}
+              logs={activeTestCase?.logs || []}
+              timerSeconds={timerSeconds}
+              isRunning={isRunning}
+              onTogglePlay={() => setIsRunning(!isRunning)}
+              onReset={() => handleRunTest(activeTestCase)}
+              currentStepIndex={currentStepIndex}
+              onStepClick={(index) => setCurrentStepIndex(index)}
+            />
+
+            {/* Bottom Data Tables */}
+            <TestCaseTable 
+              testCases={testCases}
+              activeTestCaseId={activeTestCaseId}
+              onSelectTestCase={handleSelectTestCase}
+              onRunTest={handleRunTest}
+            />
           </div>
+        )}
 
-          {/* 5 KPI METRICS CARDS */}
-          <MetricsOverview stats={{
-            totalTests: testCases.length,
-            passRate: 97.4,
-            healedCount: testCases.filter(c => c.outcome === 'HEALED').length,
-            avgDuration: '2m 34s',
-          }} />
-
-          {/* Live Execution & Diagnostics Grid */}
-          <LiveExecutionConsole 
-            activeRun={activeTestCase}
-            logs={activeTestCase?.logs || []}
-            timerSeconds={timerSeconds}
-            isRunning={isRunning}
-            onTogglePlay={() => setIsRunning(!isRunning)}
-            onReset={() => handleRunTest(activeTestCase)}
-            currentStepIndex={currentStepIndex}
-            onStepClick={(index) => setCurrentStepIndex(index)}
+        {activeNav === 'projects' && (
+          <ProjectsView 
+            setActiveNav={setActiveNav}
+            onOpenPlanModal={() => setIsModalOpen(true)}
+            searchQuery={searchQuery}
           />
+        )}
 
-          {/* Bottom Data Tables */}
-          <TestCaseTable 
+        {activeNav === 'applications' && (
+          <ApplicationsView 
+            setActiveNav={setActiveNav}
+            onOpenPlanModal={() => setIsModalOpen(true)}
+            searchQuery={searchQuery}
+          />
+        )}
+
+        {activeNav === 'test-cases' && (
+          <TestCasesView 
             testCases={testCases}
-            activeTestCaseId={activeTestCaseId}
-            onSelectTestCase={handleSelectTestCase}
             onRunTest={handleRunTest}
+            onSelectTestCase={handleSelectTestCase}
+            searchQuery={searchQuery}
+            onOpenPlanModal={() => setIsModalOpen(true)}
           />
-        </div>
+        )}
+
+        {activeNav === 'executions' && (
+          <ExecutionsView 
+            onOpenPlanModal={() => setIsModalOpen(true)}
+            searchQuery={searchQuery}
+          />
+        )}
+
+        {activeNav === 'failures' && (
+          <FailuresHealingView 
+            onOpenPlanModal={() => setIsModalOpen(true)}
+          />
+        )}
+
+        {activeNav === 'reports' && (
+          <ReportsView />
+        )}
+
+        {activeNav === 'system' && (
+          <SystemStatusView 
+            backendStatus={backendStatus}
+          />
+        )}
       </main>
 
       <PlanExecuteModal 
