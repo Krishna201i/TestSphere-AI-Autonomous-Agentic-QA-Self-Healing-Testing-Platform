@@ -104,7 +104,7 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
           style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', cursor: 'pointer' }}
         >
           <Plus size={16} />
-          <span>+ Add Application</span>
+          <span>Add Application</span>
         </button>
       </div>
 

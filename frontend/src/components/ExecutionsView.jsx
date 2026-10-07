@@ -127,7 +127,7 @@ export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', exec
           style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', cursor: 'pointer' }}
         >
           <Play size={15} />
-          <span>+ Trigger New Run</span>
+          <span>Trigger New Run</span>
         </button>
       </div>
 
