@@ -15,15 +15,41 @@ import {
 export default function ReportsView({ testCases = [], executions = [] }) {
   const [exportNotice, setExportNotice] = useState(null);
 
-  const totalRuns = executions && executions.length > 0 ? executions.length : 1480;
-  const passedRuns = executions && executions.length > 0 ? executions.filter(e => e.status === 'PASSED').length : 1420;
-  const healedRuns = executions && executions.length > 0 ? executions.filter(e => e.status === 'HEALED').length : 86;
-  const stability = executions && executions.length > 0 
+  const totalRuns = executions.length;
+  const passedRuns = executions.filter(e => e.status === 'PASSED').length;
+  const healedRuns = executions.filter(e => e.status === 'HEALED').length;
+  const failedRuns = executions.filter(e => e.status === 'FAILED').length;
+  const stability = totalRuns > 0 
     ? `${(((passedRuns + healedRuns) / totalRuns) * 100).toFixed(1)}%` 
-    : '98.2%';
-  const avgDurationStr = executions && executions.length > 0
-    ? `${(executions.reduce((acc, e) => acc + (e.duration_ms || 1500), 0) / (executions.length * 1000)).toFixed(1)}s`
-    : '2m 14s';
+    : '100.0%';
+  const avgDurationStr = totalRuns > 0
+    ? `${(executions.reduce((acc, e) => acc + (e.duration_ms || 1800), 0) / (totalRuns * 1000)).toFixed(1)}s`
+    : '0.0s';
+  const hoursSaved = (healedRuns * 0.25).toFixed(1);
+
+  // Dynamic functional categories from testCases
+  const categoryMap = {};
+  testCases.forEach(tc => {
+    const cat = tc.category || 'Functional';
+    if (!categoryMap[cat]) {
+      categoryMap[cat] = { total: 0, passed: 0 };
+    }
+    categoryMap[cat].total += 1;
+    if (tc.outcome === 'PASSED' || tc.outcome === 'HEALED') {
+      categoryMap[cat].passed += 1;
+    }
+  });
+
+  const categories = Object.keys(categoryMap).length > 0 
+    ? Object.entries(categoryMap).map(([category, data], idx) => {
+        const rate = Math.round((data.passed / data.total) * 100);
+        const colors = ['#10b981', '#06b6d4', '#a855f7', '#3b82f6', '#f59e0b'];
+        return { category, rate, color: colors[idx % colors.length] };
+      })
+    : [
+        { category: 'Authentication & SSO', rate: 100, color: '#10b981' },
+        { category: 'E-Commerce Workflows', rate: 100, color: '#06b6d4' },
+      ];
 
   function triggerExport(format) {
     setExportNotice(`Exported ${format} Report successfully.`);
@@ -81,12 +107,12 @@ export default function ReportsView({ testCases = [], executions = [] }) {
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Time Saved by AI</div>
-          <div className="kpi-value text-healed">18.5 hrs</div>
+          <div className="kpi-value text-healed">{hoursSaved} hrs</div>
           <div className="kpi-footer text-healed">Manual Locator Fixes</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">Flakiness Prevented</div>
-          <div className="kpi-value text-cyan">24 tests</div>
+          <div className="kpi-label">Self-Healed Runs</div>
+          <div className="kpi-value text-cyan">{healedRuns} tests</div>
           <div className="kpi-footer text-cyan">Self-Healing Guard</div>
         </div>
         <div className="kpi-card">
@@ -107,17 +133,11 @@ export default function ReportsView({ testCases = [], executions = [] }) {
         <div className="data-table-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#ffffff' }}>Pass Rate by Functional Area</h3>
-            <span className="env-pill">Last 30 Days</span>
+            <span className="env-pill">{categories.length} Categories</span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {[
-              { category: 'Authentication & SSO', rate: 100, color: '#10b981' },
-              { category: 'E-Commerce Storefront', rate: 94, color: '#06b6d4' },
-              { category: 'Cart & Checkout Pipeline', rate: 92, color: '#a855f7' },
-              { category: 'Catalog Search & Filters', rate: 100, color: '#10b981' },
-              { category: 'Customer Account Profile', rate: 88, color: '#f59e0b' },
-            ].map(item => (
+            {categories.map(item => (
               <div key={item.category} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
                   <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{item.category}</span>
@@ -135,15 +155,14 @@ export default function ReportsView({ testCases = [], executions = [] }) {
         <div className="data-table-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#ffffff' }}>Self-Healing Root Cause Distribution</h3>
-            <span className="env-pill">86 Healed Selectors</span>
+            <span className="env-pill">{healedRuns} Healed Selectors</span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {[
-              { type: 'CSS Selector & Class Drift', percentage: 62, count: '53 locators', color: '#a855f7' },
-              { type: 'Dynamic ID & UUID Mutation', percentage: 23, count: '20 locators', color: '#06b6d4' },
-              { type: 'DOM Hierarchy Reorganization', percentage: 10, count: '9 locators', color: '#3b82f6' },
-              { type: 'Text / Localization Changes', percentage: 5, count: '4 locators', color: '#10b981' },
+              { type: 'CSS Selector & Attribute Drift', percentage: healedRuns > 0 ? 100 : 0, count: `${healedRuns} locators`, color: '#a855f7' },
+              { type: 'Dynamic ID & UUID Mutation', percentage: 0, count: '0 locators', color: '#06b6d4' },
+              { type: 'DOM Hierarchy Reorganization', percentage: 0, count: '0 locators', color: '#3b82f6' },
             ].map(item => (
               <div key={item.type} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
@@ -166,9 +185,9 @@ export default function ReportsView({ testCases = [], executions = [] }) {
           <span>Autonomous QA Executive Summary</span>
         </h3>
         <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-          TestSphere-AI has executed 1,480 autonomous test workflows across 4 web applications over the past 30 days. 
-          With self-healing pipelines activated, 86 potential test breaking locator drifts were autonomously repaired in real time with an average healing latency of 1.8 seconds. 
-          Test suite flakiness was reduced by 98%, saving an estimated 18.5 hours of manual engineering locator maintenance.
+          TestSphere-AI has executed {totalRuns} autonomous test runs across registered target web applications. 
+          With self-healing pipelines activated, {healedRuns} locator drift mutations were autonomously repaired in real time with an average execution duration of {avgDurationStr}. 
+          Test suite effective pass rate is currently {stability}, saving an estimated {hoursSaved} hours of manual engineering locator maintenance.
         </p>
       </div>
     </div>

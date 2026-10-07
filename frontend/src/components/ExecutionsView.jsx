@@ -15,94 +15,8 @@ import {
 } from 'lucide-react';
 import { getTestExecutions, planAndExecuteWorkflow } from '../services/api';
 
-const DEFAULT_EXECUTIONS = [
-  {
-    id: 'exec_20261007_102432',
-    testName: 'User Login & Auth Flow',
-    app: 'E-Commerce Storefront',
-    browser: 'Playwright Chromium Headless',
-    status: 'HEALED',
-    duration: '2m 34s',
-    timestamp: 'Today at 10:24 AM',
-    initiator: 'Autonomous Agent',
-    logsCount: 10,
-    logs: [
-      { time: '10:24:03', text: 'Starting execution: TC_LOGIN_001', type: 'info' },
-      { time: '10:24:05', text: 'Navigating to https://example.com/login', type: 'default' },
-      { time: '10:24:28', text: 'Locator timeout: #login-btn not found. Triggering Failure Analyzer Agent...', type: 'warn' },
-      { time: '10:24:30', text: 'Agent diagnosed LOCATOR_CHANGED (Confidence: 92%)', type: 'agent' },
-      { time: '10:24:32', text: 'Synthesized: button[type="submit"]', type: 'agent' },
-      { time: '10:24:38', text: 'Validation SUCCESS! Test step healed & persisted to database.', type: 'success' },
-    ]
-  },
-  {
-    id: 'exec_20261007_101200',
-    testName: 'Add Item to Cart Scenario',
-    app: 'E-Commerce Storefront',
-    browser: 'Playwright Chromium Headless',
-    status: 'FAILED',
-    duration: '1m 12s',
-    timestamp: 'Today at 10:12 AM',
-    initiator: 'CI/CD Pipeline #482',
-    logsCount: 5,
-    logs: [
-      { time: '10:12:00', text: 'Starting execution: TC_CART_002', type: 'info' },
-      { time: '10:12:08', text: 'Clicking button[data-testid="add-to-cart"]', type: 'default' },
-      { time: '10:12:12', text: 'Server returned HTTP 500 Internal Server Error', type: 'error' },
-      { time: '10:12:14', text: 'Categorized as APPLICATION_BUG. Non-healable.', type: 'error' },
-    ]
-  },
-  {
-    id: 'exec_20261007_095810',
-    testName: 'Complete Checkout & Order Confirmation',
-    app: 'E-Commerce Storefront',
-    browser: 'Playwright Chromium Headless',
-    status: 'PASSED',
-    duration: '3m 18s',
-    timestamp: 'Today at 09:58 AM',
-    initiator: 'Autonomous Agent',
-    logsCount: 5,
-    logs: [
-      { time: '09:58:10', text: 'Starting execution: TC_CHECKOUT_003', type: 'info' },
-      { time: '09:58:25', text: 'Filling shipping and payment form...', type: 'default' },
-      { time: '09:58:43', text: 'Order confirmation #ord-9821 received. All assertions passed.', type: 'success' },
-    ]
-  },
-  {
-    id: 'exec_20261007_093421',
-    testName: 'Search Product Catalog Grid',
-    app: 'E-Commerce Storefront',
-    browser: 'Playwright Chromium Headless',
-    status: 'PASSED',
-    duration: '1m 45s',
-    timestamp: 'Today at 09:34 AM',
-    initiator: 'Scheduled Run',
-    logsCount: 3,
-    logs: [
-      { time: '09:34:21', text: 'Starting execution: TC_SEARCH_004', type: 'info' },
-      { time: '09:34:30', text: '12 items verified in catalog grid. Passed.', type: 'success' },
-    ]
-  },
-  {
-    id: 'exec_20261007_084511',
-    testName: 'Account MFA Verification',
-    app: 'FinTech Banking Portal',
-    browser: 'Playwright Chromium Headless',
-    status: 'HEALED',
-    duration: '2m 10s',
-    timestamp: 'Today at 08:45 AM',
-    initiator: 'Autonomous Agent',
-    logsCount: 7,
-    logs: [
-      { time: '08:45:11', text: 'Starting execution: TC_MFA_008', type: 'info' },
-      { time: '08:45:25', text: 'OTP input box relocated from form#otp to input[name="token"]', type: 'warn' },
-      { time: '08:45:30', text: 'Self-healing selector successfully updated. Passed.', type: 'success' },
-    ]
-  }
-];
-
 export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', executions: propExecutions = [] }) {
-  const [executions, setExecutions] = useState(DEFAULT_EXECUTIONS);
+  const [executions, setExecutions] = useState([]);
   const [localSearch, setLocalSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [selectedLogExec, setSelectedLogExec] = useState(null);
@@ -114,7 +28,7 @@ export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', exec
       rawId: e.id,
       testCaseId: e.test_case_id,
       testName: `Execution Run #${e.id} (TC #${e.test_case_id})`,
-      app: 'E-Commerce Storefront',
+      app: 'TestSphere Suite',
       browser: 'Playwright Chromium Headless',
       status: e.status || 'PASSED',
       duration: e.duration_ms ? `${(e.duration_ms / 1000).toFixed(1)}s` : '1.8s',
@@ -122,9 +36,21 @@ export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', exec
       initiator: 'Autonomous Agent',
       logsCount: 3,
       logs: [
-        { time: e.started_at ? new Date(e.started_at).toLocaleTimeString() : '10:00:00', text: `Execution initialized for test case #${e.test_case_id}`, type: 'info' },
-        { time: e.started_at ? new Date(e.started_at).toLocaleTimeString() : '10:00:01', text: 'Playwright Chromium browser context launched in headless fast mode', type: 'default' },
-        { time: e.completed_at ? new Date(e.completed_at).toLocaleTimeString() : '10:00:02', text: e.error_message ? `Failed: ${e.error_message}` : `Execution completed cleanly: ${e.status}`, type: e.status === 'PASSED' ? 'success' : 'error' },
+        { 
+          time: e.started_at ? new Date(e.started_at).toLocaleTimeString() : '10:00:00', 
+          text: `Execution initialized for test case #${e.test_case_id}`, 
+          type: 'info' 
+        },
+        { 
+          time: e.started_at ? new Date(e.started_at).toLocaleTimeString() : '10:00:01', 
+          text: 'Playwright Chromium browser context launched in headless fast mode', 
+          type: 'default' 
+        },
+        { 
+          time: e.completed_at ? new Date(e.completed_at).toLocaleTimeString() : '10:00:02', 
+          text: e.error_message ? `Result: ${e.error_message}` : `Execution completed cleanly: ${e.status}`, 
+          type: e.status === 'PASSED' ? 'success' : (e.status === 'HEALED' ? 'agent' : 'error') 
+        },
       ]
     }));
   }
@@ -135,7 +61,7 @@ export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', exec
     } else {
       async function loadExecutions() {
         const live = await getTestExecutions();
-        if (live && live.length > 0) {
+        if (Array.isArray(live) && live.length > 0) {
           setExecutions(mapLiveExecutions(live));
         }
       }
@@ -152,20 +78,30 @@ export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', exec
     return matchesSearch && matchesStatus;
   });
 
+  const totalRuns = executions.length;
+  const passedRuns = executions.filter(e => e.status === 'PASSED').length;
+  const healedRuns = executions.filter(e => e.status === 'HEALED').length;
+  const failedRuns = executions.filter(e => e.status === 'FAILED').length;
+  const passRate = totalRuns > 0 ? `${Math.round(((passedRuns + healedRuns) / totalRuns) * 100)}%` : '100%';
+  const avgDuration = totalRuns > 0 
+    ? `${(executions.reduce((acc, e) => acc + (parseFloat(e.duration) || 1.8), 0) / totalRuns).toFixed(1)}s` 
+    : '0.0s';
+
   async function handleReRun(exec) {
     setReRunningId(exec.id);
     try {
       const tcId = exec.testCaseId || 1;
       await planAndExecuteWorkflow({
         test_case_id: tcId,
+        test_case_name: exec.testName,
         headless: true,
       });
-      const live = await getTestExecutions();
-      if (live && live.length > 0) {
-        setExecutions(mapLiveExecutions(live));
+      const refreshed = await getTestExecutions();
+      if (Array.isArray(refreshed) && refreshed.length > 0) {
+        setExecutions(mapLiveExecutions(refreshed));
       }
     } catch (err) {
-      console.warn('Re-run error:', err.message);
+      console.warn('Re-run failed:', err);
     } finally {
       setReRunningId(null);
     }
@@ -176,12 +112,12 @@ export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', exec
       {/* Title Header */}
       <div className="page-title-row">
         <div className="page-title-box">
-          <div className="page-icon-badge">
-            <PlayCircle size={22} />
+          <div className="page-icon-badge" style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(168, 85, 247, 0.3))' }}>
+            <PlayCircle size={22} color="#818cf8" />
           </div>
           <div>
-            <h2>Test Executions</h2>
-            <p>Live execution history, multi-agent telemetry streams, and run telemetry</p>
+            <h2>Execution History & Telemetry</h2>
+            <p>Live Playwright runs, step-by-step logs, durations, and agent actions</p>
           </div>
         </div>
 
@@ -199,28 +135,28 @@ export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', exec
       <div className="kpi-grid">
         <div className="kpi-card">
           <div className="kpi-label">Total Executions</div>
-          <div className="kpi-value">{executions.length}</div>
-          <div className="kpi-footer text-primary">All Sessions</div>
+          <div className="kpi-value">{totalRuns}</div>
+          <div className="kpi-footer text-primary">Database Runs</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Pass Rate</div>
-          <div className="kpi-value text-success">94.2%</div>
-          <div className="kpi-footer text-success">High Stability</div>
+          <div className="kpi-value text-success">{passRate}</div>
+          <div className="kpi-footer text-success">Effective Success</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Auto-Healed Runs</div>
-          <div className="kpi-value text-healed">18</div>
-          <div className="kpi-footer text-healed">Saved Pipeline Runs</div>
+          <div className="kpi-value text-healed">{healedRuns}</div>
+          <div className="kpi-footer text-healed">Self-Repaired</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Average Run Time</div>
-          <div className="kpi-value">2m 14s</div>
+          <div className="kpi-value">{avgDuration}</div>
           <div className="kpi-footer text-cyan">Fast Execution</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Active Engine</div>
           <div className="kpi-value">Playwright</div>
-          <div className="kpi-footer text-success">Chromium 128</div>
+          <div className="kpi-footer text-success">Chromium Headless</div>
         </div>
       </div>
 
@@ -231,25 +167,25 @@ export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', exec
             className={`filter-tab ${statusFilter === 'ALL' ? 'active' : ''}`}
             onClick={() => setStatusFilter('ALL')}
           >
-            All Runs
+            All Runs ({totalRuns})
           </button>
           <button 
             className={`filter-tab ${statusFilter === 'PASSED' ? 'active' : ''}`}
             onClick={() => setStatusFilter('PASSED')}
           >
-            Passed
+            Passed ({passedRuns})
           </button>
           <button 
             className={`filter-tab ${statusFilter === 'HEALED' ? 'active' : ''}`}
             onClick={() => setStatusFilter('HEALED')}
           >
-            Healed
+            Healed ({healedRuns})
           </button>
           <button 
             className={`filter-tab ${statusFilter === 'FAILED' ? 'active' : ''}`}
             onClick={() => setStatusFilter('FAILED')}
           >
-            Failed
+            Failed ({failedRuns})
           </button>
         </div>
 
@@ -281,82 +217,92 @@ export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', exec
             </tr>
           </thead>
           <tbody>
-            {filtered.map((e) => {
-              const isHealed = e.status === 'HEALED';
-              const isPassed = e.status === 'PASSED';
-              const isFailed = e.status === 'FAILED';
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2.5rem 1rem' }}>
+                  No execution logs found matching the filter.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((e) => {
+                const isHealed = e.status === 'HEALED';
+                const isPassed = e.status === 'PASSED';
+                const isFailed = e.status === 'FAILED';
 
-              return (
-                <tr key={e.id} className="table-row-hover">
-                  <td>
-                    <span className="mono" style={{ fontSize: '0.78rem', color: 'var(--primary-light)', fontWeight: 600 }}>
-                      {e.id}
-                    </span>
-                  </td>
-                  <td>
-                    <span style={{ fontWeight: 600, color: '#ffffff' }}>{e.testName}</span>
-                  </td>
-                  <td>
-                    <span className="env-pill">{e.app}</span>
-                  </td>
-                  <td>
-                    <span className={`status-pill ${
-                      isHealed ? 'status-pill-healed' : isPassed ? 'status-pill-passed' : 'status-pill-failed'
-                    }`}>
-                      {isHealed && <Wrench size={12} />}
-                      {isPassed && <CheckCircle2 size={12} />}
-                      {isFailed && <XCircle size={12} />}
-                      <span>{e.status}</span>
-                    </span>
-                  </td>
-                  <td>
-                    <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{e.duration}</span>
-                  </td>
-                  <td>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{e.initiator}</span>
-                  </td>
-                  <td>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{e.timestamp}</span>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: '0.45rem' }}>
-                      <button 
-                        className="btn-card-action"
-                        onClick={() => setSelectedLogExec(e)}
-                        title="View Telemetry Logs"
-                      >
-                        <Terminal size={14} />
-                        <span>Logs</span>
-                      </button>
+                return (
+                  <tr key={e.id} className="table-row-hover">
+                    <td>
+                      <span className="mono" style={{ fontSize: '0.78rem', color: 'var(--primary-light)', fontWeight: 600 }}>
+                        {e.id}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ fontWeight: 600, color: '#ffffff' }}>{e.testName}</span>
+                    </td>
+                    <td>
+                      <span className="env-pill">{e.app}</span>
+                    </td>
+                    <td>
+                      <span className={`status-pill ${
+                        isHealed ? 'status-pill-healed' : isPassed ? 'status-pill-passed' : 'status-pill-failed'
+                      }`}>
+                        {isHealed && <Wrench size={12} />}
+                        {isPassed && <CheckCircle2 size={12} />}
+                        {isFailed && <XCircle size={12} />}
+                        <span>{e.status}</span>
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{e.duration}</span>
+                    </td>
+                    <td>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{e.initiator}</span>
+                    </td>
+                    <td>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{e.timestamp}</span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
+                        <button 
+                          className="btn-card-action"
+                          onClick={() => setSelectedLogExec(e)}
+                          title="View Execution Log Trace"
+                        >
+                          <Terminal size={13} />
+                          <span>View Logs</span>
+                        </button>
 
-                      <button 
-                        className="btn-primary-small"
-                        onClick={() => handleReRun(e)}
-                        disabled={reRunningId === e.id}
-                        title="Re-run test scenario"
-                      >
-                        <RotateCw size={13} className={reRunningId === e.id ? 'spin-icon' : ''} />
-                        <span>{reRunningId === e.id ? 'Running' : 'Re-run'}</span>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
+                        <button 
+                          className="btn-primary-small"
+                          onClick={() => handleReRun(e)}
+                          disabled={reRunningId === e.id}
+                          title="Re-run against Playwright Engine"
+                        >
+                          <RotateCw size={13} className={reRunningId === e.id ? 'spin-icon' : ''} />
+                          <span>{reRunningId === e.id ? 'Running...' : 'Re-Run'}</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
 
-      {/* Execution Logs Modal */}
+      {/* Log Details Modal */}
       {selectedLogExec && (
         <div className="modal-overlay modal-backdrop" onClick={() => setSelectedLogExec(null)}>
-          <div className="modal-content modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '650px' }}>
+          <div className="modal-content modal-card" style={{ maxWidth: '680px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="modal-title-wrap modal-title-group">
                 <Terminal size={20} className="text-cyan" />
                 <div>
-                  <h3 className="modal-title">Execution Telemetry Stream</h3>
-                  <p className="modal-subtitle">{selectedLogExec.id} • {selectedLogExec.testName}</p>
+                  <h3 className="modal-title">Execution Trace: {selectedLogExec.id}</h3>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                    {selectedLogExec.testName} &bull; {selectedLogExec.browser}
+                  </p>
                 </div>
               </div>
               <button className="modal-close-btn" onClick={() => setSelectedLogExec(null)}>
@@ -364,31 +310,28 @@ export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', exec
               </button>
             </div>
 
-            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="env-pill">{selectedLogExec.browser}</span>
-                <span className={`status-pill ${
-                  selectedLogExec.status === 'HEALED' ? 'status-pill-healed' :
-                  selectedLogExec.status === 'PASSED' ? 'status-pill-passed' : 'status-pill-failed'
-                }`}>
-                  {selectedLogExec.status}
-                </span>
-              </div>
-
-              <div className="console-log-box" style={{ maxHeight: '280px', overflowY: 'auto' }}>
-                {selectedLogExec.logs.map((l, i) => (
-                  <div key={i} className={`log-line log-${l.type || 'default'}`}>
-                    <span className="log-time">{l.time}</span>
-                    <span className="log-text">{l.text}</span>
+            <div style={{ padding: '1.25rem' }}>
+              <div className="terminal-window" style={{ maxHeight: '340px', overflowY: 'auto' }}>
+                {selectedLogExec.logs.map((log, idx) => (
+                  <div className="log-line" key={idx}>
+                    <span className="log-time">[{log.time}]</span>
+                    <span className={`log-text ${log.type}`}>{log.text}</span>
                   </div>
                 ))}
               </div>
+            </div>
 
-              <div className="modal-footer" style={{ border: 'none', padding: 0 }}>
-                <button className="btn-secondary" onClick={() => setSelectedLogExec(null)}>
-                  Close
-                </button>
-              </div>
+            <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+              <span className={`status-pill ${
+                selectedLogExec.status === 'HEALED' ? 'status-pill-healed' : 
+                selectedLogExec.status === 'PASSED' ? 'status-pill-passed' : 'status-pill-failed'
+              }`}>
+                {selectedLogExec.status}
+              </span>
+
+              <button className="btn-secondary" onClick={() => setSelectedLogExec(null)}>
+                Close
+              </button>
             </div>
           </div>
         </div>

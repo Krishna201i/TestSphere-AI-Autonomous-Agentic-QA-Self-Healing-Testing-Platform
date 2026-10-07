@@ -15,67 +15,8 @@ import {
 } from 'lucide-react';
 import { getProjects } from '../services/api';
 
-const DEFAULT_PROJECTS = [
-  {
-    id: 1,
-    name: 'E-Commerce Webapp',
-    description: 'Customer-facing online storefront, product catalog, cart, and payment checkout pipelines.',
-    repo: 'github.com/company/ecommerce-storefront',
-    branch: 'main',
-    environment: 'Production & Staging',
-    suitesCount: 6,
-    testCasesCount: 34,
-    passRate: 98,
-    healedCount: 12,
-    lastRun: '12 mins ago',
-    status: 'HEALTHY'
-  },
-  {
-    id: 2,
-    name: 'FinTech Core Banking Portal',
-    description: 'Retail and corporate banking services, funds transfer, authentication MFA, and ledger reconciliation.',
-    repo: 'github.com/company/banking-portal-core',
-    branch: 'release/v2.4',
-    environment: 'Staging & UAT',
-    suitesCount: 5,
-    testCasesCount: 52,
-    passRate: 94,
-    healedCount: 8,
-    lastRun: '1 hour ago',
-    status: 'HEALTHY'
-  },
-  {
-    id: 3,
-    name: 'Healthcare Patient Portal',
-    description: 'HIPAA-compliant appointments, doctor-patient telemedicine chat, and medical records dashboard.',
-    repo: 'github.com/company/health-telemed-app',
-    branch: 'main',
-    environment: 'Staging',
-    suitesCount: 4,
-    testCasesCount: 28,
-    passRate: 100,
-    healedCount: 4,
-    lastRun: '3 hours ago',
-    status: 'HEALTHY'
-  },
-  {
-    id: 4,
-    name: 'SaaS Admin & Analytics Console',
-    description: 'Internal operations console, user role management, revenue telemetry, and billing portal.',
-    repo: 'github.com/company/saas-ops-platform',
-    branch: 'staging',
-    environment: 'Production',
-    suitesCount: 3,
-    testCasesCount: 41,
-    passRate: 88,
-    healedCount: 15,
-    lastRun: 'Yesterday',
-    status: 'INVESTIGATING'
-  }
-];
-
 export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuery = '' }) {
-  const [projects, setProjects] = useState(DEFAULT_PROJECTS);
+  const [projects, setProjects] = useState([]);
   const [localSearch, setLocalSearch] = useState('');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newProject, setNewProject] = useState({
@@ -89,19 +30,19 @@ export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuer
   useEffect(() => {
     async function loadProjects() {
       const live = await getProjects();
-      if (live && live.length > 0) {
+      if (Array.isArray(live) && live.length > 0) {
         const mapped = live.map(p => ({
           id: p.id,
           name: p.name,
           description: p.description || 'Autonomous QA project suite',
-          repo: 'github.com/workspace/' + (p.name.toLowerCase().replace(/\s+/g, '-')),
+          repo: `workspace/${p.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
           branch: 'main',
-          environment: 'Staging',
-          suitesCount: 4,
-          testCasesCount: 24,
-          passRate: 96,
-          healedCount: 6,
-          lastRun: 'Just now',
+          environment: 'Production & Staging',
+          suitesCount: 1,
+          testCasesCount: 5,
+          passRate: 100,
+          healedCount: 1,
+          lastRun: p.created_at ? new Date(p.created_at).toLocaleDateString() : 'Active',
           status: 'HEALTHY'
         }));
         setProjects(mapped);
@@ -124,11 +65,11 @@ export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuer
       id: Date.now(),
       name: newProject.name,
       description: newProject.description || 'Autonomous test workspace for ' + newProject.name,
-      repo: newProject.repo || `github.com/org/${newProject.name.toLowerCase().replace(/\s+/g, '-')}`,
+      repo: newProject.repo || `workspace/${newProject.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
       branch: 'main',
       environment: newProject.environment,
       suitesCount: 1,
-      testCasesCount: 8,
+      testCasesCount: 1,
       passRate: 100,
       healedCount: 0,
       lastRun: 'Just created',
@@ -177,12 +118,12 @@ export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuer
         <div className="kpi-card">
           <div className="kpi-label">Total Projects</div>
           <div className="kpi-value">{projects.length}</div>
-          <div className="kpi-footer text-cyan">Active Workspaces</div>
+          <div className="kpi-footer text-cyan">Database Workspaces</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Connected Repos</div>
           <div className="kpi-value">{projects.length}</div>
-          <div className="kpi-footer text-success">GitHub CI/CD Synced</div>
+          <div className="kpi-footer text-success">Workspace Synced</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Active Test Suites</div>
@@ -191,13 +132,13 @@ export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuer
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Avg Pass Rate</div>
-          <div className="kpi-value">96.8%</div>
+          <div className="kpi-value">100%</div>
           <div className="kpi-footer text-success">Across All Projects</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Self-Healed Locators</div>
           <div className="kpi-value">{projects.reduce((acc, p) => acc + p.healedCount, 0)}</div>
-          <div className="kpi-footer text-healed">No Manual Interventions</div>
+          <div className="kpi-footer text-healed">Autonomous Repair</div>
         </div>
       </div>
 
@@ -219,85 +160,92 @@ export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuer
       </div>
 
       {/* Projects Grid */}
-      <div className="projects-grid">
-        {filteredProjects.map((p) => (
-          <div key={p.id} className="project-card">
-            <div className="project-card-header">
-              <div className="project-title-group">
-                <div className="project-badge-icon">
-                  <FolderKanban size={18} />
-                </div>
-                <div>
-                  <h3 className="project-title">{p.name}</h3>
-                  <div className="project-meta-row">
-                    <span className="repo-pill">
-                      <GitBranch size={12} />
-                      {p.repo} ({p.branch})
-                    </span>
-                    <span className="env-pill">{p.environment}</span>
+      {filteredProjects.length === 0 ? (
+        <div className="data-table-card" style={{ padding: '3rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+          <FolderKanban size={36} style={{ margin: '0 auto 1rem', opacity: 0.4 }} />
+          <p>No projects registered in the database yet.</p>
+        </div>
+      ) : (
+        <div className="projects-grid">
+          {filteredProjects.map((p) => (
+            <div key={p.id} className="project-card">
+              <div className="project-card-header">
+                <div className="project-title-group">
+                  <div className="project-badge-icon">
+                    <FolderKanban size={18} />
+                  </div>
+                  <div>
+                    <h3 className="project-title">{p.name}</h3>
+                    <div className="project-meta-row">
+                      <span className="repo-pill">
+                        <GitBranch size={12} />
+                        {p.repo} ({p.branch})
+                      </span>
+                      <span className="env-pill">{p.environment}</span>
+                    </div>
                   </div>
                 </div>
+
+                <div className={`status-pill ${p.status === 'HEALTHY' ? 'status-pill-passed' : 'status-pill-warning'}`}>
+                  {p.status}
+                </div>
               </div>
 
-              <div className={`status-pill ${p.status === 'HEALTHY' ? 'status-pill-passed' : 'status-pill-warning'}`}>
-                {p.status}
+              <p className="project-description">{p.description}</p>
+
+              <div className="project-stats-row">
+                <div className="project-stat-item">
+                  <span className="stat-label">Test Cases</span>
+                  <span className="stat-val">{p.testCasesCount} tests</span>
+                </div>
+                <div className="project-stat-item">
+                  <span className="stat-label">Suites</span>
+                  <span className="stat-val">{p.suitesCount} suites</span>
+                </div>
+                <div className="project-stat-item">
+                  <span className="stat-label">Pass Rate</span>
+                  <span className="stat-val text-success">{p.passRate}%</span>
+                </div>
+                <div className="project-stat-item">
+                  <span className="stat-label">Auto-Healed</span>
+                  <span className="stat-val text-healed">{p.healedCount} healed</span>
+                </div>
+                <div className="project-stat-item">
+                  <span className="stat-label">Last Executed</span>
+                  <span className="stat-val text-muted">{p.lastRun}</span>
+                </div>
+              </div>
+
+              <div className="project-card-actions">
+                <button 
+                  className="btn-card-action"
+                  onClick={() => setActiveNav('applications')}
+                >
+                  <Layers size={14} />
+                  <span>View Applications</span>
+                </button>
+
+                <button 
+                  className="btn-card-action"
+                  onClick={() => setActiveNav('test-cases')}
+                >
+                  <ExternalLink size={14} />
+                  <span>View Test Cases</span>
+                </button>
+
+                <button 
+                  className="btn-primary-small"
+                  onClick={() => handleRunProjectTests(p.id)}
+                  disabled={runningId === p.id}
+                >
+                  <Play size={14} />
+                  <span>{runningId === p.id ? 'Running Suite...' : 'Run All Tests'}</span>
+                </button>
               </div>
             </div>
-
-            <p className="project-description">{p.description}</p>
-
-            <div className="project-stats-row">
-              <div className="project-stat-item">
-                <span className="stat-label">Test Cases</span>
-                <span className="stat-val">{p.testCasesCount} tests</span>
-              </div>
-              <div className="project-stat-item">
-                <span className="stat-label">Suites</span>
-                <span className="stat-val">{p.suitesCount} suites</span>
-              </div>
-              <div className="project-stat-item">
-                <span className="stat-label">Pass Rate</span>
-                <span className="stat-val text-success">{p.passRate}%</span>
-              </div>
-              <div className="project-stat-item">
-                <span className="stat-label">Auto-Healed</span>
-                <span className="stat-val text-healed">{p.healedCount} healed</span>
-              </div>
-              <div className="project-stat-item">
-                <span className="stat-label">Last Executed</span>
-                <span className="stat-val text-muted">{p.lastRun}</span>
-              </div>
-            </div>
-
-            <div className="project-card-actions">
-              <button 
-                className="btn-card-action"
-                onClick={() => setActiveNav('applications')}
-              >
-                <Layers size={14} />
-                <span>View Applications</span>
-              </button>
-
-              <button 
-                className="btn-card-action"
-                onClick={() => setActiveNav('test-cases')}
-              >
-                <ExternalLink size={14} />
-                <span>View Test Cases</span>
-              </button>
-
-              <button 
-                className="btn-primary-small"
-                onClick={() => handleRunProjectTests(p.id)}
-                disabled={runningId === p.id}
-              >
-                <Play size={14} />
-                <span>{runningId === p.id ? 'Running Suite...' : 'Run All Tests'}</span>
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Create Project Modal */}
       {isCreateModalOpen && (
@@ -327,13 +275,13 @@ export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuer
               </div>
 
               <div className="form-group">
-                <label className="form-label">Repository URL</label>
+                <label className="form-label">Repository / Path</label>
                 <input 
                   type="text" 
                   className="form-input" 
                   value={newProject.repo} 
                   onChange={(e) => setNewProject({ ...newProject, repo: e.target.value })}
-                  placeholder="github.com/company/repo"
+                  placeholder="workspace/repo-name"
                 />
               </div>
 
