@@ -104,7 +104,7 @@ export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuer
           lastRun: 'Just now',
           status: 'HEALTHY'
         }));
-        setProjects([...mapped, ...DEFAULT_PROJECTS]);
+        setProjects(mapped);
       }
     }
     loadProjects();

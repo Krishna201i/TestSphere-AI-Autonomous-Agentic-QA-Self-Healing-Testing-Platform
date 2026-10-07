@@ -13,7 +13,7 @@ import {
   Filter,
   Sparkles
 } from 'lucide-react';
-import { getTestExecutions } from '../services/api';
+import { getTestExecutions, planAndExecuteWorkflow } from '../services/api';
 
 const DEFAULT_EXECUTIONS = [
   {
@@ -101,37 +101,47 @@ const DEFAULT_EXECUTIONS = [
   }
 ];
 
-export default function ExecutionsView({ onOpenPlanModal, searchQuery = '' }) {
+export default function ExecutionsView({ onOpenPlanModal, searchQuery = '', executions: propExecutions = [] }) {
   const [executions, setExecutions] = useState(DEFAULT_EXECUTIONS);
   const [localSearch, setLocalSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [selectedLogExec, setSelectedLogExec] = useState(null);
   const [reRunningId, setReRunningId] = useState(null);
 
+  function mapLiveExecutions(live) {
+    return live.map(e => ({
+      id: `exec_${e.id}`,
+      rawId: e.id,
+      testCaseId: e.test_case_id,
+      testName: `Execution Run #${e.id} (TC #${e.test_case_id})`,
+      app: 'E-Commerce Storefront',
+      browser: 'Playwright Chromium Headless',
+      status: e.status || 'PASSED',
+      duration: e.duration_ms ? `${(e.duration_ms / 1000).toFixed(1)}s` : '1.8s',
+      timestamp: e.started_at ? new Date(e.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now',
+      initiator: 'Autonomous Agent',
+      logsCount: 3,
+      logs: [
+        { time: e.started_at ? new Date(e.started_at).toLocaleTimeString() : '10:00:00', text: `Execution initialized for test case #${e.test_case_id}`, type: 'info' },
+        { time: e.started_at ? new Date(e.started_at).toLocaleTimeString() : '10:00:01', text: 'Playwright Chromium browser context launched in headless fast mode', type: 'default' },
+        { time: e.completed_at ? new Date(e.completed_at).toLocaleTimeString() : '10:00:02', text: e.error_message ? `Failed: ${e.error_message}` : `Execution completed cleanly: ${e.status}`, type: e.status === 'PASSED' ? 'success' : 'error' },
+      ]
+    }));
+  }
+
   useEffect(() => {
-    async function loadExecutions() {
-      const live = await getTestExecutions();
-      if (live && live.length > 0) {
-        const mapped = live.map(e => ({
-          id: `exec_${e.id}`,
-          testName: e.test_case_name || `Execution #${e.id}`,
-          app: 'E-Commerce Storefront',
-          browser: 'Playwright Chromium Headless',
-          status: e.status || 'PASSED',
-          duration: `${(e.duration_ms / 1000).toFixed(1)}s`,
-          timestamp: 'Recent',
-          initiator: 'Autonomous Agent',
-          logsCount: 4,
-          logs: [
-            { time: '10:00:00', text: 'Execution started', type: 'info' },
-            { time: '10:00:02', text: `Status: ${e.status}`, type: e.status === 'PASSED' ? 'success' : 'error' },
-          ]
-        }));
-        setExecutions([...mapped, ...DEFAULT_EXECUTIONS]);
+    if (propExecutions && propExecutions.length > 0) {
+      setExecutions(mapLiveExecutions(propExecutions));
+    } else {
+      async function loadExecutions() {
+        const live = await getTestExecutions();
+        if (live && live.length > 0) {
+          setExecutions(mapLiveExecutions(live));
+        }
       }
+      loadExecutions();
     }
-    loadExecutions();
-  }, []);
+  }, [propExecutions]);
 
   const filterTerm = (searchQuery || localSearch).toLowerCase();
   const filtered = executions.filter(e => {
@@ -142,11 +152,23 @@ export default function ExecutionsView({ onOpenPlanModal, searchQuery = '' }) {
     return matchesSearch && matchesStatus;
   });
 
-  function handleReRun(exec) {
+  async function handleReRun(exec) {
     setReRunningId(exec.id);
-    setTimeout(() => {
+    try {
+      const tcId = exec.testCaseId || 1;
+      await planAndExecuteWorkflow({
+        test_case_id: tcId,
+        headless: true,
+      });
+      const live = await getTestExecutions();
+      if (live && live.length > 0) {
+        setExecutions(mapLiveExecutions(live));
+      }
+    } catch (err) {
+      console.warn('Re-run error:', err.message);
+    } finally {
       setReRunningId(null);
-    }, 1500);
+    }
   }
 
   return (
