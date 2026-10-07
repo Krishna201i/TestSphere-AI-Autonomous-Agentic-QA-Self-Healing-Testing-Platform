@@ -15,22 +15,28 @@ from backend.config import settings
 # Engine setup
 connect_args = {}
 engine_kwargs = {}
-if settings.DATABASE_URL.startswith("sqlite"):
+db_url = settings.DATABASE_URL
+
+# Normalize legacy postgres:// URI scheme to postgresql:// for SQLAlchemy
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+if db_url.startswith("sqlite"):
     connect_args["check_same_thread"] = False
 else:
     engine_kwargs["pool_pre_ping"] = True
     engine_kwargs["pool_recycle"] = 300
 
 # For in-memory sqlite testing or standard file-based sqlite
-if settings.DATABASE_URL == "sqlite:///:memory:":
+if db_url == "sqlite:///:memory:":
     engine = create_engine(
-        settings.DATABASE_URL,
+        db_url,
         connect_args=connect_args,
         poolclass=StaticPool,
     )
 else:
     engine = create_engine(
-        settings.DATABASE_URL,
+        db_url,
         connect_args=connect_args,
         **engine_kwargs,
     )
