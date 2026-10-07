@@ -76,7 +76,7 @@ export default function TestCasesView({
           style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', cursor: 'pointer' }}
         >
           <Plus size={16} />
-          <span>+ Plan New Test</span>
+          <span>Plan New Test</span>
         </button>
       </div>
 
