@@ -12,6 +12,7 @@ export default function LiveExecutionConsole({
   onReset,
   currentStepIndex = 1,
   onStepClick,
+  backendStatus = false,
 }) {
   const terminalRef = useRef(null);
 
@@ -35,8 +36,8 @@ export default function LiveExecutionConsole({
           <div className="live-title-area">
             <h3>Live Test Execution</h3>
             <span className="live-status-pill">
-              <span className="dot-indicator passed" style={{ width: 8, height: 8 }}></span>
-              <span>Running Simulation</span>
+              <span className={`dot-indicator ${backendStatus ? 'passed' : 'healed'}`} style={{ width: 8, height: 8 }}></span>
+              <span>{backendStatus ? 'Autonomous Engine Live' : 'Simulated Sandbox'}</span>
             </span>
           </div>
 
@@ -52,7 +53,7 @@ export default function LiveExecutionConsole({
               className="btn-stop" 
               id="btn-toggle-execution"
               onClick={onTogglePlay}
-              title={isRunning ? 'Pause simulation' : 'Resume simulation'}
+              title={isRunning ? 'Pause execution' : 'Resume execution'}
             >
               {isRunning ? <Pause size={14} /> : <Play size={14} />}
               <span>{isRunning ? 'Pause' : 'Resume'}</span>
@@ -60,7 +61,7 @@ export default function LiveExecutionConsole({
             <button 
               className="btn-stop" 
               onClick={onReset}
-              title="Rerun test"
+              title="Rerun test scenario against engine"
               style={{ background: 'rgba(56, 189, 248, 0.15)', borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
             >
               <RotateCcw size={14} />

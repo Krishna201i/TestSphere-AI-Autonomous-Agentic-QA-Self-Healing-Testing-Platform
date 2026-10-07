@@ -10,10 +10,20 @@ const RECENT_EXECUTIONS = [
 
 export default function TestCaseTable({ 
   testCases, 
+  executions = [],
   activeTestCaseId, 
   onSelectTestCase, 
   onRunTest 
 }) {
+  const displayExecutions = executions && executions.length > 0
+    ? [...executions].reverse().slice(0, 5).map(e => ({
+        id: `exec_${e.id}`,
+        testCaseId: `TC_${e.test_case_id}`,
+        status: (e.status || 'PASSED').toLowerCase(),
+        duration: e.duration_ms ? `${(e.duration_ms / 1000).toFixed(1)}s` : '1.2s',
+        time: e.started_at ? new Date(e.started_at).toLocaleTimeString() : 'Recent',
+      }))
+    : RECENT_EXECUTIONS;
   function renderStatusPill(outcome) {
     const status = (outcome || 'PASSED').toLowerCase();
     let display = 'Passed';
@@ -123,7 +133,7 @@ export default function TestCaseTable({
             </tr>
           </thead>
           <tbody id="executions-tbody">
-            {RECENT_EXECUTIONS.map((ex) => (
+            {displayExecutions.map((ex) => (
               <tr key={ex.id} onClick={() => onSelectTestCase(ex.testCaseId)}>
                 <td><code className="mono" style={{ color: '#cbd5e1' }}>{ex.id}</code></td>
                 <td>{ex.testCaseId}</td>
