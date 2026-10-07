@@ -74,7 +74,7 @@ export default function FailuresHealingView({ onOpenPlanModal, executions = [] }
           style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', cursor: 'pointer' }}
         >
           <Sparkles size={15} />
-          <span>+ Trigger Healing Test</span>
+          <span>Trigger Healing Test</span>
         </button>
       </div>
 
