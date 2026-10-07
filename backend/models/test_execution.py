@@ -25,6 +25,7 @@ class TestExecutionStatus(str, Enum):
     RUNNING = "RUNNING"
     PASSED = "PASSED"
     FAILED = "FAILED"
+    HEALED = "HEALED"
 
 
 class TestExecution(Base):

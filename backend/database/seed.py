@@ -182,7 +182,15 @@ def seed_database_if_empty(db: Session) -> bool:
         duration_ms=105000,
         error_message=None,
     )
-    db.add_all([exec1, exec2, exec3, exec4])
+    exec5 = TestExecution(
+        test_case_id=tc5.id,
+        status=TestExecutionStatus.HEALED.value,
+        started_at=now - timedelta(minutes=5),
+        completed_at=now - timedelta(minutes=3),
+        duration_ms=86000,
+        error_message="Drift resolved: selector button#avatar-upload healed to input[type='file'][name='avatar']",
+    )
+    db.add_all([exec1, exec2, exec3, exec4, exec5])
     db.commit()
 
     return True
