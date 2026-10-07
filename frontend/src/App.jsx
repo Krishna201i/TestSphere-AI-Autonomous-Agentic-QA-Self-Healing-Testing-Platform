@@ -15,6 +15,8 @@ import SystemStatusView from './components/SystemStatusView';
 import { 
   checkBackendHealth, 
   getTestCases, 
+  getTestExecutions,
+  planAndExecuteWorkflow,
   subscribeToWorkflowStream 
 } from './services/api';
 
@@ -182,6 +184,8 @@ export default function App() {
   const [timerSeconds, setTimerSeconds] = useState(78);
   const [isRunning, setIsRunning] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [executions, setExecutions] = useState([]);
 
   const activeTestCase = testCases.find(t => t.id === activeTestCaseId) || testCases[0];
 
@@ -189,23 +193,49 @@ export default function App() {
   useEffect(() => {
     async function initPlatform() {
       const health = await checkBackendHealth();
-      if (health && health.status === 'healthy') {
+      if (health && (health.status === 'healthy' || health.status === 'ok')) {
         setBackendStatus(true);
-        const liveCases = await getTestCases();
+        const [liveCases, liveExecutions] = await Promise.all([
+          getTestCases(),
+          getTestExecutions(),
+        ]);
+        if (liveExecutions && liveExecutions.length > 0) {
+          setExecutions(liveExecutions);
+        }
         if (liveCases && liveCases.length > 0) {
-          const merged = liveCases.map((lc, idx) => ({
-            id: lc.external_id || `TC-${lc.id}`,
-            name: lc.name,
-            category: lc.category || 'Functional',
-            priority: lc.priority || 'High',
-            version: `${lc.version || 1}.0`,
-            outcome: idx % 3 === 0 ? 'HEALED' : (idx % 3 === 1 ? 'PASSED' : 'FAILED'),
-            duration: `${Math.floor(Math.random() * 2) + 1}m ${Math.floor(Math.random() * 50) + 10}s`,
-            logs: DEFAULT_TEST_CASES[0].logs,
-            failure: DEFAULT_TEST_CASES[0].failure,
-            healing: DEFAULT_TEST_CASES[0].healing,
-          }));
-          setTestCases([...merged, ...DEFAULT_TEST_CASES]);
+          const merged = liveCases.map((lc, idx) => {
+            const relatedExecs = (liveExecutions || []).filter(e => e.test_case_id === lc.id);
+            const latestExec = relatedExecs[relatedExecs.length - 1];
+            const outcome = latestExec ? latestExec.status : 'PENDING';
+            const duration = latestExec?.duration_ms ? `${(latestExec.duration_ms / 1000).toFixed(1)}s` : '—';
+
+            return {
+              id: lc.external_id || `TC-${lc.id}`,
+              db_id: lc.id,
+              name: lc.name,
+              category: lc.category || 'Functional',
+              priority: lc.priority || 'High',
+              version: `${lc.version || 1}.0`,
+              outcome: outcome,
+              duration: duration,
+              error_message: latestExec?.error_message,
+              logs: latestExec ? [
+                { time: new Date(latestExec.started_at || Date.now()).toLocaleTimeString(), text: `Execution Run #${latestExec.id} initiated`, type: 'info' },
+                { time: new Date(latestExec.completed_at || Date.now()).toLocaleTimeString(), text: latestExec.error_message ? `Failed: ${latestExec.error_message}` : `Execution completed: ${latestExec.status}`, type: latestExec.error_message ? 'error' : 'success' },
+              ] : (DEFAULT_TEST_CASES[idx % DEFAULT_TEST_CASES.length]?.logs || DEFAULT_TEST_CASES[0].logs),
+              failure: latestExec?.error_message ? {
+                step: 'Target Action',
+                errorType: 'EXECUTION_FAILURE',
+                message: latestExec.error_message,
+                timestamp: latestExec.completed_at || new Date().toISOString(),
+              } : (DEFAULT_TEST_CASES[idx % DEFAULT_TEST_CASES.length]?.failure || DEFAULT_TEST_CASES[0].failure),
+              healing: DEFAULT_TEST_CASES[idx % DEFAULT_TEST_CASES.length]?.healing || DEFAULT_TEST_CASES[0].healing,
+            };
+          });
+          setTestCases(merged);
+          if (merged.length > 0) {
+            setActiveTestCaseId(merged[0].id);
+          }
         }
       }
     }
@@ -226,6 +256,7 @@ export default function App() {
     const newId = `TC_RUN_${Date.now().toString().slice(-4)}`;
     const newCase = {
       id: newId,
+      db_id: result.test_case_id,
       name: result.test_case_name || 'Autonomous Flow Execution',
       category: 'Autonomous',
       priority: 'High',
@@ -235,7 +266,7 @@ export default function App() {
       logs: (result.events || []).map(e => ({
         time: new Date().toLocaleTimeString('en-US', { hour12: false }),
         text: `[${e.event_type}] ${e.message}`,
-        type: e.event_type.includes('COMPLETED') ? 'success' : 'agent',
+        type: e.event_type.includes('COMPLETED') || e.event_type.includes('SUCCESS') ? 'success' : (e.event_type.includes('FAILURE') ? 'error' : 'agent'),
       })),
       failure: DEFAULT_TEST_CASES[0].failure,
       healing: DEFAULT_TEST_CASES[0].healing,
@@ -244,7 +275,11 @@ export default function App() {
     setTestCases([newCase, ...testCases]);
     setActiveTestCaseId(newId);
     setTimerSeconds(0);
-    setCurrentStepIndex(5); // Completed (Persist)
+    setCurrentStepIndex(result.status === 'HEALED' ? 4 : (result.status === 'PASSED' ? 5 : 2));
+
+    getTestExecutions().then(execs => {
+      if (execs && execs.length > 0) setExecutions(execs);
+    });
 
     if (result.execution_id) {
       subscribeToWorkflowStream(
@@ -269,25 +304,58 @@ export default function App() {
     else setCurrentStepIndex(2);
   }
 
-  function handleRunTest(tc) {
+  async function handleRunTest(tc) {
     handleSelectTestCase(tc.id);
     setTimerSeconds(0);
     setIsRunning(true);
     setCurrentStepIndex(0); // PLAN
 
-    setTimeout(() => setCurrentStepIndex(1), 600); // EXECUTE
-    setTimeout(() => {
-      if (tc.outcome === 'HEALED') {
-        setCurrentStepIndex(2);
-        setTimeout(() => setCurrentStepIndex(3), 800);
-        setTimeout(() => setCurrentStepIndex(4), 1600);
-        setTimeout(() => setCurrentStepIndex(5), 2400);
-      } else if (tc.outcome === 'PASSED') {
-        setTimeout(() => setCurrentStepIndex(5), 1200);
-      } else {
-        setCurrentStepIndex(2);
+    const stepTimer = setTimeout(() => setCurrentStepIndex(1), 500); // EXECUTE
+
+    try {
+      const tcId = tc.db_id || (typeof tc.id === 'number' ? tc.id : null);
+      const res = await planAndExecuteWorkflow({
+        test_case_id: tcId,
+        test_case_name: tc.name,
+        headless: true,
+      });
+
+      const finalStatus = res.status || 'PASSED';
+      const durationSec = res.duration_ms ? `${(res.duration_ms / 1000).toFixed(1)}s` : '1.5s';
+      const events = res.events || [];
+
+      const liveLogs = events.map(e => ({
+        time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+        text: `[${e.event_type}] ${e.message}`,
+        type: e.event_type.includes('COMPLETED') || e.event_type.includes('SUCCESS') ? 'success' : (e.event_type.includes('FAILURE') ? 'error' : 'agent'),
+      }));
+
+      if (finalStatus === 'HEALED') setCurrentStepIndex(4);
+      else if (finalStatus === 'PASSED') setCurrentStepIndex(5);
+      else setCurrentStepIndex(2);
+
+      setTestCases(prev => prev.map(item => item.id === tc.id ? {
+        ...item,
+        outcome: finalStatus,
+        duration: durationSec,
+        logs: liveLogs.length > 0 ? liveLogs : item.logs,
+      } : item));
+
+      const refreshed = await getTestExecutions();
+      if (refreshed && refreshed.length > 0) {
+        setExecutions(refreshed);
       }
-    }, 1200);
+    } catch (err) {
+      console.warn('Real test run caught error:', err.message);
+      setTimeout(() => {
+        if (tc.outcome === 'HEALED') setCurrentStepIndex(4);
+        else if (tc.outcome === 'PASSED') setCurrentStepIndex(5);
+        else setCurrentStepIndex(2);
+      }, 1000);
+    } finally {
+      clearTimeout(stepTimer);
+      setIsRunning(false);
+    }
   }
 
   return (
@@ -295,6 +363,8 @@ export default function App() {
       <Sidebar 
         activeNav={activeNav} 
         setActiveNav={setActiveNav}
+        isOpen={isMobileMenuOpen}
+        onClose={() => setIsMobileMenuOpen(false)}
       />
 
       <main className="main-content">
@@ -302,6 +372,8 @@ export default function App() {
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
           backendStatus={backendStatus}
+          onToggleMobileMenu={() => setIsMobileMenuOpen(prev => !prev)}
+          isMobileMenuOpen={isMobileMenuOpen}
         />
 
         {activeNav === 'dashboard' && (
@@ -365,6 +437,7 @@ export default function App() {
             {/* Bottom Data Tables */}
             <TestCaseTable 
               testCases={testCases}
+              executions={executions}
               activeTestCaseId={activeTestCaseId}
               onSelectTestCase={handleSelectTestCase}
               onRunTest={handleRunTest}
@@ -400,6 +473,7 @@ export default function App() {
 
         {activeNav === 'executions' && (
           <ExecutionsView 
+            executions={executions}
             onOpenPlanModal={() => setIsModalOpen(true)}
             searchQuery={searchQuery}
           />
@@ -407,12 +481,16 @@ export default function App() {
 
         {activeNav === 'failures' && (
           <FailuresHealingView 
+            executions={executions}
             onOpenPlanModal={() => setIsModalOpen(true)}
           />
         )}
 
         {activeNav === 'reports' && (
-          <ReportsView />
+          <ReportsView 
+            testCases={testCases}
+            executions={executions}
+          />
         )}
 
         {activeNav === 'system' && (

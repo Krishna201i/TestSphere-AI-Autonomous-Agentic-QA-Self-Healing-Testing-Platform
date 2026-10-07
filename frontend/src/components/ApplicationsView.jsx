@@ -87,15 +87,15 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
           id: a.id,
           name: a.name,
           baseUrl: a.base_url || 'https://example.com',
-          environment: a.environment || 'Staging',
+          environment: a.description?.includes('Production') ? 'Production' : 'Staging',
           healthStatus: '200 OK',
           latency: `${Math.floor(Math.random() * 30) + 25}ms`,
-          casesCount: 10,
+          casesCount: 8,
           playwrightMode: 'Chromium Headless',
           lastTested: 'Just now',
-          project: 'Active Suite'
+          project: 'Active Target'
         }));
-        setApps([...mapped, ...DEFAULT_APPLICATIONS]);
+        setApps(mapped);
       }
     }
     loadApps();

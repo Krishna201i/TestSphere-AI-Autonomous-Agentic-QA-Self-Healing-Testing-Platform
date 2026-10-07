@@ -21,14 +21,22 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-from playwright.async_api import (
-    Browser,
-    BrowserContext,
-    Page,
-    Playwright,
-    async_playwright,
-)
+try:
+    from playwright.async_api import (
+        Browser,
+        BrowserContext,
+        Page,
+        Playwright,
+        async_playwright,
+    )
+    PLAYWRIGHT_INSTALLED = True
+except ImportError:
+    Browser = object  # type: ignore
+    BrowserContext = object  # type: ignore
+    Page = object  # type: ignore
+    Playwright = object  # type: ignore
+    async_playwright = None
+    PLAYWRIGHT_INSTALLED = False
 
 from .schemas import EngineConfig
 
@@ -74,6 +82,10 @@ class BrowserSession:
     # ------------------------------------------------------------------
 
     async def __aenter__(self) -> "BrowserSession":
+        if not PLAYWRIGHT_INSTALLED or async_playwright is None:
+            raise RuntimeError(
+                "Playwright is not installed in the environment. Please run 'pip install playwright && playwright install chromium' to enable browser automation."
+            )
         self._pw = await async_playwright().start()
         log.debug(
             "Launching Chromium headless=%s slow_mo=%d",

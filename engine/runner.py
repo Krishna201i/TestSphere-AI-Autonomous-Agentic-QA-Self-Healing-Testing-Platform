@@ -29,8 +29,17 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from playwright.async_api import Error as PlaywrightError
-from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
+try:
+    from playwright.async_api import Error as PlaywrightError
+    from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
+    PLAYWRIGHT_INSTALLED = True
+except ImportError:
+    class PlaywrightError(Exception):  # type: ignore
+        pass
+    class PlaywrightTimeoutError(Exception):  # type: ignore
+        pass
+    Page = object  # type: ignore
+    PLAYWRIGHT_INSTALLED = False
 
 from .artifacts import write_dom_snapshot, write_screenshot
 from .browser import BrowserSession
@@ -86,21 +95,32 @@ async def run_test(
     step_results: list[StepResult] = []
     artifacts_dir = str(Path(config.artifacts_dir) / plan.test_id)
 
-    async with BrowserSession(config, trace_path=f"{artifacts_dir}/_trace.zip") as session:
-        page = await session.new_page()
+    try:
+        async with BrowserSession(config, trace_path=f"{artifacts_dir}/_trace.zip") as session:
+            page = await session.new_page()
 
-        for step in plan.steps:
-            log.info("[%s] Executing step %s (%s)", plan.test_id, step.step_id, step.action)
-            result = await _execute_step(page, step, config, plan.test_id, artifacts_dir)
-            step_results.append(result)
-            if result.status == StepStatus.FAILED:
-                log.warning(
-                    "[%s] Step %s FAILED — stopping run: %s",
-                    plan.test_id,
-                    step.step_id,
-                    result.error,
-                )
-                break
+            for step in plan.steps:
+                log.info("[%s] Executing step %s (%s)", plan.test_id, step.step_id, step.action)
+                result = await _execute_step(page, step, config, plan.test_id, artifacts_dir)
+                step_results.append(result)
+                if result.status == StepStatus.FAILED:
+                    log.warning(
+                        "[%s] Step %s FAILED — stopping run: %s",
+                        plan.test_id,
+                        step.step_id,
+                        result.error,
+                    )
+                    break
+    except Exception as exc:
+        log.error("[%s] Browser session error: %s", plan.test_id, exc)
+        step_results.append(
+            StepResult(
+                step_id=plan.steps[0].step_id if plan.steps else "step_0",
+                status=StepStatus.FAILED,
+                duration_ms=0,
+                error=f"Browser execution error: {exc}",
+            )
+        )
 
     duration_ms = int((time.monotonic() - wall_start) * 1000)
     overall = _aggregate_status(step_results)

@@ -2028,4 +2028,339 @@ code, pre, .mono {
 .text-cyan { color: var(--accent-cyan) !important; }
 .text-muted { color: var(--text-muted) !important; }
 
+/* ============================================================
+   Mobile Navigation Header & Drawer System
+   ============================================================ */
+
+.header-left-group {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.mobile-menu-toggle {
+  display: none;
+  background: rgba(16, 26, 48, 0.8);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  padding: 0.5rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.mobile-menu-toggle:hover {
+  background: rgba(30, 45, 75, 0.9);
+  color: #ffffff;
+  border-color: var(--primary-light);
+}
+
+.sidebar-close-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.35rem;
+  border-radius: var(--radius-sm);
+  margin-left: auto;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.sidebar-close-btn:hover {
+  color: #ffffff;
+  background: rgba(244, 63, 94, 0.15);
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+/* ============================================================
+   Responsive Media Queries (Mobile & Tablet)
+   ============================================================ */
+
+@media (max-width: 1024px) {
+  .mobile-menu-toggle {
+    display: inline-flex;
+  }
+
+  .sidebar-close-btn {
+    display: inline-flex;
+  }
+
+  /* Transform Sidebar into an off-canvas drawer */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    height: 100vh;
+    z-index: 10000;
+    background: #080d1a;
+    box-shadow: 0 0 45px rgba(0, 0, 0, 0.9);
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(4, 7, 16, 0.75);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 9999;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .main-content {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .top-header {
+    padding: 0 1.25rem;
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .projects-grid {
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-body,
+  .view-container {
+    padding: 1.25rem 1rem 2.5rem 1rem;
+    gap: 1.25rem;
+  }
+
+  .top-header {
+    padding: 0 0.85rem;
+    height: 60px;
+  }
+
+  .clock-display {
+    display: none;
+  }
+
+  .user-meta {
+    display: none;
+  }
+
+  .status-badge-healthy span:not(.status-dot-pulse) {
+    display: none;
+  }
+
+  .status-badge-healthy {
+    padding: 0.4rem 0.5rem;
+  }
+
+  .search-wrapper {
+    min-width: 120px;
+  }
+
+  .search-keycap {
+    display: none;
+  }
+
+  /* 2-column KPI Grid on Mobile */
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.85rem;
+  }
+
+  .kpi-card {
+    padding: 1rem 0.85rem;
+  }
+
+  .kpi-number {
+    font-size: 1.5rem;
+  }
+
+  /* Page title row stacks */
+  .page-title-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.85rem;
+  }
+
+  .page-title-row .btn-run-small,
+  .page-title-row button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Stack Live Execution & Diagnostics */
+  .execution-grid,
+  .live-execution-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Failures & Healing split columns stack */
+  div[style*="gridTemplateColumns: 1fr 1.35fr"],
+  div[style*="grid-template-columns: 1fr 1.35fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Reports 2-column analytics stack */
+  div[style*="gridTemplateColumns: 1fr 1fr"],
+  div[style*="grid-template-columns: 1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Infrastructure 3-column stack */
+  div[style*="repeat(3, 1fr)"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Projects & Applications grid */
+  .projects-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .project-card {
+    padding: 1.15rem;
+  }
+
+  .project-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .project-card-actions {
+    flex-wrap: wrap;
+    justify-content: stretch;
+  }
+
+  .project-card-actions button {
+    flex: 1;
+    min-width: 120px;
+    justify-content: center;
+  }
+
+  /* Filter bar */
+  .filter-bar-card {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.85rem 1rem;
+  }
+
+  .search-input-wrapper {
+    width: 100% !important;
+    min-width: 0;
+  }
+
+  .status-tabs {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .filter-tab {
+    flex: 1;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  /* Data tables: Touch swipe scrolling */
+  .data-table-card {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .custom-table {
+    min-width: 580px;
+  }
+
+  /* Stepper in Live Execution */
+  .pipeline-stepper,
+  .stepper-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.5rem;
+  }
+
+  /* Mobile Modals */
+  .modal-overlay,
+  .modal-backdrop {
+    padding: 0.75rem !important;
+  }
+
+  .modal-content,
+  .modal-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 1.25rem 1rem !important;
+    max-height: 94vh !important;
+  }
+
+  .modal-header {
+    padding: 1rem !important;
+  }
+
+  .modal-form {
+    padding: 1rem !important;
+  }
+
+  .form-row-2col {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-footer {
+    flex-direction: column-reverse;
+  }
+
+  .modal-footer button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard-body,
+  .view-container {
+    padding: 1rem 0.65rem 2rem 0.65rem;
+  }
+
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-title-box h2 {
+    font-size: 1.35rem;
+  }
+
+  .page-icon-badge {
+    width: 38px;
+    height: 38px;
+  }
+
+  .search-wrapper {
+    display: none;
+  }
+
+  .header-left-group {
+    gap: 0.5rem;
+  }
+}
+
+
 
