@@ -14,8 +14,12 @@ from backend.config import settings
 
 # Engine setup
 connect_args = {}
+engine_kwargs = {}
 if settings.DATABASE_URL.startswith("sqlite"):
     connect_args["check_same_thread"] = False
+else:
+    engine_kwargs["pool_pre_ping"] = True
+    engine_kwargs["pool_recycle"] = 300
 
 # For in-memory sqlite testing or standard file-based sqlite
 if settings.DATABASE_URL == "sqlite:///:memory:":
@@ -28,6 +32,7 @@ else:
     engine = create_engine(
         settings.DATABASE_URL,
         connect_args=connect_args,
+        **engine_kwargs,
     )
 
 # Session factory

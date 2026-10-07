@@ -1,6 +1,15 @@
 import React from 'react';
 
-export default function MetricsOverview({ stats }) {
+export default function MetricsOverview({ stats = {} }) {
+  const totalExec = stats.totalExecutions ?? stats.totalTests ?? 0;
+  const passed = stats.passedCount ?? 0;
+  const failed = stats.failedCount ?? 0;
+  const healed = stats.healedCount ?? 0;
+  const passRate = stats.passRate ?? (totalExec > 0 ? Math.round(((passed + healed) / totalExec) * 100) : 100);
+  const failRate = totalExec > 0 ? Math.round((failed / totalExec) * 100) : 0;
+  const healedRate = totalExec > 0 ? Math.round((healed / totalExec) * 100) : 0;
+  const avgDuration = stats.avgDuration || '0.0s';
+
   return (
     <section className="kpi-grid">
       {/* KPI 1: Total Executions */}
@@ -14,11 +23,11 @@ export default function MetricsOverview({ stats }) {
           <span className="kpi-label">Total Executions</span>
         </div>
         <div className="kpi-card-mid">
-          <span className="kpi-number" id="kpi-total-exec">{stats.totalTests || '128'}</span>
-          <span className="kpi-trend positive">↑ +12%</span>
+          <span className="kpi-number" id="kpi-total-exec">{totalExec}</span>
+          <span className="kpi-trend positive">Live</span>
         </div>
         <div className="kpi-card-bot">
-          <span>89% Active</span>
+          <span>{totalExec > 0 ? `${totalExec} Database Runs` : 'Ready to Run'}</span>
           <svg className="kpi-mini-wave" viewBox="0 0 80 20" fill="none">
             <path d="M0 15 Q 20 5, 40 12 T 80 6" stroke="#38bdf8" strokeWidth="2" fill="none" strokeLinecap="round" />
           </svg>
@@ -36,12 +45,12 @@ export default function MetricsOverview({ stats }) {
           <span className="kpi-label">Passed</span>
         </div>
         <div className="kpi-card-mid">
-          <span className="kpi-number" id="kpi-passed">86</span>
+          <span className="kpi-number" id="kpi-passed">{passed}</span>
         </div>
         <div className="kpi-card-bot">
-          <span>{stats.passRate || 67}%</span>
+          <span>{passRate}% Effective</span>
           <div className="kpi-progress-bar">
-            <div className="kpi-progress-fill green" style={{ width: `${stats.passRate || 67}%` }}></div>
+            <div className="kpi-progress-fill green" style={{ width: `${passRate}%` }}></div>
           </div>
         </div>
       </div>
@@ -58,12 +67,12 @@ export default function MetricsOverview({ stats }) {
           <span className="kpi-label">Failed</span>
         </div>
         <div className="kpi-card-mid">
-          <span className="kpi-number" id="kpi-failed">24</span>
+          <span className="kpi-number" id="kpi-failed">{failed}</span>
         </div>
         <div className="kpi-card-bot">
-          <span>19%</span>
+          <span>{failRate}%</span>
           <div className="kpi-progress-bar">
-            <div className="kpi-progress-fill red" style={{ width: '19%' }}></div>
+            <div className="kpi-progress-fill red" style={{ width: `${failRate}%` }}></div>
           </div>
         </div>
       </div>
@@ -79,12 +88,12 @@ export default function MetricsOverview({ stats }) {
           <span className="kpi-label">Healed</span>
         </div>
         <div className="kpi-card-mid">
-          <span className="kpi-number" id="kpi-healed">{stats.healedCount || 16}</span>
+          <span className="kpi-number" id="kpi-healed">{healed}</span>
         </div>
         <div className="kpi-card-bot">
-          <span>92% Confidence</span>
+          <span>{healedRate}% Self-Repaired</span>
           <div className="kpi-progress-bar">
-            <div className="kpi-progress-fill purple" style={{ width: '92%' }}></div>
+            <div className="kpi-progress-fill purple" style={{ width: `${healedRate}%` }}></div>
           </div>
         </div>
       </div>
@@ -101,11 +110,11 @@ export default function MetricsOverview({ stats }) {
           <span className="kpi-label">Avg. Duration</span>
         </div>
         <div className="kpi-card-mid">
-          <span className="kpi-number" id="kpi-duration">{stats.avgDuration || '2m 34s'}</span>
-          <span className="kpi-trend negative">↓ -18%</span>
+          <span className="kpi-number" id="kpi-duration">{avgDuration}</span>
+          <span className="kpi-trend positive">Playwright Fast</span>
         </div>
         <div className="kpi-card-bot">
-          <span>Fast</span>
+          <span>Headless Chrome</span>
           <svg className="kpi-mini-wave" viewBox="0 0 80 20" fill="none">
             <path d="M0 16 Q 25 4, 45 10 T 80 4" stroke="#22d3ee" strokeWidth="2" fill="none" strokeLinecap="round" />
           </svg>
