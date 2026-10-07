@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { X, Play, Globe, Sparkles, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { X, Play, Globe, Sparkles, AlertCircle, Loader2 } from 'lucide-react';
 import { planAndExecuteWorkflow } from '../services/api';
 
 export default function PlanExecuteModal({ isOpen, onClose, onExecutionStarted }) {
@@ -10,6 +11,20 @@ export default function PlanExecuteModal({ isOpen, onClose, onExecutionStarted }
   const [headless, setHeadless] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // Close on Escape & lock body scroll while modal is active
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = '';
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -66,22 +81,26 @@ export default function PlanExecuteModal({ isOpen, onClose, onExecutionStarted }
     }
   }
 
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card card-glass" onClick={(e) => e.stopPropagation()}>
+  const modalElement = (
+    <div className="modal-overlay modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="modal-content modal-card card-solid" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title-group">
-            <Sparkles size={20} className="text-cyan" />
+          <div className="modal-title-wrap modal-title-group">
+            <div className="modal-badge">
+              <Sparkles size={13} />
+              <span>AI AGENT RUNNER</span>
+            </div>
             <h3 className="modal-title">Trigger Autonomous QA Workflow</h3>
+            <p className="modal-subtitle">Configure scenario goals and let multi-agent orchestrator plan & execute</p>
           </div>
-          <button className="modal-close-btn" onClick={onClose}>
+          <button className="modal-close-btn" onClick={onClose} aria-label="Close modal">
             <X size={18} />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="modal-form">
           {error && (
-            <div className="modal-alert alert-error">
+            <div className="modal-error-banner modal-alert alert-error">
               <AlertCircle size={16} />
               <span>{error}</span>
             </div>
@@ -94,6 +113,7 @@ export default function PlanExecuteModal({ isOpen, onClose, onExecutionStarted }
               className="form-input" 
               value={appName}
               onChange={(e) => setAppName(e.target.value)}
+              placeholder="e.g. E-Commerce Webapp"
               required
             />
           </div>
@@ -107,6 +127,7 @@ export default function PlanExecuteModal({ isOpen, onClose, onExecutionStarted }
                 className="form-input with-icon" 
                 value={appUrl}
                 onChange={(e) => setAppUrl(e.target.value)}
+                placeholder="https://example.com"
                 required
               />
             </div>
@@ -119,6 +140,7 @@ export default function PlanExecuteModal({ isOpen, onClose, onExecutionStarted }
               className="form-input" 
               value={testName}
               onChange={(e) => setTestName(e.target.value)}
+              placeholder="e.g. Autonomous Login & Checkout Flow"
               required
             />
           </div>
@@ -167,4 +189,6 @@ export default function PlanExecuteModal({ isOpen, onClose, onExecutionStarted }
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalElement, document.body) : modalElement;
 }
