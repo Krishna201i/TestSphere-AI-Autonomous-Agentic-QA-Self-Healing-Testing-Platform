@@ -66,10 +66,7 @@ def init_db() -> bool:
         # Import models so Base.metadata discovers all Member 3 tables
         import backend.models  # noqa: F401
         Base.metadata.create_all(bind=engine)
-        # Auto-seed initial real data if database has no projects
-        from backend.database.seed import seed_database_if_empty
-        with SessionLocal() as db:
-            seed_database_if_empty(db)
+        # Dummy auto-seeding removed: platform starts clean with real live data only
         return True
     except Exception as exc:
         raise RuntimeError(f"Database initialization failed: {exc}") from exc

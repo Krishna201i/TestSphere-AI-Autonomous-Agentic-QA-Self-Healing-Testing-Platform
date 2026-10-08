@@ -24,8 +24,8 @@ export default function FailuresHealingView({ onOpenPlanModal, executions = [] }
       const isHealed = e.status === 'HEALED';
       const oldMatch = e.error_message?.match(/selector\s+([^\s]+)/)?.[1] || 
         e.error_message?.match(/locator\("([^"]+)"\)/)?.[1] || 
-        'button#avatar-upload';
-      const newMatch = e.error_message?.match(/healed to\s+([^\s]+)/)?.[1] || "input[type='file'][name='avatar']";
+        'N/A';
+      const newMatch = e.error_message?.match(/healed to\s+([^\s]+)/)?.[1] || 'N/A';
 
       return {
         id: `HEAL_EXEC_${e.id}`,
@@ -34,7 +34,7 @@ export default function FailuresHealingView({ onOpenPlanModal, executions = [] }
         timestamp: e.started_at ? new Date(e.started_at).toLocaleTimeString() : 'Recent',
         driftType: isHealed ? 'Autonomous Selector Healed' : 'Selector Timeout / Drift',
         confidence: isHealed ? '96%' : '88%',
-        oldSelector: isHealed ? oldMatch : (e.error_message?.match(/locator\("([^"]+)"\)/)?.[1] || '#target-btn'),
+        oldSelector: isHealed ? oldMatch : 'N/A',
         newSelector: isHealed ? newMatch : 'AI Recovery Retry Initiated',
         rootCause: e.error_message || 'Element was not found or timed out during test execution.',
         agentProof: isHealed 
