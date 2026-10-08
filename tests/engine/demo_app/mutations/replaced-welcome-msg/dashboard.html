@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TestSphere Demo — Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 2rem;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2rem;
+      border-bottom: 1px solid #334155;
+      padding-bottom: 1rem;
+    }
+    header h1 { color: #7c3aed; font-size: 1.4rem; }
+    #logout-btn {
+      padding: 0.45rem 1rem;
+      background: transparent;
+      border: 1px solid #7c3aed;
+      color: #7c3aed;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    #logout-btn:hover { background: #7c3aed; color: #fff; }
+    .welcome-banner {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    #welcome-msg {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #a78bfa;
+      margin-bottom: 0.4rem;
+    }
+    #status-text { color: #94a3b8; font-size: 0.95rem; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+    .stat-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 1.25rem;
+      text-align: center;
+    }
+    .stat-card .value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #7c3aed;
+    }
+    .stat-card .label { font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem; }
+    #test-count  .value { color: #34d399; }
+    #fail-count  .value { color: #f87171; }
+    #heal-count  .value { color: #fbbf24; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TestSphere Dashboard</h1>
+    <button id="logout-btn" data-testid="logout-button">Logout</button>
+  </header>
+
+  <div class="welcome-banner">
+    <div id="promo-banner" data-testid="promo-banner">Upgrade to Pro!</div>
+    <p id="status-text" data-testid="status-text">All systems operational.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card" id="test-count" data-testid="test-count">
+      <div class="value">42</div>
+      <div class="label">Tests Run</div>
+    </div>
+    <div class="stat-card" id="fail-count" data-testid="fail-count">
+      <div class="value">3</div>
+      <div class="label">Failures</div>
+    </div>
+    <div class="stat-card" id="heal-count" data-testid="heal-count">
+      <div class="value">7</div>
+      <div class="label">Healed</div>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('logout-btn').addEventListener('click', function () {
+      window.location.href = 'index.html';
+    });
+  </script>
+</body>
+</html>

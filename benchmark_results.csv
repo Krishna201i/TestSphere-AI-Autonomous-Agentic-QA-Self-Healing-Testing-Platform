@@ -1,0 +1,3 @@
+name,change_type,expected_to_heal,passed_off,outcome_on,healed_locator,strategy_used,confidence,false_heal,time_per_step_ms_off,time_per_step_ms_on
+rename-id-login-btn,rename_id,True,False,failed,,,0.0,False,5273.5,10297.0
+rename-id-welcome-msg,rename_id,True,True,passed,,,0.0,False,281.0,281.5

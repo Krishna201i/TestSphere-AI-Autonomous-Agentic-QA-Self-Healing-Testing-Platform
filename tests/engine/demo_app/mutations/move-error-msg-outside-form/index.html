@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TestSphere Demo — Login</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      color: #e2e8f0;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 2.5rem 2rem;
+      width: 360px;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 1.5rem; color: #7c3aed; }
+    label { display: block; font-size: 0.85rem; margin-bottom: 0.35rem; color: #94a3b8; }
+    input {
+      width: 100%;
+      padding: 0.65rem 0.75rem;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-size: 1rem;
+      margin-bottom: 1rem;
+    }
+    input:focus { outline: 2px solid #7c3aed; border-color: transparent; }
+    button {
+      width: 100%;
+      padding: 0.75rem;
+      background: #7c3aed;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover { background: #6d28d9; }
+    #error-msg {
+      display: none;
+      color: #f87171;
+      font-size: 0.875rem;
+      margin-top: 0.75rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>TestSphere Login</h1>
+    <form id="login-form" novalidate>
+      <label for="username">Username</label>
+      <input
+        id="username"
+        type="text"
+        name="username"
+        placeholder="admin"
+        autocomplete="username"
+        data-testid="username-input"
+      />
+
+      <label for="password">Password</label>
+      <input
+        id="password"
+        type="password"
+        name="password"
+        placeholder="••••••••"
+        autocomplete="current-password"
+        data-testid="password-input"
+      />
+
+      <button id="login-btn" type="submit" data-testid="login-button">
+        Log in
+      </button>
+
+    </form>
+      <p id="error-msg" role="alert" data-testid="error-message">
+        Invalid username or password.
+      </p>
+  </div>
+
+  <script>
+    document.getElementById('login-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var u = document.getElementById('username').value.trim();
+      var p = document.getElementById('password').value;
+      if (u === 'admin' && p === 'password') {
+        window.location.href = 'dashboard.html';
+      } else {
+        document.getElementById('error-msg').style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

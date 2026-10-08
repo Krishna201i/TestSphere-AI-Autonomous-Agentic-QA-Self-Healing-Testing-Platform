@@ -1,0 +1,122 @@
+[
+  {
+    "name": "rename-id-login-btn",
+    "change_type": "rename_id",
+    "expected_to_heal": true,
+    "target_step_id": "click-login",
+    "expected_element_marker": "data-testid=\"login-button\"",
+    "source_file": "index.html"
+  },
+  {
+    "name": "rename-id-welcome-msg",
+    "change_type": "rename_id",
+    "expected_to_heal": true,
+    "target_step_id": "assert-welcome",
+    "expected_element_marker": "data-testid=\"welcome-message\"",
+    "source_file": "dashboard.html"
+  },
+  {
+    "name": "rename-class-card",
+    "change_type": "rename_class",
+    "expected_to_heal": true,
+    "target_step_id": "fill-username",
+    "expected_element_marker": "data-testid=\"username-input\"",
+    "source_file": "index.html"
+  },
+  {
+    "name": "change-text-login-btn",
+    "change_type": "change_visible_text",
+    "expected_to_heal": true,
+    "target_step_id": "click-login",
+    "expected_element_marker": "data-testid=\"login-button\"",
+    "source_file": "index.html"
+  },
+  {
+    "name": "move-error-msg-outside-form",
+    "change_type": "move_element",
+    "expected_to_heal": true,
+    "target_step_id": "assert-error",
+    "expected_element_marker": "data-testid=\"error-message\"",
+    "source_file": "index.html"
+  },
+  {
+    "name": "wrap-username-in-div",
+    "change_type": "wrap_in_div",
+    "expected_to_heal": true,
+    "target_step_id": "fill-username",
+    "expected_element_marker": "data-testid=\"username-input\"",
+    "source_file": "index.html"
+  },
+  {
+    "name": "button-to-anchor",
+    "change_type": "change_tag",
+    "expected_to_heal": true,
+    "target_step_id": "click-login",
+    "expected_element_marker": "data-testid=\"login-button\"",
+    "source_file": "index.html"
+  },
+  {
+    "name": "reorder-stat-cards",
+    "change_type": "reorder_siblings",
+    "expected_to_heal": true,
+    "target_step_id": "assert-test-count",
+    "expected_element_marker": "data-testid=\"test-count\"",
+    "source_file": "dashboard.html"
+  },
+  {
+    "name": "remove-testid-username",
+    "change_type": "remove_data_testid",
+    "expected_to_heal": true,
+    "target_step_id": "fill-username",
+    "expected_element_marker": "name=\"username\"",
+    "source_file": "index.html"
+  },
+  {
+    "name": "change-placeholder-username",
+    "change_type": "change_placeholder",
+    "expected_to_heal": true,
+    "target_step_id": "fill-username",
+    "expected_element_marker": "data-testid=\"username-input\"",
+    "source_file": "index.html"
+  },
+  {
+    "name": "change-name-password",
+    "change_type": "change_name_attr",
+    "expected_to_heal": true,
+    "target_step_id": "fill-password",
+    "expected_element_marker": "data-testid=\"password-input\"",
+    "source_file": "index.html"
+  },
+  {
+    "name": "combined-id-class-logout",
+    "change_type": "combined_id_class",
+    "expected_to_heal": true,
+    "target_step_id": "click-logout",
+    "expected_element_marker": "data-testid=\"logout-button\"",
+    "source_file": "dashboard.html"
+  },
+  {
+    "name": "removed-login-btn",
+    "change_type": "element_removed",
+    "expected_to_heal": false,
+    "target_step_id": "click-login",
+    "expected_element_marker": "",
+    "source_file": "index.html"
+  },
+  {
+    "name": "replaced-username-with-select",
+    "change_type": "element_replaced",
+    "expected_to_heal": false,
+    "target_step_id": "fill-username",
+    "expected_element_marker": "",
+    "source_file": "index.html"
+  },
+  {
+    "name": "replaced-welcome-msg",
+    "change_type": "element_replaced",
+    "expected_to_heal": false,
+    "target_step_id": "assert-welcome",
+    "expected_element_marker": "",
+    "source_file": "dashboard.html"
+  }
+]
