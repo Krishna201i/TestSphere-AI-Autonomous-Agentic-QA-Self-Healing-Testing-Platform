@@ -74,6 +74,16 @@ export async function getProjects() {
   }
 }
 
+export async function createProject(payload) {
+  const res = await fetchWithFallback('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Failed to create project');
+  return await res.json();
+}
+
 export async function getApplications(projectId = null) {
   try {
     const endpoint = projectId 
@@ -86,6 +96,16 @@ export async function getApplications(projectId = null) {
     console.warn('Error fetching applications:', err.message);
     return [];
   }
+}
+
+export async function createApplication(payload) {
+  const res = await fetchWithFallback('/api/applications', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Failed to create application');
+  return await res.json();
 }
 
 export async function getTestCases(appId = null) {
@@ -125,6 +145,27 @@ export async function planAndExecuteWorkflow(payload) {
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.detail || `Execution failed with status ${res.status}`);
+  }
+
+  return await res.json();
+}
+
+export async function analyzeWebsiteUrl(url, prompt = null, testCaseName = null) {
+  const res = await fetchWithFallback('/api/workflow/analyze', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      url,
+      prompt,
+      test_case_name: testCaseName,
+    }),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Analysis failed with status ${res.status}`);
   }
 
   return await res.json();

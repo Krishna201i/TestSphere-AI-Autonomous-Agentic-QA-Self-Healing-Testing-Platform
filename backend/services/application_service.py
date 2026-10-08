@@ -24,12 +24,23 @@ class ApplicationService:
         description: Optional[str] = None,
     ) -> Application:
         """Create and persist a new application after validating parent project existence."""
-        project = db.query(Project).filter(Project.id == project_id).first()
-        if not project:
-            raise ProjectNotFoundError(f"Project with ID {project_id} not found")
+        if project_id is not None:
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                raise ProjectNotFoundError(f"Project with ID {project_id} not found")
+        else:
+            project = db.query(Project).first()
+            if not project:
+                project = Project(
+                    name="TestSphere Auto QA",
+                    description="Autonomous agentic QA testing workspace",
+                )
+                db.add(project)
+                db.commit()
+                db.refresh(project)
 
         application = Application(
-            project_id=project_id,
+            project_id=project.id,
             name=name,
             base_url=base_url,
             description=description,

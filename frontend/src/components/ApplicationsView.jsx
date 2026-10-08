@@ -14,7 +14,7 @@ import {
   Radio,
   FileCode2
 } from 'lucide-react';
-import { getApplications } from '../services/api';
+import { getApplications, createApplication, analyzeWebsiteUrl } from '../services/api';
 
 export default function ApplicationsView({ setActiveNav, onOpenPlanModal, searchQuery = '' }) {
   const [apps, setApps] = useState([]);
@@ -24,24 +24,24 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
     name: '',
     baseUrl: 'https://',
     environment: 'Production',
-    project: 'E-Commerce Webapp'
+    project: 'TestSphere Suite'
   });
   const [pingingId, setPingingId] = useState(null);
 
   useEffect(() => {
     async function loadApps() {
       const live = await getApplications();
-      if (Array.isArray(live) && live.length > 0) {
+      if (Array.isArray(live)) {
         const mapped = live.map(a => ({
           id: a.id,
           name: a.name,
-          baseUrl: a.base_url || 'https://example.com',
-          environment: a.description?.includes('Production') ? 'Production' : 'Staging',
-          healthStatus: '200 OK',
-          latency: '28ms',
-          casesCount: 2,
+          baseUrl: a.base_url || '',
+          environment: a.description?.includes('Staging') ? 'Staging' : 'Production',
+          healthStatus: 'Active Target',
+          latency: 'Live',
+          casesCount: 1,
           playwrightMode: 'Chromium Headless',
-          lastTested: 'Connected',
+          lastTested: 'Ready',
           project: 'TestSphere Suite'
         }));
         setApps(mapped);
@@ -57,31 +57,63 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
     a.project.toLowerCase().includes(filterTerm)
   );
 
-  function handleAddApplication(e) {
+  async function handleAddApplication(e) {
     e.preventDefault();
-    if (!newApp.name) return;
-    const created = {
-      id: Date.now(),
-      name: newApp.name,
-      baseUrl: newApp.baseUrl,
-      environment: newApp.environment,
-      healthStatus: '200 OK',
-      latency: '30ms',
-      casesCount: 0,
-      playwrightMode: 'Chromium Headless',
-      lastTested: 'Just added',
-      project: newApp.project
-    };
-    setApps([created, ...apps]);
-    setIsAddModalOpen(false);
-    setNewApp({ name: '', baseUrl: 'https://', environment: 'Production', project: 'E-Commerce Webapp' });
+    if (!newApp.baseUrl || newApp.baseUrl === 'https://') return;
+    try {
+      let finalName = newApp.name.trim();
+      let detectedTitle = null;
+      try {
+        const analysis = await analyzeWebsiteUrl(newApp.baseUrl);
+        if (analysis?.page_title) detectedTitle = analysis.page_title;
+      } catch {}
+      if (!finalName) finalName = detectedTitle || newApp.baseUrl;
+
+      const created = await createApplication({
+        name: finalName,
+        base_url: newApp.baseUrl,
+        description: `Target application in ${newApp.environment}`,
+      });
+      const newEntry = {
+        id: created.id,
+        name: created.name,
+        baseUrl: created.base_url,
+        environment: newApp.environment,
+        healthStatus: '200 OK',
+        latency: 'Live',
+        casesCount: 0,
+        playwrightMode: 'Chromium Headless',
+        lastTested: 'Just added',
+        project: newApp.project || 'TestSphere Suite'
+      };
+      setApps(prev => [newEntry, ...prev]);
+      setIsAddModalOpen(false);
+      setNewApp({ name: '', baseUrl: 'https://', environment: 'Production', project: 'TestSphere Suite' });
+    } catch (err) {
+      console.error('Failed to create application:', err);
+    }
   }
 
-  function handlePing(appId) {
-    setPingingId(appId);
-    setTimeout(() => {
+  async function handlePing(appItem) {
+    setPingingId(appItem.id);
+    try {
+      const res = await analyzeWebsiteUrl(appItem.baseUrl);
+      setApps(prev => prev.map(a => a.id === appItem.id ? {
+        ...a,
+        healthStatus: `${res.status_code || 200} OK`,
+        latency: `${res.latency_ms || 35}ms`,
+        lastTested: 'Live Verified'
+      } : a));
+    } catch {
+      setApps(prev => prev.map(a => a.id === appItem.id ? {
+        ...a,
+        healthStatus: 'Offline / Error',
+        latency: 'Timeout',
+        lastTested: 'Ping Failed'
+      } : a));
+    } finally {
       setPingingId(null);
-    }, 1200);
+    }
   }
 
   return (
@@ -218,7 +250,7 @@ export default function ApplicationsView({ setActiveNav, onOpenPlanModal, search
               <div className="project-card-actions">
                 <button 
                   className="btn-card-action"
-                  onClick={() => handlePing(a.id)}
+                  onClick={() => handlePing(a)}
                   disabled={pingingId === a.id}
                 >
                   <Activity size={14} />

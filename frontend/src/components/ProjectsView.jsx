@@ -13,7 +13,7 @@ import {
   X,
   Sparkles
 } from 'lucide-react';
-import { getProjects } from '../services/api';
+import { getProjects, createProject } from '../services/api';
 
 export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuery = '' }) {
   const [projects, setProjects] = useState([]);
@@ -30,7 +30,7 @@ export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuer
   useEffect(() => {
     async function loadProjects() {
       const live = await getProjects();
-      if (Array.isArray(live) && live.length > 0) {
+      if (Array.isArray(live)) {
         const mapped = live.map(p => ({
           id: p.id,
           name: p.name,
@@ -39,9 +39,9 @@ export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuer
           branch: 'main',
           environment: 'Production & Staging',
           suitesCount: 1,
-          testCasesCount: 5,
+          testCasesCount: 0,
           passRate: 100,
-          healedCount: 1,
+          healedCount: 0,
           lastRun: p.created_at ? new Date(p.created_at).toLocaleDateString() : 'Active',
           status: 'HEALTHY'
         }));
@@ -58,33 +58,40 @@ export default function ProjectsView({ setActiveNav, onOpenPlanModal, searchQuer
     p.repo.toLowerCase().includes(filterTerm)
   );
 
-  function handleCreateProject(e) {
+  async function handleCreateProject(e) {
     e.preventDefault();
     if (!newProject.name) return;
-    const created = {
-      id: Date.now(),
-      name: newProject.name,
-      description: newProject.description || 'Autonomous test workspace for ' + newProject.name,
-      repo: newProject.repo || `workspace/${newProject.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-      branch: 'main',
-      environment: newProject.environment,
-      suitesCount: 1,
-      testCasesCount: 1,
-      passRate: 100,
-      healedCount: 0,
-      lastRun: 'Just created',
-      status: 'HEALTHY'
-    };
-    setProjects([created, ...projects]);
-    setIsCreateModalOpen(false);
-    setNewProject({ name: '', description: '', repo: '', environment: 'Staging' });
+    try {
+      const created = await createProject({
+        name: newProject.name.trim(),
+        description: newProject.description || 'Autonomous test workspace for ' + newProject.name,
+      });
+      const item = {
+        id: created.id,
+        name: created.name,
+        description: created.description || '',
+        repo: newProject.repo || `workspace/${newProject.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+        branch: 'main',
+        environment: newProject.environment,
+        suitesCount: 1,
+        testCasesCount: 0,
+        passRate: 100,
+        healedCount: 0,
+        lastRun: 'Just created',
+        status: 'HEALTHY'
+      };
+      setProjects([item, ...projects]);
+      setIsCreateModalOpen(false);
+      setNewProject({ name: '', description: '', repo: '', environment: 'Staging' });
+    } catch (err) {
+      console.error('Failed to create project:', err);
+    }
   }
 
   function handleRunProjectTests(projectId) {
-    setRunningId(projectId);
-    setTimeout(() => {
-      setRunningId(null);
-    }, 2000);
+    if (onOpenPlanModal) {
+      onOpenPlanModal();
+    }
   }
 
   return (
