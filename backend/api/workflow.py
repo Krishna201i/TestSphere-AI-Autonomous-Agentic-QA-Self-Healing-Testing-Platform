@@ -18,6 +18,7 @@ from backend.models.project import Project
 from backend.models.test_case import TestCase
 from backend.models.test_execution import TestExecution, TestExecutionStatus
 from backend.orchestration.orchestrator import PlatformWorkflowOrchestrator
+from backend.services.url_analyzer import URLAnalyzerService
 from engine.schemas import RunOptions
 
 router = APIRouter(prefix="/workflow", tags=["Workflow & Orchestration"])
@@ -36,6 +37,22 @@ class PlanAndExecuteRequest(BaseModel):
     headless: bool = True
 
 
+class AnalyzeURLRequest(BaseModel):
+    url: str
+    prompt: Optional[str] = None
+    test_case_name: Optional[str] = None
+
+
+@router.post("/analyze", status_code=status.HTTP_200_OK)
+async def analyze_url_endpoint(req: AnalyzeURLRequest) -> Dict[str, Any]:
+    """Perform live DOM element extraction, security/a11y audit, and QA synthesis on any URL."""
+    return await URLAnalyzerService.analyze_live_website(
+        url=req.url,
+        prompt=req.prompt,
+        test_case_name=req.test_case_name,
+    )
+
+
 @router.post("/plan-and-execute", status_code=status.HTTP_200_OK)
 async def plan_and_execute_workflow(
     payload: Optional[PlanAndExecuteRequest] = None,
@@ -44,11 +61,12 @@ async def plan_and_execute_workflow(
     """Autonomous plan and execute workflow endpoint.
     
     Dynamically identifies or provisions the target application context,
-    synthesizes or loads test cases with multi-step definitions, creates
-    an execution record, and executes the complete autonomous QA loop.
+    performs live DOM analysis on real URLs, synthesizes executable test steps,
+    creates an execution record, and executes the complete autonomous QA loop.
     """
     req = payload or PlanAndExecuteRequest()
     try:
+        live_analysis = None
         if req.test_case_id:
             tc = db.query(TestCase).filter(TestCase.id == req.test_case_id).first()
             if not tc:
@@ -57,6 +75,17 @@ async def plan_and_execute_workflow(
                     detail=f"TestCase #{req.test_case_id} not found",
                 )
         else:
+            # Perform live website inspection on the target URL
+            target_url = req.app_url or "https://example.com"
+            try:
+                live_analysis = await URLAnalyzerService.analyze_live_website(
+                    url=target_url,
+                    prompt=req.prompt,
+                    test_case_name=req.test_case_name,
+                )
+            except Exception as exc:
+                live_analysis = None
+
             # Locate or create project
             proj = db.query(Project).first()
             if not proj:
@@ -67,6 +96,14 @@ async def plan_and_execute_workflow(
                 db.add(proj)
                 db.commit()
                 db.refresh(proj)
+
+            # Determine application name and URL
+            resolved_app_name = req.app_name
+            resolved_app_url = target_url
+            if live_analysis and live_analysis.get("page_title"):
+                if not resolved_app_name or resolved_app_name in ("Demo Application", "E-Commerce Webapp"):
+                    resolved_app_name = live_analysis["page_title"][:60]
+                resolved_app_url = live_analysis["url"]
 
             # Locate or create application
             if req.application_id:
@@ -83,27 +120,37 @@ async def plan_and_execute_workflow(
             else:
                 app_entity = (
                     db.query(Application)
-                    .filter(Application.name == req.app_name)
+                    .filter(Application.name == resolved_app_name)
                     .first()
                 )
                 if not app_entity:
                     app_entity = Application(
                         project_id=proj.id,
-                        name=req.app_name or "Demo Application",
-                        base_url=req.app_url or "https://example.com",
+                        name=resolved_app_name or "Demo Application",
+                        base_url=resolved_app_url,
                     )
                     db.add(app_entity)
                     db.commit()
                     db.refresh(app_entity)
 
-            desc_content = (
-                json.dumps({"steps": req.steps})
-                if req.steps
-                else (req.prompt or "Autonomous test case")
-            )
+            # Determine executable test steps
+            effective_steps = req.steps
+            if not effective_steps and live_analysis:
+                effective_steps = live_analysis["synthesized_test_case"]["steps"]
+
+            resolved_tc_name = req.test_case_name
+            if not resolved_tc_name and live_analysis:
+                resolved_tc_name = live_analysis["synthesized_test_case"]["name"]
+
+            desc_content = json.dumps({
+                "steps": effective_steps or [],
+                "analysis": live_analysis,
+                "prompt": req.prompt,
+            })
+
             tc = TestCase(
                 application_id=app_entity.id,
-                name=req.test_case_name or "Autonomous Planned Test Case",
+                name=resolved_tc_name or "Autonomous Planned Test Case",
                 description=desc_content,
                 external_id=f"tc-auto-{app_entity.id}",
             )
@@ -120,11 +167,16 @@ async def plan_and_execute_workflow(
         db.commit()
         db.refresh(execution)
 
-        return await _workflow_orchestrator.execute_test_run(
+        res = await _workflow_orchestrator.execute_test_run(
             db=db,
             execution_id=execution.id,
             options=RunOptions(headless=req.headless),
         )
+
+        if live_analysis and "analysis" not in res:
+            res["analysis"] = live_analysis
+
+        return res
     except HTTPException:
         raise
     except Exception as exc:

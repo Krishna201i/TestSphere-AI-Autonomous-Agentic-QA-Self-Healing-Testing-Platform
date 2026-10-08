@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Globe, Sparkles, Loader2, Play, Search, AlertCircle, CheckCircle2, ArrowRight } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import MetricsOverview from './components/MetricsOverview';
@@ -97,11 +98,21 @@ function mapTestCaseFromBackend(lc, allExecutions = []) {
     healing = {
       candidate: 'Heuristic Selector Repair',
       confidence: '96%',
-      oldSelector: oldSelMatch || 'button#avatar-upload',
-      newSelector: newSelMatch || "input[type='file'][name='avatar']",
+      oldSelector: oldSelMatch || 'N/A',
+      newSelector: newSelMatch || 'N/A',
       validation: 'Playwright engine verified unique interactive DOM candidate.',
       status: 'Healing Successful & Persisted',
     };
+  }
+
+  let analysisData = null;
+  if (lc.description) {
+    try {
+      const parsedDesc = JSON.parse(lc.description);
+      if (parsedDesc && typeof parsedDesc === 'object') {
+        analysisData = parsedDesc.analysis || null;
+      }
+    } catch {}
   }
 
   return {
@@ -117,6 +128,7 @@ function mapTestCaseFromBackend(lc, allExecutions = []) {
     logs: logs,
     failure: failure,
     healing: healing,
+    analysis: analysisData,
   };
 }
 
@@ -132,6 +144,49 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [executions, setExecutions] = useState([]);
+  const [quickUrl, setQuickUrl] = useState('');
+  const [quickPrompt, setQuickPrompt] = useState('');
+  const [isQuickAnalyzing, setIsQuickAnalyzing] = useState(false);
+  const [quickError, setQuickError] = useState(null);
+  const [quickStatus, setQuickStatus] = useState(null);
+
+  const QUICK_PRESETS = [
+    { label: 'Login Benchmark', url: 'https://the-internet.herokuapp.com/login', prompt: 'Verify login authentication form and submit' },
+    { label: 'Playwright TodoMVC', url: 'https://demo.playwright.dev/todomvc', prompt: 'Inspect interactive Todo items and input' },
+    { label: 'Hacker News', url: 'https://news.ycombinator.com', prompt: 'Verify live news feed, search input, and table links' },
+    { label: 'Example Domain', url: 'https://example.com', prompt: 'Inspect landing page DOM structure, title, and link' },
+  ];
+
+  async function handleQuickAnalyze(targetUrl = null, targetPrompt = null) {
+    const urlToUse = (typeof targetUrl === 'string' ? targetUrl : quickUrl).trim();
+    const promptToUse = typeof targetPrompt === 'string' ? targetPrompt : quickPrompt.trim();
+    if (!urlToUse) return;
+
+    setIsQuickAnalyzing(true);
+    setQuickError(null);
+    setQuickStatus('Connecting to live website & inspecting DOM...');
+
+    try {
+      setQuickStatus('Extracting buttons, inputs, forms & calculating health audit...');
+      const result = await planAndExecuteWorkflow({
+        app_url: urlToUse,
+        prompt: promptToUse || undefined,
+        headless: true,
+      });
+
+      setQuickStatus('Analysis complete! Loaded live telemetry.');
+      handleExecutionStarted(result);
+      setQuickUrl('');
+      setQuickPrompt('');
+      setTimeout(() => setQuickStatus(null), 3500);
+    } catch (err) {
+      console.error('Quick analyze error:', err);
+      setQuickError(err.message || 'Failed to inspect website. Verify the URL and backend status.');
+      setTimeout(() => setQuickError(null), 6000);
+    } finally {
+      setIsQuickAnalyzing(false);
+    }
+  }
 
   const activeTestCase = testCases.find(t => t.id === activeTestCaseId) || testCases[0] || null;
 
@@ -190,18 +245,20 @@ export default function App() {
       type: e.event_type.includes('COMPLETED') || e.event_type.includes('SUCCESS') ? 'success' : (e.event_type.includes('FAILURE') ? 'error' : 'agent'),
     }));
 
+    const resolvedName = result.test_case_name || result.analysis?.page_title || 'Autonomous Flow Execution';
     const newCase = {
       id: newId,
       db_id: result.test_case_id,
-      name: result.test_case_name || 'Autonomous Flow Execution',
-      category: 'Autonomous',
+      name: resolvedName,
+      category: result.analysis ? 'Live Website QA' : 'Autonomous',
       priority: 'High',
       version: '1.0',
       outcome: result.status || 'PASSED',
-      duration: `${result.duration_ms ? (result.duration_ms / 1000).toFixed(1) + 's' : '2.4s'}`,
+      duration: `${result.duration_ms ? (result.duration_ms / 1000).toFixed(1) + 's' : '1.2s'}`,
       logs: liveLogs.length > 0 ? liveLogs : [
         { time: new Date().toLocaleTimeString(), text: 'Test execution initiated', type: 'info' }
       ],
+      analysis: result.analysis || null,
       failure: result.status === 'FAILED' ? {
         category: 'Execution Failure',
         rootCause: result.error || 'Test step failed during Playwright execution.',
@@ -267,6 +324,7 @@ export default function App() {
       const res = await planAndExecuteWorkflow({
         test_case_id: tcId,
         test_case_name: tc.name,
+        app_url: tc.analysis?.url,
         headless: true,
       });
 
@@ -362,6 +420,168 @@ export default function App() {
                 </svg>
                 <span>Plan & Execute Test</span>
               </button>
+            </div>
+
+            {/* Real Live Website QA Analyzer Hero Card */}
+            <div 
+              className="live-analyzer-hero" 
+              style={{
+                background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%)',
+                border: '1px solid rgba(99, 102, 241, 0.4)',
+                borderRadius: '12px',
+                padding: '1.25rem 1.5rem',
+                marginBottom: '1.5rem',
+                boxShadow: '0 8px 30px rgba(0, 0, 0, 0.35)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <div style={{
+                    background: 'linear-gradient(135deg, #6366f1, #06b6d4)',
+                    borderRadius: '8px',
+                    padding: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    <Globe size={18} color="#ffffff" />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                      Real Live Website QA Analyzer
+                      <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.4)' }}>
+                        Live DOM Inspection
+                      </span>
+                    </h3>
+                    <p style={{ margin: '2px 0 0 0', fontSize: '0.78rem', color: '#94a3b8' }}>
+                      Enter any website URL below to connect live, extract DOM inputs/buttons/forms, audit SSL &amp; A11y, and execute real automated QA tests.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Quick Preset Buttons */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Quick Test:</span>
+                  {QUICK_PRESETS.map((p, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setQuickUrl(p.url);
+                        setQuickPrompt(p.prompt);
+                      }}
+                      style={{
+                        background: quickUrl === p.url ? 'rgba(99, 102, 241, 0.3)' : 'rgba(30, 41, 59, 0.6)',
+                        border: quickUrl === p.url ? '1px solid #6366f1' : '1px solid rgba(148, 163, 184, 0.2)',
+                        color: quickUrl === p.url ? '#a5b4fc' : '#cbd5e1',
+                        borderRadius: '6px',
+                        padding: '3px 8px',
+                        fontSize: '0.73rem',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Form Input Row */}
+              <form 
+                onSubmit={(e) => { e.preventDefault(); handleQuickAnalyze(); }}
+                style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 2fr) minmax(200px, 1.5fr) auto', gap: '0.75rem', alignItems: 'center' }}
+              >
+                <div style={{ position: 'relative' }}>
+                  <Globe size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#6366f1' }} />
+                  <input
+                    type="url"
+                    placeholder="https://example.com or any target website..."
+                    value={quickUrl}
+                    onChange={(e) => setQuickUrl(e.target.value)}
+                    required
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      padding: '0.65rem 0.75rem 0.65rem 2.4rem',
+                      background: 'rgba(15, 23, 42, 0.8)',
+                      border: '1px solid rgba(148, 163, 184, 0.25)',
+                      borderRadius: '8px',
+                      color: '#f8fafc',
+                      fontSize: '0.86rem',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+
+                <div style={{ position: 'relative' }}>
+                  <Sparkles size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#a855f7' }} />
+                  <input
+                    type="text"
+                    placeholder="QA goal (e.g. Verify login form, click buttons...)"
+                    value={quickPrompt}
+                    onChange={(e) => setQuickPrompt(e.target.value)}
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      padding: '0.65rem 0.75rem 0.65rem 2.3rem',
+                      background: 'rgba(15, 23, 42, 0.8)',
+                      border: '1px solid rgba(148, 163, 184, 0.25)',
+                      borderRadius: '8px',
+                      color: '#f8fafc',
+                      fontSize: '0.86rem',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isQuickAnalyzing || !quickUrl.trim()}
+                  style={{
+                    background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '0.65rem 1.35rem',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    cursor: (isQuickAnalyzing || !quickUrl.trim()) ? 'not-allowed' : 'pointer',
+                    opacity: (isQuickAnalyzing || !quickUrl.trim()) ? 0.6 : 1,
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)',
+                  }}
+                >
+                  {isQuickAnalyzing ? (
+                    <>
+                      <Loader2 size={16} className="spin-icon" />
+                      <span>Inspecting DOM...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play size={15} />
+                      <span>Analyze &amp; Test Live</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Progress & Error Feedback */}
+              {quickStatus && (
+                <div style={{ marginTop: '0.65rem', padding: '0.45rem 0.85rem', background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.35)', borderRadius: '6px', color: '#a5b4fc', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Loader2 size={13} className="spin-icon" />
+                  <span>{quickStatus}</span>
+                </div>
+              )}
+              {quickError && (
+                <div style={{ marginTop: '0.65rem', padding: '0.45rem 0.85rem', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: '6px', color: '#f87171', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <AlertCircle size={14} />
+                  <span>{quickError}</span>
+                </div>
+              )}
             </div>
 
             {/* 5 KPI METRICS CARDS (Derived strictly from live records) */}
