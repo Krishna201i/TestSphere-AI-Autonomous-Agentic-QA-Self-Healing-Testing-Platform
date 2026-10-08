@@ -14,11 +14,8 @@ from backend.models.test_execution import TestExecution, TestExecutionStatus
 
 
 def seed_database_if_empty(db: Session) -> bool:
-    """Seed initial records if the projects table is currently empty."""
-    if db.query(Project).count() > 0:
-        return False
-
-    now = datetime.now(timezone.utc)
+    """Disabled: Platform operates purely on real live website analysis without dummy data."""
+    return False
 
     # 1. Projects
     proj1 = Project(

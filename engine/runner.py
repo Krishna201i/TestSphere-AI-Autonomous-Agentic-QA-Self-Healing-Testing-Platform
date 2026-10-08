@@ -265,7 +265,11 @@ async def _perform_action(page: Page, step: Step, config: EngineConfig) -> str |
     # ---- navigation ---------------------------------------------------
     if action == ActionType.GOTO:
         url = _require_value(step, "goto")
-        await page.goto(url, timeout=timeout)
+        nav_timeout = max(timeout or 15000, 15000)
+        try:
+            await page.goto(url, timeout=nav_timeout, wait_until="domcontentloaded")
+        except Exception:
+            await page.goto(url, timeout=nav_timeout, wait_until="commit")
         return None
 
     # ---- element-less wait --------------------------------------------
@@ -292,8 +296,8 @@ async def _perform_action_with_locator(
 ) -> str:
     """Run the step's action using *locator_str* and return it."""
     action = step.action
-    timeout = step.timeout_ms
-    loc = page.locator(locator_str)
+    timeout = max(step.timeout_ms or 10000, 10000)
+    loc = page.locator(locator_str).first
 
     if action == ActionType.CLICK:
         await loc.click(timeout=timeout)

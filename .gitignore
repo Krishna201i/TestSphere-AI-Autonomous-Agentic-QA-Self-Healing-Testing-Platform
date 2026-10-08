@@ -51,4 +51,4 @@ frontend/dist/
 
 # --- OS ---
 Thumbs.db
-
+*.pdf
