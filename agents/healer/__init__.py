@@ -17,6 +17,10 @@ Components
 - LLMHealingEvaluator       — LLM-assisted evaluator (Day 11)
 - HealingResultFeedback     — Member 2 feedback schema (Day 12)
 - HealingResultFeedbackProcessor — Feedback processor (Day 12)
+- HealingCandidateDetail    — Detailed candidate contract (Member 1)
+- HealingInput              — Healing pipeline input (Member 1)
+- HealingOutput             — Healing pipeline output (Member 1)
+- LocatorStrategy           — Locator strategy constants (Member 1)
 """
 
 from agents.healer.candidate_generator import CandidateGenerator
@@ -29,6 +33,13 @@ from agents.healer.healing_decision import (
 from agents.healer.healing_feedback import (
     HealingResultFeedback,
     HealingResultFeedbackProcessor,
+)
+from agents.healer.healing_foundation import (
+    HealingCandidateDetail,
+    HealingInput,
+    HealingOutput,
+    LocatorStrategy,
+    create_no_safe_healing,
 )
 from agents.healer.healing_result_mapper import (
     healing_result_to_memory_update,
@@ -68,4 +79,11 @@ __all__ = [
     # Day 12 — Healing feedback loop
     "HealingResultFeedback",
     "HealingResultFeedbackProcessor",
+    # Member 1 — Self-Healing Foundation
+    "HealingCandidateDetail",
+    "HealingInput",
+    "HealingOutput",
+    "LocatorStrategy",
+    "create_no_safe_healing",
 ]
+

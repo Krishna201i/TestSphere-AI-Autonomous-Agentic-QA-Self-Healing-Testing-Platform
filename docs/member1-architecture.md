@@ -1421,3 +1421,121 @@ All 15 scenarios are verified in `tests/test_day15_pipeline_integration.py`:
 - **Latency Benchmark:** Entire autonomous cycle executes in $< 50\text{ms}$ (limit: $< 500\text{ms}$).
 - **Environment:** 100% offline, zero browser automation dependencies, zero external API keys.
 
+---
+
+## 14. Member 1 Intelligence Layer Enhancements & Self-Healing Foundation
+
+### 14.1 Summary of Implemented Modules
+
+| Module | Location | Primary Responsibilities |
+|---|---|---|
+| **Test Prioritization & Explanations** | `agents/planner/prioritization.py` | Scores test cases by priority level, category risk (negative/boundary/functional), step complexity, and page importance; annotates structured reasoning. |
+| **Enhanced Failure Data Contract** | `agents/analyzer/schemas.py` | Enriched `FailureContext` / `TestFailure` with `failed_step_id`, `failure_category`, `dom_evidence`, `screenshot_path`, `trace_path`, `timestamp`, `execution_metadata`, and property aliases. |
+| **Deterministic Failure Classifier** | `agents/analyzer/failure_classifier.py` | Deterministic rule-based categorization into 8 distinct failure categories + `UNKNOWN`, with confidence calibration and state mismatch detection. |
+| **Failure Analysis Agent** | `agents/analyzer/failure_analysis_agent.py` | High-level analysis agent evaluating healability, severity, root-cause reasoning, and recommended next actions without recommending healing for true defects. |
+| **Self-Healing Foundation Contracts** | `agents/healer/healing_foundation.py` | `HealingCandidateDetail`, `HealingInput`, `HealingOutput`, and `create_no_safe_healing` sentinel. Strictly enforces `requires_validation=True`. |
+| **Comprehensive Test Suite** | `tests/test_*.py` | 42 new unit tests across failure classification, analysis decisions, healing contracts, and prioritization (total 962 passing tests). |
+
+---
+
+### 14.2 Failure Classification Mechanism
+
+The `FailureClassifier` uses deterministic rules ordered by decreasing specificity:
+
+1. **`ELEMENT_NOT_INTERACTABLE`**: Matches obscured, disabled, hidden, pointer-events none, intercepted elements. Checked before missing elements because non-interactability implies existence.
+2. **`ASSERTION_FAILURE`**: Matches explicit assert/mismatch statements or state mismatches between `expected_result` and `actual_result`.
+3. **`TIMEOUT`**: Matches execution deadline exceeded, waiting timeouts, wait failures.
+4. **`NAVIGATION_FAILURE`**: Matches 404, invalid URL, `net::ERR_` network routing issues.
+5. **`NETWORK_ERROR`**: Matches fetch failures, CORS, SSL, ECONNREFUSED, socket hangup.
+6. **`APPLICATION_ERROR`**: Matches 500, unhandled exceptions, runtime errors, JavaScript crashes.
+7. **`ELEMENT_NOT_FOUND`**: Broadest selector-matching category: no element, unable to locate, selector not found.
+8. **`UNKNOWN`**: Fallback when evidence is empty, ambiguous, or unmatched (assigned low confidence $\le 0.3$).
+
+#### Confidence Scoring Rules:
+- Multi-pattern match boost: Base confidence $+ 0.02$ per additional matched pattern.
+- Supporting DOM evidence boost: $+ 0.05$ if DOM confirms missing or disabled element.
+- Short error message penalty: $- 0.10$ if message is $< 10$ chars.
+- Inconsistent action penalty: $- 0.15$ if action does not align with error type (e.g. `navigate` with element not found).
+
+---
+
+### 14.3 Failure Analysis Agent Workflow
+
+The `FailureAnalysisAgent` takes a `FailureContext` (or `TestFailure`) and optional DOM evidence:
+
+1. **Classification:** Invokes `FailureClassifier` to categorize the error.
+2. **Healability Assessment:**
+   - **Healable:** `SELECTOR_CHANGED`, `ELEMENT_NOT_FOUND` (automation/selector issue).
+   - **Conditionally Healable:** `ELEMENT_NOT_INTERACTABLE` (only if element state change is solvable via alternative locator; non-healable if genuinely disabled/hidden).
+   - **Strictly Non-Healable:** `ASSERTION_FAILURE`, `APPLICATION_ERROR`, `NETWORK_ERROR`, `TIMEOUT`, `UNKNOWN`. Never flags genuine product defects or infrastructure issues as selector problems.
+3. **Severity Calculation:**
+   - `CRITICAL`: `APPLICATION_ERROR` (crash, 500 server error).
+   - `HIGH`: `ASSERTION_FAILURE`, `NETWORK_ERROR`, `NAVIGATION_FAILURE`.
+   - `MEDIUM`: `ELEMENT_NOT_FOUND`, `ELEMENT_NOT_INTERACTABLE`, `TIMEOUT`.
+4. **Action Recommendation:**
+   - `INSPECT_CURRENT_UI` for missing elements.
+   - `CHECK_ELEMENT_STATE` for non-interactable elements.
+   - `ANALYZE_APPLICATION_STATE` for assertion failures.
+   - `INVESTIGATE_TIMEOUT` for timeouts.
+   - `REQUIRE_FURTHER_ANALYSIS` for network/application/unknown errors.
+5. **Evidence Compilation:** Aggregates classification, error details, action context, page URL, and DOM observations.
+
+---
+
+### 14.4 Self-Healing Integration with Member 2
+
+The self-healing contracts define how Member 1 and Member 2 interact during healing:
+
+```
+ Member 2 (Execution Engine)               Member 1 (Intelligence Layer)
+ ───────────────────────────               ────────────────────────────
+         │                                               │
+         │ 1. Step fails & DOM snapshot captured         │
+         ├──────────────────────────────────────────────>│
+         │    HealingInput:                              │
+         │    - original_selector                        │
+         │    - current_dom_elements (actual DOM)        │
+         │                                               │
+         │                                 2. Rank candidates using DOM evidence
+         │                                    (NO invented selectors)
+         │                                    If no match: create_no_safe_healing()
+         │                                               │
+         │ 3. Return Ranked Proposals                    │
+         │<──────────────────────────────────────────────┤
+         │    HealingOutput:                             │
+         │    - candidates: list[HealingCandidateDetail] │
+         │    - requires_validation: True (enforced)     │
+         │                                               │
+         │ 4. Browser Validation                         │
+         │    (Playwright executes proposed selector)    │
+         │                                               │
+         │ 5. Validation Result                          │
+         ├──────────────────────────────────────────────>│
+         │    Memory Records:                            │
+         │    (Update success / failure stats)           │
+```
+
+#### Core Invariants:
+- **Zero Hallucination / No Invented Selectors:** Candidates must derive strictly from actual DOM elements provided by Member 2 in `current_dom_elements`.
+- **Mandatory Browser Validation:** `HealingOutput.requires_validation` is strictly validated and cannot be set to `False`. The intelligence layer NEVER declares a test healed without browser execution confirmation by Member 2.
+- **Safe Fallback:** When DOM evidence is empty or below threshold, `create_no_safe_healing()` issues `NO_SAFE_HEALING_FOUND` with `DO_NOT_HEAL`.
+
+---
+
+### 14.5 Unimplemented Components & Boundaries
+
+The following components belong to other members or production phases and remain intentionally outside Member 1:
+
+1. **Member 2 (Execution Engine):**
+   - Playwright browser launcher and page automation drivers.
+   - Live DOM tree extraction and element bounding-box computation.
+   - Physical execution of healed selectors in a real browser session.
+   - Capture of binary PNG screenshots and Playwright trace zip archives.
+2. **Member 3 (Platform & Infrastructure):**
+   - FastAPI HTTP endpoints and WebSocket routing.
+   - PostgreSQL / SQLite database persistence for runs and test suites.
+   - React / Vite frontend UI for test plan visualization and execution logs.
+3. **Production LLM Providers:**
+   - Production API credentials and live HTTP connections for OpenAI, Anthropic, or Gemini (retained provider-independent mock architecture for deterministic, offline operation).
+
+

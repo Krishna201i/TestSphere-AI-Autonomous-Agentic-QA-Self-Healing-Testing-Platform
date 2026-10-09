@@ -34,6 +34,13 @@ from agents.planner.structured_output import (
     StructuredOutputProcessor,
 )
 
+# Test Prioritization
+from agents.planner.prioritization import (
+    PrioritizationResult,
+    TestPrioritizer,
+    add_test_reasoning,
+)
+
 __all__ = [
     # Agent classes
     "TestPlannerAgent",
@@ -44,6 +51,10 @@ __all__ = [
     "TestPlannerPromptTemplate",
     "StructuredOutputProcessor",
     "StructuredOutputError",
+    # Prioritization
+    "TestPrioritizer",
+    "PrioritizationResult",
+    "add_test_reasoning",
     # Input schemas
     "ApplicationContext",
     "PageContext",
