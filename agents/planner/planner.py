@@ -82,6 +82,7 @@ class TestPlannerAgent(ABC):
         context: ApplicationContext,
         *,
         max_tests: int = 10,
+        prioritize: bool = False,
     ) -> list[TestCase]:
         """Generate test cases from application context.
 
@@ -342,10 +343,11 @@ class LLMTestPlanner(TestPlannerAgent):
         context: ApplicationContext,
         *,
         max_tests: int = 10,
+        prioritize: bool = False,
     ) -> list[TestCase]:
         """Generate test cases from application context.
 
-        Full generation pipeline (Day 5):
+        Full generation pipeline (Day 5 + Member 1 enhancements):
 
         1. Validate input ApplicationContext
         2. Build the prompt
@@ -354,7 +356,8 @@ class LLMTestPlanner(TestPlannerAgent):
         5. Validate each test case
         6. Remove duplicates
         7. Validate element references
-        8. Return valid test cases
+        8. Prioritize tests (if prioritize=True)
+        9. Return valid test cases
 
         Parameters
         ----------
@@ -362,6 +365,8 @@ class LLMTestPlanner(TestPlannerAgent):
             Information about the application under test.
         max_tests:
             Maximum number of test cases to generate.
+        prioritize:
+            Whether to prioritize generated tests by risk and importance.
 
         Returns
         -------
@@ -426,6 +431,15 @@ class LLMTestPlanner(TestPlannerAgent):
         # 7. Validate element references
         valid_cases = self._validate_element_refs(valid_cases, context)
 
+        # 8. Prioritize if requested
+        if prioritize:
+            from agents.planner.prioritization import (
+                TestPrioritizer,
+                add_test_reasoning,
+            )
+            valid_cases = add_test_reasoning(valid_cases)
+            valid_cases = TestPrioritizer().prioritize(valid_cases)
+
         logger.info(
             "LLMTestPlanner: returning %d valid test cases "
             "(from %d generated).",
@@ -440,6 +454,7 @@ class LLMTestPlanner(TestPlannerAgent):
         context: ApplicationContext,
         *,
         max_tests: int = 10,
+        prioritize: bool = False,
     ) -> TestPlan:
         """Generate a complete TestPlan from application context.
 
@@ -452,6 +467,8 @@ class LLMTestPlanner(TestPlannerAgent):
             Information about the application under test.
         max_tests:
             Maximum number of test cases to generate.
+        prioritize:
+            Whether to prioritize generated tests by risk and importance.
 
         Returns
         -------
@@ -459,16 +476,26 @@ class LLMTestPlanner(TestPlannerAgent):
             A validated test plan with metadata.
         """
         test_cases = await self.generate_tests(
-            context, max_tests=max_tests,
+            context, max_tests=max_tests, prioritize=prioritize,
         )
+        metadata = {
+            "max_tests_requested": max_tests,
+            "provider": self._llm_client.provider_name,
+            "prioritized": prioritize,
+        }
+        if prioritize:
+            from agents.planner.prioritization import TestPrioritizer
+            prioritizer = TestPrioritizer()
+            explanations = [
+                f"{r.test_case.test_id}: {r.explanation}"
+                for r in prioritizer.prioritize_with_explanations(test_cases)
+            ]
+            metadata["prioritization_explanations"] = explanations
         return TestPlan(
             application_name=context.app_name,
             base_url=context.app_url,
             test_cases=test_cases,
-            metadata={
-                "max_tests_requested": max_tests,
-                "provider": self._llm_client.provider_name,
-            },
+            metadata=metadata,
         )
 
 
@@ -551,10 +578,11 @@ class LangChainTestPlanner(TestPlannerAgent):
         context: ApplicationContext,
         *,
         max_tests: int = 10,
+        prioritize: bool = False,
     ) -> list[TestCase]:
         """Generate test cases using LangChain-powered pipeline.
 
-        Full generation pipeline (Day 7):
+        Full generation pipeline (Day 7 + Member 1 enhancements):
 
         1. Validate input ApplicationContext
         2. Build prompt via LangChain (adapter)
@@ -563,7 +591,8 @@ class LangChainTestPlanner(TestPlannerAgent):
         5. Validate each test case
         6. Remove duplicates
         7. Validate element references
-        8. Return valid test cases
+        8. Prioritize tests (if prioritize=True)
+        9. Return valid test cases
 
         Parameters
         ----------
@@ -571,6 +600,8 @@ class LangChainTestPlanner(TestPlannerAgent):
             Information about the application under test.
         max_tests:
             Maximum number of test cases to generate.
+        prioritize:
+            Whether to prioritize generated tests by risk and importance.
 
         Returns
         -------
@@ -621,6 +652,15 @@ class LangChainTestPlanner(TestPlannerAgent):
             valid_cases, context,
         )
 
+        # 8. Prioritize if requested
+        if prioritize:
+            from agents.planner.prioritization import (
+                TestPrioritizer,
+                add_test_reasoning,
+            )
+            valid_cases = add_test_reasoning(valid_cases)
+            valid_cases = TestPrioritizer().prioritize(valid_cases)
+
         logger.info(
             "LangChainTestPlanner: returning %d valid test cases "
             "(from %d generated).",
@@ -635,6 +675,7 @@ class LangChainTestPlanner(TestPlannerAgent):
         context: ApplicationContext,
         *,
         max_tests: int = 10,
+        prioritize: bool = False,
     ) -> TestPlan:
         """Generate a complete TestPlan from application context.
 
@@ -647,6 +688,8 @@ class LangChainTestPlanner(TestPlannerAgent):
             Information about the application under test.
         max_tests:
             Maximum number of test cases to generate.
+        prioritize:
+            Whether to prioritize generated tests by risk and importance.
 
         Returns
         -------
@@ -654,16 +697,26 @@ class LangChainTestPlanner(TestPlannerAgent):
             A validated test plan with metadata.
         """
         test_cases = await self.generate_tests(
-            context, max_tests=max_tests,
+            context, max_tests=max_tests, prioritize=prioritize,
         )
+        metadata = {
+            "max_tests_requested": max_tests,
+            "provider": self._llm_client.provider_name,
+            "pipeline": "langchain",
+            "prioritized": prioritize,
+        }
+        if prioritize:
+            from agents.planner.prioritization import TestPrioritizer
+            prioritizer = TestPrioritizer()
+            explanations = [
+                f"{r.test_case.test_id}: {r.explanation}"
+                for r in prioritizer.prioritize_with_explanations(test_cases)
+            ]
+            metadata["prioritization_explanations"] = explanations
         return TestPlan(
             application_name=context.app_name,
             base_url=context.app_url,
             test_cases=test_cases,
-            metadata={
-                "max_tests_requested": max_tests,
-                "provider": self._llm_client.provider_name,
-                "pipeline": "langchain",
-            },
+            metadata=metadata,
         )
 

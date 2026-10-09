@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agents.memory.memory_schemas import (
     ContextComparisonResult,
@@ -39,7 +39,7 @@ class FailureContext(BaseModel):
     """Structured failure input for the Failure Analysis Agent.
 
     This is the primary input that Member 2's execution engine
-    provides when a test step fails.  It contains all observable
+    provides when a test step fails. It contains all observable
     information about the failure.
 
     Design: structured fields, not raw log strings.
@@ -52,7 +52,10 @@ class FailureContext(BaseModel):
         ..., min_length=1, description="Unique execution identifier"
     )
     failed_step: int = Field(
-        ..., ge=1, description="1-based step number that failed"
+        default=1, ge=1, description="1-based step number that failed"
+    )
+    failed_step_id: Optional[int] = Field(
+        default=None, description="Step number/identifier that failed"
     )
     action: str = Field(
         ..., min_length=1,
@@ -71,6 +74,9 @@ class FailureContext(BaseModel):
     error_message: str = Field(
         default="", description="Error message from the execution engine"
     )
+    failure_category: Optional[FailureType] = Field(
+        default=None, description="Pre-classified failure category, if known"
+    )
     current_page_url: Optional[str] = Field(
         default=None, description="Page URL at time of failure"
     )
@@ -84,6 +90,46 @@ class FailureContext(BaseModel):
             "was found in the UI"
         ),
     )
+    dom_evidence: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="DOM evidence at time of failure, if available",
+    )
+    screenshot_path: Optional[str] = Field(
+        default=None,
+        description="Screenshot path or reference, if available",
+    )
+    trace_path: Optional[str] = Field(
+        default=None,
+        description="Trace file path or reference, if available",
+    )
+    timestamp: Optional[str] = Field(
+        default=None,
+        description="Timestamp of the failure occurrence",
+    )
+    execution_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Arbitrary execution metadata",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_failed_step_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "failed_step" not in data and "failed_step_id" in data:
+                data["failed_step"] = data["failed_step_id"]
+            elif "failed_step" in data and "failed_step_id" not in data:
+                data["failed_step_id"] = data["failed_step"]
+        return data
+
+    @property
+    def target_element(self) -> str:
+        """Alias for target_selector."""
+        return self.target_selector
+
+    @property
+    def current_url(self) -> Optional[str]:
+        """Alias for current_page_url."""
+        return self.current_page_url
 
 
 # Backward-compatible alias for the Day 1 inter-member contract
