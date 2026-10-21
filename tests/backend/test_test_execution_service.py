@@ -17,11 +17,8 @@ Validates:
 
 import unittest
 from datetime import datetime, timezone
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.database.session import Base
+from backend.database.session import get_store
 from backend.models.test_execution import TestExecutionStatus
 from backend.services.application_service import ApplicationService
 from backend.services.exceptions import (
@@ -39,14 +36,7 @@ class TestTestExecutionService(unittest.TestCase):
 
     def setUp(self) -> None:
         """Create an isolated in-memory database and seed hierarchy."""
-        self.engine = create_engine(
-            "sqlite:///:memory:",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(bind=self.engine)
-        self.Session = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
-        self.session = self.Session()
+        self.session = get_store()
 
         # Seed hierarchy: Project -> Application -> TestCase
         self.project = ProjectService.create_project(self.session, name="Exec Project")
@@ -59,9 +49,6 @@ class TestTestExecutionService(unittest.TestCase):
 
     def tearDown(self) -> None:
         """Clean up session and drop all tables."""
-        self.session.close()
-        Base.metadata.drop_all(bind=self.engine)
-        self.engine.dispose()
 
     def test_create_execution_default_status(self) -> None:
         """Verify execution creation defaults to PENDING."""
@@ -132,11 +119,8 @@ class TestTestExecutionService(unittest.TestCase):
         self.assertEqual(updated.status, "PASSED")
         self.assertEqual(updated.duration_ms, 500)
         self.assertIsNotNone(updated.completed_at)
-        # SQLite stores datetimes without tzinfo, compare timestamps
-        if updated.completed_at.tzinfo is None:
-            self.assertEqual(updated.completed_at.replace(tzinfo=timezone.utc), now)
-        else:
-            self.assertEqual(updated.completed_at, now)
+        # Timestamps are stored as ISO 8601 UTC strings
+        self.assertEqual(datetime.fromisoformat(updated.completed_at), now)
 
     def test_update_execution_invalid_status_raises_error(self) -> None:
         """Verify updating execution with invalid status raises InvalidExecutionStatusError."""
@@ -159,9 +143,13 @@ class TestTestExecutionService(unittest.TestCase):
     def test_relationship_integrity(self) -> None:
         """Verify relationship between TestCase and TestExecution."""
         exec_item = TestExecutionService.create_execution(self.session, self.test_case.id)
-        fetched_tc = TestCaseService.get_test_case(self.session, self.test_case.id)
-        self.assertEqual(len(fetched_tc.test_executions), 1)
-        self.assertEqual(fetched_tc.test_executions[0].id, exec_item.id)
+        children = TestExecutionService.list_executions(self.session, test_case_id=self.test_case.id)
+        self.assertEqual([e.id for e in children], [exec_item.id])
+
+    def test_delete_test_case_cascades_to_executions(self) -> None:
+        TestExecutionService.create_execution(self.session, self.test_case.id)
+        TestCaseService.delete_test_case(self.session, self.test_case.id)
+        self.assertEqual(TestExecutionService.list_executions(self.session), [])
 
 
 if __name__ == "__main__":

@@ -3,70 +3,52 @@ TestSphere-AI — Security finding persistence and the audit trail.
 """
 
 import json
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy.orm import Session
-
-from backend.models.security import AuditEvent, SecurityFinding
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _iso(value: Optional[datetime]) -> Optional[str]:
-    """ISO 8601 in UTC; SQLite returns naive datetimes, which are stored as UTC."""
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.isoformat()
+from backend.database.store import Record, Store, now_iso
+from backend.models import AUDIT_EVENTS, SECURITY_FINDINGS
 
 
 def record_audit(
-    db: Session, *, actor: str, kind: str, message: str, level: str = "info", ref: Optional[str] = None,
-) -> AuditEvent:
-    event = AuditEvent(actor=actor, kind=kind, message=message, level=level, ref=ref, at=_now())
-    db.add(event)
-    db.commit()
-    return event
+    db: Store, *, actor: str, kind: str, message: str, level: str = "info", ref: Optional[str] = None,
+) -> Record:
+    return db.insert(AUDIT_EVENTS, at=now_iso(), actor=actor, kind=kind, message=message, level=level, ref=ref)
 
 
-def list_audit(db: Session, limit: int = 200) -> List[Dict[str, Any]]:
-    rows = db.query(AuditEvent).order_by(AuditEvent.at.desc(), AuditEvent.id.desc()).limit(limit).all()
+def list_audit(db: Store, limit: int = 200) -> List[Dict[str, Any]]:
+    rows = db.find(AUDIT_EVENTS, order_by="id", descending=True, limit=limit)
     return [
-        {"id": r.id, "at": _iso(r.at), "actor": r.actor, "kind": r.kind, "level": r.level, "message": r.message, "ref": r.ref}
+        {"id": r["id"], "at": r["at"], "actor": r["actor"], "kind": r["kind"], "level": r["level"],
+         "message": r["message"], "ref": r.get("ref")}
         for r in rows
     ]
 
 
-def serialize(row: SecurityFinding) -> Dict[str, Any]:
+def serialize(row: Record) -> Dict[str, Any]:
     """Stored finding JSON plus its tracked lifecycle fields."""
-    return json.loads(row.data) | {
-        "key": row.key,
-        "status": row.status,
-        "retest_result": row.retest_result,
-        "retested_at": _iso(row.retested_at),
-        "approved_by": row.approved_by,
-        "approved_at": _iso(row.approved_at),
-        "first_seen": _iso(row.first_seen),
-        "last_seen": _iso(row.last_seen),
+    return json.loads(row["data"]) | {
+        "key": row["key"],
+        "status": row["status"],
+        "retest_result": row.get("retest_result"),
+        "retested_at": row.get("retested_at"),
+        "approved_by": row.get("approved_by"),
+        "approved_at": row.get("approved_at"),
+        "first_seen": row["first_seen"],
+        "last_seen": row["last_seen"],
     }
 
 
-def get_finding(db: Session, key: str) -> Optional[SecurityFinding]:
-    return db.query(SecurityFinding).filter(SecurityFinding.key == key).first()
+def get_finding(db: Store, key: str) -> Optional[Record]:
+    return db.find_one(SECURITY_FINDINGS, key=key)
 
 
-def list_findings(db: Session, target_url: Optional[str] = None) -> List[SecurityFinding]:
-    query = db.query(SecurityFinding)
+def list_findings(db: Store, target_url: Optional[str] = None) -> List[Record]:
     if target_url:
-        query = query.filter(SecurityFinding.target_url == target_url)
-    return query.order_by(SecurityFinding.last_seen.desc()).all()
+        return db.find(SECURITY_FINDINGS, target_url=target_url, order_by="last_seen", descending=True)
+    return db.find(SECURITY_FINDINGS, order_by="last_seen", descending=True)
 
 
-def save_scan(db: Session, target_url: str, findings: List[Dict[str, Any]]) -> Dict[str, List[SecurityFinding]]:
+def save_scan(db: Store, target_url: str, findings: List[Dict[str, Any]]) -> Dict[str, List[Record]]:
     """Upsert this scan's findings for *target_url*.
 
     - New findings are inserted as open.
@@ -75,7 +57,7 @@ def save_scan(db: Session, target_url: str, findings: List[Dict[str, Any]]) -> D
     - Open findings for this target that no longer appear are resolved —
       the scan itself is a retest that passed.
     """
-    now = _now()
+    now = now_iso()
     seen = {f["key"] for f in findings}
     current, reopened, resolved = [], [], []
 
@@ -83,41 +65,32 @@ def save_scan(db: Session, target_url: str, findings: List[Dict[str, Any]]) -> D
         data = json.dumps({k: v for k, v in f.items() if k != "key"})
         row = get_finding(db, f["key"])
         if row is None:
-            row = SecurityFinding(
-                key=f["key"], target_url=target_url, check_id=f["check_id"], severity=f["severity"],
-                title=f["title"], data=data, status="open", first_seen=now, last_seen=now,
+            row = db.insert(
+                SECURITY_FINDINGS, key=f["key"], target_url=target_url, check_id=f["check_id"],
+                severity=f["severity"], title=f["title"], data=data, status="open",
+                retest_result=None, retested_at=None, approved_by=None, approved_at=None,
+                first_seen=now, last_seen=now,
             )
-            db.add(row)
         else:
-            if row.status == "resolved":
-                row.status = "open"
-                row.retest_result = None
-                row.retested_at = None
-                row.approved_by = None
-                row.approved_at = None
+            changes: Dict[str, Any] = {"severity": f["severity"], "title": f["title"], "data": data, "last_seen": now}
+            if row["status"] == "resolved":
+                changes.update(status="open", retest_result=None, retested_at=None, approved_by=None, approved_at=None)
+            was_resolved = row["status"] == "resolved"
+            row = db.update(SECURITY_FINDINGS, row["id"], **changes)
+            if was_resolved:
                 reopened.append(row)
-            row.severity, row.title, row.data, row.last_seen = f["severity"], f["title"], data, now
         current.append(row)
 
-    for row in list_findings(db, target_url):
-        if row.key not in seen and row.status == "open":
-            row.status, row.retest_result, row.retested_at = "resolved", "pass", now
-            resolved.append(row)
+    for row in db.find(SECURITY_FINDINGS, target_url=target_url):
+        if row["key"] not in seen and row["status"] == "open":
+            resolved.append(db.update(SECURITY_FINDINGS, row["id"], status="resolved", retest_result="pass", retested_at=now))
 
-    db.commit()
     return {"current": current, "reopened": reopened, "resolved": resolved}
 
 
-def approve(db: Session, row: SecurityFinding, actor: str) -> SecurityFinding:
-    row.approved_by = actor
-    row.approved_at = _now()
-    db.commit()
-    return row
+def approve(db: Store, row: Record, actor: str) -> Record:
+    return db.update(SECURITY_FINDINGS, row["id"], approved_by=actor, approved_at=now_iso())
 
 
-def save_retest(db: Session, row: SecurityFinding, result: str, status: str) -> SecurityFinding:
-    row.retest_result = result
-    row.status = status
-    row.retested_at = _now()
-    db.commit()
-    return row
+def save_retest(db: Store, row: Record, result: str, status: str) -> Record:
+    return db.update(SECURITY_FINDINGS, row["id"], retest_result=result, status=status, retested_at=now_iso())

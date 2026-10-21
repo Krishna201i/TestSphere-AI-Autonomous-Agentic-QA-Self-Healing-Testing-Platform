@@ -2,7 +2,7 @@
 
 ## 1. Architectural Overview
 
-TestSphere-AI's backend serves as the persistence, API coordination, and lifecycle management layer of the platform. Built on **FastAPI** and **SQLAlchemy 2.0**, it provides high-throughput asynchronous and synchronous API endpoints, relational database persistence, schema validation via Pydantic v2, and bidirectional bridge interfaces connecting AI test planning with headless browser automation.
+TestSphere-AI's backend serves as the persistence, API coordination, and lifecycle management layer of the platform. Built on **FastAPI** with **Firebase Cloud Firestore** for persistence, it provides asynchronous and synchronous API endpoints, document storage behind a swappable `Store` interface, schema validation via Pydantic v2, and bidirectional bridge interfaces connecting AI test planning with headless browser automation.
 
 ```
                            +-------------------------------------+
@@ -32,67 +32,49 @@ TestSphere-AI's backend serves as the persistence, API coordination, and lifecyc
                      |                                                 |
                      v                                                 +--------+
          +-----------------------+                                              |
-         |   SQLAlchemy Models   |                                              v
-         | (backend/models/*.py) |                                   +---------------------+
+         |   Store interface     |                                              v
+         | (backend/database/)   |                                   +---------------------+
          +-----------+-----------+                                   | Member 1 (Agents)   |
                      |                                               | Member 2 (Engine)   |
                      v                                               +---------------------+
          +-----------------------+
-         |   Relational Store    |
-         | (PostgreSQL / SQLite) |
+         |  Cloud Firestore      |
+         | (local JSON offline)  |
          +-----------------------+
 ```
 
 ---
 
-## 2. Database Schema & Data Models
+## 2. Storage & Data Model
 
-The persistence schema is defined in [`backend/models/`](file:///backend/models/) using SQLAlchemy declarative mappings.
+All persistence goes through the `Store` interface in [`backend/database/store.py`](../backend/database/store.py):
+named collections of documents with integer ids, equality filters and ordering. Backends:
 
-### 2.1 Project (`backend/models/project.py`)
-Root multi-tenant container for test automation suites and configuration profiles.
-- `id` (Integer, Primary Key)
-- `name` (String, Indexed, Unique per tenant)
-- `description` (Text, Optional)
-- `created_at` (DateTime, Default UTC)
-- `updated_at` (DateTime, Auto-updating UTC)
-- Relationships:
-  - `applications`: One-to-many relationship with `Application`
-  - `test_cases`: One-to-many cascade relationship with `TestCase`
+| `DATABASE_BACKEND` | Implementation | Use |
+| --- | --- | --- |
+| `firestore` | `FirestoreStore` (firebase-admin) | Production. Credentials from `FIREBASE_CREDENTIALS` |
+| `local` | `LocalStore` (JSON file, atomic writes) | Offline local development (`LOCAL_DB_PATH`) |
+| `memory` | `MemoryStore` | Tests |
 
-### 2.2 Application (`backend/models/application.py`)
-Target system-under-test (SUT) metadata, base URLs, and authentication credentials.
-- `id` (Integer, Primary Key)
-- `project_id` (Integer, Foreign Key `projects.id`)
-- `name` (String, Required)
-- `base_url` (String, Target web app entrypoint)
-- `description` (Text, Optional)
-- `auth_config` (JSON / Dict, Stored credential hints or session tokens)
-- `created_at` / `updated_at` (DateTime)
+Every backend passes the same contract tests (`tests/backend/test_store.py`), including Firestore via the official emulator.
+Ids are per-collection counters (in Firestore: `_meta/counters`, incremented transactionally); every document has
+`id`, `created_at` and `updated_at` (ISO 8601 UTC strings).
 
-### 2.3 TestCase (`backend/models/test_case.py`)
-Executable test definitions composed of sequential test steps.
-- `id` (Integer, Primary Key)
-- `project_id` (Integer, Foreign Key `projects.id`)
-- `title` (String, Short descriptive label)
-- `description` (Text, High-level intent)
-- `category` (Enum: `SMOKE`, `REGRESSION`, `CRITICAL_PATH`, `EDGE_CASE`, `ACCESSIBILITY`)
-- `priority` (Enum: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`)
-- `steps` (JSON / List of Dicts, Stored serialized `TestStep` definitions)
-- `is_active` (Boolean, Default True)
-- `created_at` / `updated_at` (DateTime)
+### Collections
 
-### 2.4 TestExecution (`backend/models/test_execution.py`)
-Historical run records with step-level telemetry, timing, and self-healing artifacts.
-- `id` (Integer, Primary Key)
-- `test_case_id` (Integer, Foreign Key `test_cases.id`)
-- `status` (Enum: `PENDING`, `RUNNING`, `PASSED`, `FAILED`, `HEALED`, `ERROR`)
-- `started_at` (DateTime, Execution start timestamp)
-- `completed_at` (DateTime, Execution finish timestamp)
-- `duration_ms` (Float, Total elapsed wall time)
-- `step_results` (JSON, Detailed step breakdown with selectors, actions, screenshots)
-- `healing_log` (JSON, Self-healing diagnosis, mutations, and retry outcomes)
-- `error_message` (Text, Unhandled tracebacks or assertion error text)
+| Collection | Fields | Parent (cascade delete) |
+| --- | --- | --- |
+| `projects` | `name`, `description` | — |
+| `applications` | `project_id`, `name`, `base_url`, `description` | project |
+| `test_cases` | `application_id`, `external_id`, `name`, `description` (JSON: planned steps + page analysis), `category`, `priority`, `version` | application |
+| `test_executions` | `test_case_id`, `status` (`PENDING`/`RUNNING`/`PASSED`/`FAILED`/`HEALED`), `started_at`, `completed_at`, `duration_ms`, `error_message` | test case |
+| `security_findings` | `key` (check + component), `target_url`, `check_id`, `severity`, `title`, `data` (finding JSON), `status`, `retest_result`, `approved_by`, `approved_at`, `first_seen`, `last_seen` | — |
+| `audit_events` | `at`, `actor`, `kind`, `level`, `message`, `ref` | — (append-only) |
+| `codebase_blueprints` | `source`, `name`, `data` (blueprint JSON) | — |
+| `agent_memory` | `kind` (`execution`/`element`/`healing`), `data` (record JSON) | — |
+
+Firestore has no foreign keys, so the services implement the cascades: deleting a project deletes its applications,
+their test cases and those test cases' executions.
 
 ---
 

@@ -22,7 +22,8 @@
 | Remediation | Partial | Fix proposals for header/cookie findings, human approval, retest; source-code patches not built |
 | Validation | Live | Security retests and test re-execution; findings auto-resolve or reopen as regressions |
 | Audit trail | Live | Scans, approvals, retests, QA runs and targets stored server-side (`/api/audit`) |
-| Healing memory | Live | Persisted in `DATABASE_URL` across restarts |
+| Database | Live | Firebase Cloud Firestore behind a `Store` interface (`backend/database/store.py`); local JSON file for offline dev |
+| Healing memory | Live | Persisted in the database across restarts |
 | Codebase ingestion (5.1) | Live | `ingestion/`: public Git URL or local folder → blueprint (languages, frameworks, dependencies, test suites, HTTP routes, committed secrets); static only |
 | Deployment & rollback (5.7) | Not built | |
 
@@ -34,7 +35,7 @@
 
 For in-depth architectural and developer documentation, explore our detailed guides:
 
-- 📖 **[Backend Architecture & API Specification](docs/backend-architecture.md)**: Database schemas (SQLAlchemy 2.0), FastAPI REST routes, service transaction boundaries, and SSE streaming.
+- 📖 **[Backend Architecture & API Specification](docs/backend-architecture.md)**: Firestore collections and the `Store` interface, FastAPI REST routes, service transaction boundaries, and SSE streaming.
 - 🎭 **[Browser Execution Engine Guide](docs/engine-architecture.md)**: Playwright lifecycle, `BrowserSession`, multi-tier `LocatorResolver`, and forensic screenshot/DOM artifact extraction.
 - 🔄 **[Self-Healing & Autonomous Orchestration](docs/self-healing-orchestration.md)**: Closed-loop self-healing lifecycle, failure categorization, candidate generation, and dynamic schema bridging.
 - 🔌 **[End-to-End Integration Guide](docs/integration-guide.md)**: Multi-agent coordination, offline mock vs cloud LLM providers, and real-time frontend streaming.

@@ -39,7 +39,7 @@ def system_info() -> Dict[str, Any]:
         "api_version": API_VERSION,
         "environment": settings.APP_ENV,
         "commit": _git_commit(),
-        "database": settings.DATABASE_URL.split(":", 1)[0],
+        "database": settings.DATABASE_BACKEND,
         "llm": {"provider": llm.provider, "model": llm.model, "configured": llm.is_configured},
         "scan_scope": sorted(LOOPBACK_HOSTS) + extra,
         "memory_backend": settings.AGENT_MEMORY_BACKEND,
