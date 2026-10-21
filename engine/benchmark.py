@@ -30,12 +30,15 @@ import csv
 import http.server
 import io
 import logging
+import re
 import socket
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+
+from playwright.async_api import async_playwright
 
 from engine.runner import run_test
 from engine.schemas import (
@@ -172,6 +175,9 @@ class Mutant:
     change_type: str
     expected_to_heal: bool
     patch: Callable[[], None]
+    # step_id -> selector for the element that step SHOULD act on in the mutated
+    # DOM.  A heal on a step not listed here (target gone) is a false heal.
+    truth: dict[str, str] = field(default_factory=dict)
 
 
 def _mutants() -> list[Mutant]:
@@ -179,6 +185,7 @@ def _mutants() -> list[Mutant]:
         # Heal-able: testid renamed; fallback #username survives
         Mutant(
             name="username-testid-rename",
+            truth={"fill-username": "#username"},
             change_type="testid-rename",
             expected_to_heal=True,
             patch=lambda: _patch("index.html", lambda h: h.replace(
@@ -188,6 +195,7 @@ def _mutants() -> list[Mutant]:
         # Heal-able: password testid removed; fallback #password survives
         Mutant(
             name="password-testid-removed",
+            truth={"fill-password": "#password"},
             change_type="testid-removed",
             expected_to_heal=True,
             patch=lambda: _patch("index.html", lambda h: h.replace(
@@ -197,6 +205,7 @@ def _mutants() -> list[Mutant]:
         # Heal-able: button testid renamed; fallback #login-btn survives
         Mutant(
             name="button-testid-rename",
+            truth={"click-login": "#login-btn"},
             change_type="testid-rename",
             expected_to_heal=True,
             patch=lambda: _patch("index.html", lambda h: h.replace(
@@ -213,17 +222,35 @@ def _mutants() -> list[Mutant]:
                 "<!-- button removed -->",
             ).replace("Log in", "").replace("      </button>", "")),
         ),
-        # NOT heal-able: all username locators broken (id, testid, name all changed)
+        # Heal-able: id, testid and name all renamed, but it is still the same
+        # input (same placeholder/type/autocomplete/position) -- healing it is
+        # correct, e.g. via [placeholder="admin"]
         Mutant(
-            name="username-all-locators-dead",
-            change_type="all-locators-dead",
-            expected_to_heal=False,
+            name="username-identifiers-renamed",
+            change_type="identifiers-renamed",
+            expected_to_heal=True,
+            truth={"fill-username": "#usr-x99"},
             patch=lambda: _patch("index.html", lambda h: h.replace(
                 'id="username"', 'id="usr-x99"'
             ).replace(
                 'data-testid="username-input"', 'data-testid="x-dead"'
             ).replace(
                 'name="username"', 'name="x-dead"'
+            )),
+        ),
+        # NOT heal-able (by design): the input became a <textarea>.  Fallback
+        # #username still resolves, so this exercises the tag-mismatch refusal --
+        # a different kind of element is a change for a human to review.
+        Mutant(
+            name="username-tag-changed",
+            change_type="tag-changed",
+            expected_to_heal=False,
+            patch=lambda: _patch("index.html", lambda h: re.sub(
+                r'<input\s+id="username".*?/>',
+                '<textarea id="username" name="username" placeholder="admin" '
+                'data-testid="username-text"></textarea>',
+                h,
+                flags=re.S,
             )),
         ),
     ]
@@ -272,6 +299,35 @@ def _extract_healing_info(result) -> tuple[str, str, float]:
     return ("", "", 0.0)
 
 
+async def _is_false_heal(result, mutant: Mutant, page_url: str) -> bool:
+    """True if any healed step acted on an element other than the ground truth.
+
+    Probes the (still patched) page in a fresh browser: the healed locator must
+    resolve to the very element ``mutant.truth`` names for that step.
+    """
+    healed = [s for s in result.steps if s.status == StepStatus.HEALED]
+    if not healed:
+        return False
+    if any(s.step_id not in mutant.truth for s in healed):
+        return True  # healed a step whose real target no longer exists
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.goto(page_url, wait_until="domcontentloaded")
+            for s in healed:
+                same = await page.locator(s.locator_used).first.evaluate(
+                    "(el, sel) => el === document.querySelector(sel)",
+                    mutant.truth[s.step_id],
+                )
+                if not same:
+                    return True
+        finally:
+            await browser.close()
+    return False
+
+
 def _ms_per_step(result) -> float:
     ms = [s.duration_ms for s in result.steps]
     return sum(ms) / len(ms) if ms else 0.0
@@ -315,9 +371,7 @@ async def run_benchmark() -> list[MutantRecord]:
 
             healed_loc, strategy, confidence = _extract_healing_info(result_on)
 
-            # False-heal: outcome_on=="healed" but step actually errored on retry
-            # (simplified -- see ponytail comment in _is_false_heal)
-            false_heal = False  # ponytail: full detection needs live DOM probe post-heal
+            false_heal = await _is_false_heal(result_on, mutant, base_url)
 
             rec = MutantRecord(
                 name=mutant.name,
