@@ -32,6 +32,12 @@ class Settings(BaseSettings):
         default_factory=lambda: os.getenv("DATABASE_URL", "sqlite:///./testsphere.db")
     )
 
+    # Security scanning: comma-separated extra hosts the passive scanner may
+    # contact (loopback is always allowed). Only list hosts you own.
+    SECURITY_SCAN_ALLOWED_HOSTS: str = Field(
+        default_factory=lambda: os.getenv("SECURITY_SCAN_ALLOWED_HOSTS", "")
+    )
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
