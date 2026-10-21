@@ -2,38 +2,28 @@
 TestSphere-AI — Persistent Memory Store
 
 Write-through ``MemoryStore`` that survives restarts.  Every stored record is
-written to a SQL table as JSON and kept in the in-memory indexes inherited
-from ``InMemoryStore``, so all query logic is shared; on construction the
-table is replayed to rebuild those indexes.
+written as JSON to the ``agent_memory`` collection of a document store
+(Firestore in production) and kept in the in-memory indexes inherited from
+``InMemoryStore``, so all query logic is shared; on construction the
+collection is replayed to rebuild those indexes.
 
-Works with any SQLAlchemy engine (SQLite locally, Supabase PostgreSQL in
-production)::
+``store`` is any object with the document-store interface used by the
+backend (``insert``, ``find``, ``delete_where``)::
 
-    store = PersistentMemoryStore(engine)
+    memory = PersistentMemoryStore(get_store())
 """
 
 from __future__ import annotations
 
 import logging
-
-from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, delete, func, insert, select
-from sqlalchemy.engine import Engine
+from typing import Any
 
 from agents.memory.in_memory_store import InMemoryStore
 from agents.memory.memory_schemas import ElementRecord, HealingRecord, TestExecutionRecord
 
 logger = logging.getLogger(__name__)
 
-_metadata = MetaData()
-
-memory_records = Table(
-    "agent_memory_records",
-    _metadata,
-    Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("kind", String(16), nullable=False, index=True),
-    Column("data", Text, nullable=False),
-    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
-)
+COLLECTION = "agent_memory"
 
 _KINDS = {
     "execution": TestExecutionRecord,
@@ -43,12 +33,11 @@ _KINDS = {
 
 
 class PersistentMemoryStore(InMemoryStore):
-    """``InMemoryStore`` whose records are also persisted to SQL."""
+    """``InMemoryStore`` whose records are also persisted to a document store."""
 
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, store: Any) -> None:
         super().__init__()
-        self._engine = engine
-        _metadata.create_all(engine, tables=[memory_records])
+        self._store = store
         self._load()
 
     # ── Write-through ─────────────────────────────────────────
@@ -67,14 +56,13 @@ class PersistentMemoryStore(InMemoryStore):
 
     def clear(self) -> None:
         super().clear()
-        with self._engine.begin() as conn:
-            conn.execute(delete(memory_records))
+        for kind in _KINDS:
+            self._store.delete_where(COLLECTION, kind=kind)
 
     # ── Internals ─────────────────────────────────────────────
 
     def _persist(self, kind: str, record) -> None:
-        with self._engine.begin() as conn:
-            conn.execute(insert(memory_records).values(kind=kind, data=record.model_dump_json()))
+        self._store.insert(COLLECTION, kind=kind, data=record.model_dump_json())
 
     def _load(self) -> None:
         loaders = {
@@ -83,15 +71,13 @@ class PersistentMemoryStore(InMemoryStore):
             "healing": super().store_healing_record,
         }
         counts = dict.fromkeys(_KINDS, 0)
-        with self._engine.connect() as conn:
-            rows = conn.execute(select(memory_records.c.kind, memory_records.c.data).order_by(memory_records.c.id))
-            for kind, data in rows:
-                model = _KINDS.get(kind)
-                if model is None:
-                    continue
-                try:
-                    loaders[kind](model.model_validate_json(data))
-                    counts[kind] += 1
-                except ValueError as exc:  # schema drift / bad row: skip, don't crash startup
-                    logger.warning("Skipping unreadable %s memory record: %s", kind, exc)
+        for row in self._store.find(COLLECTION, order_by="id"):
+            model = _KINDS.get(row.get("kind"))
+            if model is None:
+                continue
+            try:
+                loaders[row["kind"]](model.model_validate_json(row["data"]))
+                counts[row["kind"]] += 1
+            except ValueError as exc:  # schema drift / bad row: skip, don't crash startup
+                logger.warning("Skipping unreadable %s memory record: %s", row["kind"], exc)
         logger.info("PersistentMemoryStore loaded %s", counts)

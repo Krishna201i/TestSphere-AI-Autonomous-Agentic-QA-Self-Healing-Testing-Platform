@@ -19,7 +19,10 @@ All settings can be configured via environment variables or a `.env` file at rep
 ### 2.1 Backend & Database Settings
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `DATABASE_URL` | `sqlite:///./testsphere.db` | Relational database connection string (SQLite or PostgreSQL) |
+| `DATABASE_BACKEND` | `firestore` if credentials set, else `local` | `firestore` (production), `local` (JSON file), `memory` (tests) |
+| `FIREBASE_CREDENTIALS` | `""` | Service-account key JSON (whole file contents) or a path to it |
+| `FIREBASE_PROJECT_ID` | from the key | Firebase project id (optional) |
+| `LOCAL_DB_PATH` | `./data/local_db.json` | Database file for `DATABASE_BACKEND=local` |
 | `API_HOST` | `0.0.0.0` | Host binding interface for FastAPI |
 | `API_PORT` | `8000` | Port for FastAPI server |
 | `DEBUG` | `False` | Enable detailed stack traces and auto-reloading |
@@ -36,7 +39,7 @@ All settings can be configured via environment variables or a `.env` file at rep
 | `LLM_MAX_TOKENS` | `4096` | Max output tokens per request |
 | `LLM_TIMEOUT` | `60` | Request timeout in seconds |
 | `LLM_MAX_RETRIES` | `2` | Retries for transient errors (timeouts, 429, 5xx, network) |
-| `AGENT_MEMORY_BACKEND` | `database` | `database` persists healing memory in `DATABASE_URL` (survives restarts); `memory` keeps it in-process |
+| `AGENT_MEMORY_BACKEND` | `database` | `database` persists healing memory in the configured store (survives restarts); `memory` keeps it in-process |
 | `INGEST_WORKSPACE` | `./data/repos` | Where ingested repositories are cloned |
 | `INGEST_GIT_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts public repositories may be cloned from (https only) |
 | `INGEST_ALLOW_LOCAL_PATHS` | `true` locally in development; `false` on Render/Heroku/Railway/Fly/Cloud Run unless set | Accept local folder paths for ingestion (reads the server's disk); never enable on a public server |
@@ -89,32 +92,17 @@ CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
 version: '3.8'
 
 services:
-  db:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: testsphere
-      POSTGRES_USER: testsphere_user
-      POSTGRES_PASSWORD: testsphere_secret
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
   testsphere-api:
     build: .
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://testsphere_user:testsphere_secret@db:5432/testsphere
+      - FIREBASE_CREDENTIALS=${FIREBASE_CREDENTIALS}
       - LLM_PROVIDER=mock
       - HEADLESS=True
-    depends_on:
-      - db
     volumes:
       - ./artifacts:/app/artifacts
 
-volumes:
-  pgdata:
 ```
 
 ---

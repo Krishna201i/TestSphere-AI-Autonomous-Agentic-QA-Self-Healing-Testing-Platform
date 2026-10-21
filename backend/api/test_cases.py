@@ -8,7 +8,6 @@ Does not import, modify, or duplicate Member 1 TestCase business logic.
 
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
 
 from backend.api.schemas import (
     TestCaseCreate,
@@ -16,7 +15,7 @@ from backend.api.schemas import (
     TestCaseUpdate,
 )
 from backend.database.session import get_db
-from backend.models.test_case import TestCase
+from backend.database.store import Record, Store
 from backend.services.exceptions import (
     ApplicationNotFoundError,
     TestCaseNotFoundError,
@@ -29,8 +28,8 @@ router = APIRouter(prefix="/test-cases", tags=["Test Cases"])
 @router.post("", response_model=TestCaseResponse, status_code=status.HTTP_201_CREATED)
 def create_test_case(
     payload: TestCaseCreate,
-    db: Session = Depends(get_db),
-) -> TestCase:
+    db: Store = Depends(get_db),
+) -> Record:
     """Create a new test case linked to an existing application."""
     try:
         return TestCaseService.create_test_case(
@@ -53,8 +52,8 @@ def create_test_case(
 @router.get("", response_model=List[TestCaseResponse])
 def list_test_cases(
     application_id: Optional[int] = Query(None, description="Filter by parent Application ID"),
-    db: Session = Depends(get_db),
-) -> List[TestCase]:
+    db: Store = Depends(get_db),
+) -> List[Record]:
     """Retrieve all test cases, with optional application_id filtering."""
     return TestCaseService.list_test_cases(db=db, application_id=application_id)
 
@@ -62,8 +61,8 @@ def list_test_cases(
 @router.get("/{test_case_id}", response_model=TestCaseResponse)
 def get_test_case(
     test_case_id: int,
-    db: Session = Depends(get_db),
-) -> TestCase:
+    db: Store = Depends(get_db),
+) -> Record:
     """Retrieve a single test case by ID."""
     try:
         return TestCaseService.get_test_case(db=db, test_case_id=test_case_id)
@@ -78,8 +77,8 @@ def get_test_case(
 def update_test_case(
     test_case_id: int,
     payload: TestCaseUpdate,
-    db: Session = Depends(get_db),
-) -> TestCase:
+    db: Store = Depends(get_db),
+) -> Record:
     """Update attributes of an existing test case."""
     try:
         return TestCaseService.update_test_case(
@@ -102,7 +101,7 @@ def update_test_case(
 @router.delete("/{test_case_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_test_case(
     test_case_id: int,
-    db: Session = Depends(get_db),
+    db: Store = Depends(get_db),
 ) -> None:
     """Delete a test case and cascade delete its associated test executions."""
     try:

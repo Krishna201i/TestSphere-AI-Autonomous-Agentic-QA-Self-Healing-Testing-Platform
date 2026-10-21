@@ -17,10 +17,10 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.database.session import get_db
+from backend.database.store import Store
 from backend.services import security_service as store
 from security import Finding, OutOfScopeError, PassiveScanner, ScanError, ScopePolicy
 from security.remediation import propose, redact_headers
@@ -52,7 +52,7 @@ def _translate(exc: Exception) -> HTTPException:
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
 
-def _finding_or_404(db: Session, key: str):
+def _finding_or_404(db: Store, key: str):
     row = store.get_finding(db, key)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Finding {key} not found")
@@ -63,7 +63,7 @@ def _finding_or_404(db: Session, key: str):
 async def scan(
     req: ScanRequest,
     scanner: PassiveScanner = Depends(get_scanner),
-    db: Session = Depends(get_db),
+    db: Store = Depends(get_db),
 ) -> Dict[str, Any]:
     """Passively scan one authorized URL; findings are sorted most severe first.
 
@@ -108,22 +108,21 @@ async def scan(
 
 
 @router.get("/findings", status_code=status.HTTP_200_OK)
-def list_findings(target_url: Optional[str] = None, db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+def list_findings(target_url: Optional[str] = None, db: Store = Depends(get_db)) -> List[Dict[str, Any]]:
     """All tracked findings (optionally for one target), most recently seen first."""
     return [store.serialize(row) for row in store.list_findings(db, target_url)]
 
 
 @router.post("/findings/{key}/approve", status_code=status.HTTP_200_OK)
-def approve_finding(key: str, req: ActorRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def approve_finding(key: str, req: ActorRequest, db: Store = Depends(get_db)) -> Dict[str, Any]:
     """Record a human approval of the finding's fix proposal."""
-    row = _finding_or_404(db, key)
-    store.approve(db, row, req.actor)
+    row = store.approve(db, _finding_or_404(db, key), req.actor)
     store.record_audit(db, actor=req.actor, kind="approval", level="success", ref=key,
                        message=f"{req.actor} approved the fix for {row.check_id} ({row.title})")
     return store.serialize(row)
 
 
-async def _retest(row, scanner: PassiveScanner, db: Session, actor: str) -> Dict[str, Any]:
+async def _retest(row, scanner: PassiveScanner, db: Store, actor: str) -> Dict[str, Any]:
     finding = Finding.model_validate(json.loads(row.data))
     store.record_audit(db, actor=actor, kind="retest", ref=row.key, message=f"Retest started for {row.check_id} on {row.target_url}")
     try:
@@ -131,7 +130,7 @@ async def _retest(row, scanner: PassiveScanner, db: Session, actor: str) -> Dict
     except (OutOfScopeError, ScanError) as exc:
         store.record_audit(db, actor=actor, kind="retest", level="error", ref=row.key, message=f"Retest failed for {row.check_id}: {exc}")
         raise _translate(exc) from exc
-    store.save_retest(db, row, result.retest_result.value, result.status.value)
+    row = store.save_retest(db, row, result.retest_result.value, result.status.value)
     store.record_audit(
         db, actor=actor, kind="retest", ref=row.key,
         level="success" if result.retest_result.value == "pass" else "warn",
@@ -145,7 +144,7 @@ async def retest_finding(
     key: str,
     req: ActorRequest,
     scanner: PassiveScanner = Depends(get_scanner),
-    db: Session = Depends(get_db),
+    db: Store = Depends(get_db),
 ) -> Dict[str, Any]:
     """Re-run the check behind a tracked finding and store the result."""
     return await _retest(_finding_or_404(db, key), scanner, db, req.actor)

@@ -11,6 +11,15 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
+def _default_database_backend() -> str:
+    explicit = os.getenv("DATABASE_BACKEND")
+    if explicit:
+        return explicit.strip().lower()
+    if os.getenv("FIREBASE_CREDENTIALS") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("FIRESTORE_EMULATOR_HOST"):
+        return "firestore"
+    return "local"
+
+
 # Set by common hosting platforms; their servers are public, so local-path
 # ingestion (reading the server's own disk) must be opted into explicitly there.
 _CLOUD_MARKERS = ("RENDER", "DYNO", "RAILWAY_ENVIRONMENT", "FLY_APP_NAME", "K_SERVICE", "VERCEL")
@@ -41,9 +50,14 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["*"]
 
     # Database settings (SQLite default for local development)
-    DATABASE_URL: str = Field(
-        default_factory=lambda: os.getenv("DATABASE_URL", "sqlite:///./testsphere.db")
-    )
+    # Storage: "firestore" (production), "local" (JSON file, offline dev) or
+    # "memory" (tests).  Defaults to firestore when Firebase credentials or the
+    # emulator are configured, otherwise local.
+    DATABASE_BACKEND: str = Field(default_factory=lambda: _default_database_backend())
+    LOCAL_DB_PATH: str = Field(default_factory=lambda: os.getenv("LOCAL_DB_PATH", "./data/local_db.json"))
+    # Service-account JSON (the whole key file contents) or a path to it
+    FIREBASE_CREDENTIALS: str = Field(default_factory=lambda: os.getenv("FIREBASE_CREDENTIALS", ""))
+    FIREBASE_PROJECT_ID: str = Field(default_factory=lambda: os.getenv("FIREBASE_PROJECT_ID", ""))
 
     # Security scanning: comma-separated extra hosts the passive scanner may
     # contact (loopback is always allowed). Only list hosts you own.

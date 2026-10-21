@@ -7,7 +7,6 @@ Delegates persistence and business logic to ApplicationService.
 
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
 
 from backend.api.schemas import (
     ApplicationCreate,
@@ -15,7 +14,7 @@ from backend.api.schemas import (
     ApplicationUpdate,
 )
 from backend.database.session import get_db
-from backend.models.application import Application
+from backend.database.store import Record, Store
 from backend.services.application_service import ApplicationService
 from backend.services.security_service import record_audit
 from backend.services.exceptions import (
@@ -29,8 +28,8 @@ router = APIRouter(prefix="/applications", tags=["Applications"])
 @router.post("", response_model=ApplicationResponse, status_code=status.HTTP_201_CREATED)
 def create_application(
     payload: ApplicationCreate,
-    db: Session = Depends(get_db),
-) -> Application:
+    db: Store = Depends(get_db),
+) -> Record:
     """Create a new web application under an existing project."""
     try:
         app = ApplicationService.create_application(
@@ -53,8 +52,8 @@ def create_application(
 @router.get("", response_model=List[ApplicationResponse])
 def list_applications(
     project_id: Optional[int] = Query(None, description="Filter by parent Project ID"),
-    db: Session = Depends(get_db),
-) -> List[Application]:
+    db: Store = Depends(get_db),
+) -> List[Record]:
     """Retrieve all applications, with optional project_id filtering."""
     return ApplicationService.list_applications(db=db, project_id=project_id)
 
@@ -62,8 +61,8 @@ def list_applications(
 @router.get("/{application_id}", response_model=ApplicationResponse)
 def get_application(
     application_id: int,
-    db: Session = Depends(get_db),
-) -> Application:
+    db: Store = Depends(get_db),
+) -> Record:
     """Retrieve a single application by ID."""
     try:
         return ApplicationService.get_application(db=db, application_id=application_id)
@@ -78,8 +77,8 @@ def get_application(
 def update_application(
     application_id: int,
     payload: ApplicationUpdate,
-    db: Session = Depends(get_db),
-) -> Application:
+    db: Store = Depends(get_db),
+) -> Record:
     """Update attributes of an application."""
     try:
         return ApplicationService.update_application(
@@ -99,7 +98,7 @@ def update_application(
 @router.delete("/{application_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_application(
     application_id: int,
-    db: Session = Depends(get_db),
+    db: Store = Depends(get_db),
 ) -> None:
     """Delete an application and its cascade children."""
     try:

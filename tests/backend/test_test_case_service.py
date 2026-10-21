@@ -14,11 +14,8 @@ Validates:
 """
 
 import unittest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.database.session import Base
+from backend.database.session import get_store
 from backend.services.application_service import ApplicationService
 from backend.services.exceptions import ApplicationNotFoundError, TestCaseNotFoundError
 from backend.services.project_service import ProjectService
@@ -30,14 +27,7 @@ class TestTestCaseService(unittest.TestCase):
 
     def setUp(self) -> None:
         """Create an isolated in-memory database and seed Project & Application."""
-        self.engine = create_engine(
-            "sqlite:///:memory:",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(bind=self.engine)
-        self.Session = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
-        self.session = self.Session()
+        self.session = get_store()
 
         # Seed hierarchy
         self.project = ProjectService.create_project(self.session, name="Root Project")
@@ -47,9 +37,6 @@ class TestTestCaseService(unittest.TestCase):
 
     def tearDown(self) -> None:
         """Clean up session and drop all tables."""
-        self.session.close()
-        Base.metadata.drop_all(bind=self.engine)
-        self.engine.dispose()
 
     def test_create_test_case_success(self) -> None:
         """Verify test case creation persists and sets default version."""
@@ -140,9 +127,13 @@ class TestTestCaseService(unittest.TestCase):
         tc = TestCaseService.create_test_case(
             self.session, self.application.id, "tc-rel", "Rel TC"
         )
-        fetched_app = ApplicationService.get_application(self.session, self.application.id)
-        self.assertEqual(len(fetched_app.test_cases), 1)
-        self.assertEqual(fetched_app.test_cases[0].id, tc.id)
+        children = TestCaseService.list_test_cases(self.session, application_id=self.application.id)
+        self.assertEqual([t.id for t in children], [tc.id])
+
+    def test_delete_application_cascades_to_test_cases(self) -> None:
+        TestCaseService.create_test_case(self.session, self.application.id, "tc-rel", "Rel TC")
+        ApplicationService.delete_application(self.session, self.application.id)
+        self.assertEqual(TestCaseService.list_test_cases(self.session), [])
 
 
 if __name__ == "__main__":

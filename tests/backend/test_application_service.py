@@ -14,12 +14,8 @@ Validates:
 """
 
 import unittest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.database.session import Base
-from backend.models.project import Project
+from backend.database.session import get_store
 from backend.services.application_service import ApplicationService
 from backend.services.exceptions import ApplicationNotFoundError, ProjectNotFoundError
 from backend.services.project_service import ProjectService
@@ -30,23 +26,13 @@ class TestApplicationService(unittest.TestCase):
 
     def setUp(self) -> None:
         """Create an isolated in-memory database, session, and base Project."""
-        self.engine = create_engine(
-            "sqlite:///:memory:",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(bind=self.engine)
-        self.Session = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
-        self.session = self.Session()
+        self.session = get_store()
 
         # Seed initial project
         self.project = ProjectService.create_project(self.session, name="Root Project")
 
     def tearDown(self) -> None:
         """Clean up session and drop all tables."""
-        self.session.close()
-        Base.metadata.drop_all(bind=self.engine)
-        self.engine.dispose()
 
     def test_create_application_success(self) -> None:
         """Verify application creation persists and links to project."""
@@ -133,9 +119,14 @@ class TestApplicationService(unittest.TestCase):
         app = ApplicationService.create_application(
             self.session, self.project.id, "Child App", "https://child.test"
         )
-        fetched_proj = ProjectService.get_project(self.session, self.project.id)
-        self.assertEqual(len(fetched_proj.applications), 1)
-        self.assertEqual(fetched_proj.applications[0].id, app.id)
+        children = ApplicationService.list_applications(self.session, project_id=self.project.id)
+        self.assertEqual([a.id for a in children], [app.id])
+
+    def test_delete_project_cascades_to_applications(self) -> None:
+        """Deleting a project removes its applications (replaces the SQL FK cascade)."""
+        ApplicationService.create_application(self.session, self.project.id, "Child App", "https://child.test")
+        ProjectService.delete_project(self.session, self.project.id)
+        self.assertEqual(ApplicationService.list_applications(self.session), [])
 
 
 if __name__ == "__main__":
