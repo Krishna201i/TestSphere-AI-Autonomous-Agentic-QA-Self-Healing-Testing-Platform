@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bell, ChevronDown, Search, Server, UserRound } from 'lucide-react';
+import { Bell, ChevronDown, LogOut, Search, Server, UserRound } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
+import { useAuth } from '../state/Auth';
 import { API_BASE_LABEL } from '../services/api';
 import { healthStats, pct, timeAgo, toDate } from '../lib/derive';
 
 export const PAGES = [
   { id: 'command', label: 'Command Center' },
+  { id: 'automation', label: 'Automation' },
   { id: 'pipeline', label: 'Pipeline Visualizer' },
   { id: 'attacker', label: 'Attacker Agent' },
   { id: 'remediation', label: 'Remediation Bridge' },
@@ -69,6 +71,9 @@ function loadSeen() {
 
 export default function TopNav({ page, onNavigate }) {
   const { health, audit, system, operator, setOperator } = useWorkspace();
+  const auth = useAuth();
+  const signedIn = auth.mode === 'firebase';
+  const displayName = signedIn ? (auth.user.name || auth.user.email) : operator;
   const h = healthStats(health);
   const menu = useMenu();
   const [seenAt, setSeenAt] = useState(loadSeen);
@@ -93,7 +98,7 @@ export default function TopNav({ page, onNavigate }) {
     onNavigate(id, params);
   }
 
-  const initials = operator.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
+  const initials = displayName.split(/[\s._@-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
   const envLabel = system ? `env: ${system.environment} [${system.commit || 'main'}]` : `env: ${import.meta.env.MODE} [offline]`;
 
   return (
@@ -186,25 +191,46 @@ export default function TopNav({ page, onNavigate }) {
         {/* Profile */}
         <div className="menu-anchor">
           <button type="button" className="user" aria-expanded={menu.open === 'profile'} onClick={() => menu.toggle('profile')}>
-            <span className="avatar">{initials}</span>
-            <span className="name">{operator}</span>
+            {signedIn && auth.user.photo
+              ? <img className="avatar" src={auth.user.photo} alt="" referrerPolicy="no-referrer" />
+              : <span className="avatar">{initials}</span>}
+            <span className="name">{displayName}</span>
           </button>
           <Popover open={menu.open === 'profile'} onClose={menu.close} label="Profile" width={320}>
-            <div className="popover-head"><UserRound size={16} /> Operator</div>
-            <form onSubmit={(e) => { e.preventDefault(); setOperator(draftName); menu.close(); }} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <label className="field">
-                Name recorded on approvals, scans and retests
-                <input className="input" value={draftName} onChange={(e) => setDraftName(e.target.value)} maxLength={64} />
-              </label>
-              <button type="submit" className="btn btn-primary btn-sm">Save</button>
-            </form>
-            <p className="hint" style={{ margin: '10px 0 0' }}>
-              There is no login yet: this name is trusted as typed and stored in this browser only.
-            </p>
+            {signedIn ? (
+              <>
+                <div className="popover-head"><UserRound size={16} /> Signed in</div>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{auth.user.name || auth.user.email}</div>
+                  {auth.user.name && <div className="small muted cell-wrap">{auth.user.email}</div>}
+                </div>
+                <p className="hint" style={{ margin: 0 }}>Your verified identity is recorded on approvals, scans, retests and pipeline runs.</p>
+              </>
+            ) : (
+              <>
+                <div className="popover-head"><UserRound size={16} /> Operator</div>
+                <form onSubmit={(e) => { e.preventDefault(); setOperator(draftName); menu.close(); }} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <label className="field">
+                    Name recorded on approvals, scans and retests
+                    <input className="input" value={draftName} onChange={(e) => setDraftName(e.target.value)} maxLength={64} />
+                  </label>
+                  <button type="submit" className="btn btn-primary btn-sm">Save</button>
+                </form>
+                <p className="hint" style={{ margin: '10px 0 0' }}>
+                  Sign-in is off on this server (single local user), so this name is trusted as typed.
+                </p>
+              </>
+            )}
             <div className="popover-links">
-              <button type="button" className="tab" onClick={() => go('audit', { query: operator })}>My activity</button>
+              <button type="button" className="tab" onClick={() => go('profile')}>Profile</button>
+              <button type="button" className="tab" onClick={() => go('audit', { query: displayName })}>My activity</button>
               <button type="button" className="tab" onClick={() => menu.toggle('env')}>Connection</button>
             </div>
+            {signedIn && (
+              <button type="button" className="btn btn-sm" onClick={() => { menu.close(); auth.signOut(); }}>
+                <LogOut size={14} /> Sign out
+              </button>
+            )}
           </Popover>
         </div>
       </div>
