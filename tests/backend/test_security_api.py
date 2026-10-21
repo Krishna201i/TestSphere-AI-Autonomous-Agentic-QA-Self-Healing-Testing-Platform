@@ -78,3 +78,22 @@ def test_default_scanner_scope_is_config_driven(monkeypatch) -> None:
     assert scope.allows("https://staging.test/")
     assert scope.allows("http://127.0.0.1:8000/")
     assert not scope.allows("https://example.com/")
+
+
+def test_scan_includes_headers_and_remediation(client, state) -> None:
+    state["headers"] = {"content-type": "text/html", "Server": "nginx/1.25.3", "set-cookie": "sid=TOKEN"}
+    body = client.post("/api/security/scan", json={"url": "https://app.test/"}).json()
+
+    assert ["Server", "nginx/1.25.3"] in body["response_headers"]
+    assert ["set-cookie", "…redacted…"] in body["response_headers"]
+    assert "TOKEN" not in str(body)
+
+    by_id = {f["check_id"]: f for f in body["findings"]}
+    csp = by_id["SEC-HDR-CSP"]["remediation"]
+    assert csp["kind"] == "header"
+    assert {"kind": "added", "text": "Content-Security-Policy: default-src 'self'; frame-ancestors 'none'"} in csp["diff"]
+    assert "add_header Content-Security-Policy" in csp["snippets"]["nginx"]
+
+    leak = by_id["SEC-DISCLOSURE"]["remediation"]
+    assert {"kind": "removed", "text": "Server: nginx/1.25.3"} in leak["diff"]
+    assert "server_tokens off;" in leak["snippets"]["nginx"]

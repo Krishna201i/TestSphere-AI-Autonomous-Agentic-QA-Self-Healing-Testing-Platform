@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from backend.config import settings
 from security import Finding, OutOfScopeError, PassiveScanner, ScanError, ScopePolicy
+from security.remediation import propose, redact_headers
 from security.scope import LOOPBACK_HOSTS
 
 router = APIRouter(prefix="/security", tags=["Security Testing"])
@@ -39,15 +40,29 @@ def _translate(exc: Exception) -> HTTPException:
 
 @router.post("/scan", status_code=status.HTTP_200_OK)
 async def scan(req: ScanRequest, scanner: PassiveScanner = Depends(get_scanner)) -> Dict[str, Any]:
-    """Passively scan one authorized URL; findings are sorted most severe first."""
+    """Passively scan one authorized URL; findings are sorted most severe first.
+
+    Each finding carries a ``remediation`` proposal built from the headers the
+    target actually returned (also included, redacted, as ``response_headers``).
+    """
     try:
-        findings = await scanner.scan(req.url)
+        snap = await scanner.fetch(req.url)
     except (OutOfScopeError, ScanError) as exc:
         raise _translate(exc) from exc
+
+    findings = scanner.analyze(snap)
+    headers = [(k.decode("latin-1"), v.decode("latin-1")) for k, v in snap.headers.raw]
     return {
         "url": req.url,
+        "final_url": snap.url,
+        "status_code": snap.status,
         "summary": dict(Counter(f.severity.value for f in findings)),
-        "findings": [f.model_dump(mode="json") | {"key": f.key} for f in findings],
+        "response_headers": [list(h) for h in redact_headers(headers)],
+        "findings": [
+            f.model_dump(mode="json")
+            | {"key": f.key, "remediation": propose(f, headers).model_dump()}
+            for f in findings
+        ],
     }
 
 
