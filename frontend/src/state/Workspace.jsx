@@ -14,7 +14,11 @@ import {
   createProject,
   getApplications,
   getAudit,
+  getBlueprint,
   getFindings,
+  getSystem,
+  ingestCodebase,
+  listBlueprints,
   getProjects,
   getTestCases,
   getTestExecutions,
@@ -29,7 +33,16 @@ const STORAGE_KEY = 'testsphere.workspace.v2';
 const HEALTH_INTERVAL_MS = 3000;
 const HEALTH_SAMPLES = 40;
 const DATA_INTERVAL_MS = 15000;
-export const OPERATOR = 'dev_active';
+const OPERATOR_KEY = 'testsphere.operator';
+export const DEFAULT_OPERATOR = 'dev_active';
+
+function loadOperator() {
+  try {
+    return localStorage.getItem(OPERATOR_KEY) || DEFAULT_OPERATOR;
+  } catch {
+    return DEFAULT_OPERATOR;
+  }
+}
 
 const WorkspaceContext = createContext(null);
 
@@ -52,6 +65,11 @@ function savePersisted(value) {
 export function WorkspaceProvider({ children }) {
   const persisted = useRef(loadPersisted()).current;
 
+  const [operator, setOperatorState] = useState(loadOperator);
+  const [system, setSystem] = useState(null);
+  const [blueprints, setBlueprints] = useState([]); // summaries
+  const [blueprint, setBlueprint] = useState(null); // latest full blueprint
+  const [ingesting, setIngesting] = useState(false);
   const [health, setHealth] = useState([]);
   const [projects, setProjects] = useState([]);
   const [applications, setApplications] = useState([]);
@@ -74,8 +92,18 @@ export function WorkspaceProvider({ children }) {
     savePersisted({ scanMeta, scanHistory, selectedKey, lastRun });
   }, [scanMeta, scanHistory, selectedKey, lastRun]);
 
+  const setOperator = useCallback((name) => {
+    const clean = (name || '').trim().slice(0, 64) || DEFAULT_OPERATOR;
+    setOperatorState(clean);
+    try {
+      localStorage.setItem(OPERATOR_KEY, clean);
+    } catch {
+      // not persisted; still used for this session
+    }
+  }, []);
+
   const noteError = useCallback((kind, message) => {
-    setClientErrors((prev) => [{ id: `c-${Date.now()}`, at: new Date().toISOString(), actor: OPERATOR, kind, level: 'error', message }, ...prev].slice(0, 50));
+    setClientErrors((prev) => [{ id: `c-${Date.now()}`, at: new Date().toISOString(), actor: 'dashboard', kind, level: 'error', message }, ...prev].slice(0, 50));
   }, []);
 
   // ── Health pulse ────────────────────────────────────────────
@@ -96,9 +124,11 @@ export function WorkspaceProvider({ children }) {
   // ── Backend records ─────────────────────────────────────────
   const refresh = useCallback(async () => {
     const results = await Promise.allSettled([
-      getProjects(), getApplications(), getTestCases(), getTestExecutions(), getFindings(), getAudit(),
+      getProjects(), getApplications(), getTestCases(), getTestExecutions(), getFindings(), getAudit(), listBlueprints(),
     ]);
-    const [p, a, t, e, f, au] = results.map((r) => (r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : null));
+    const [p, a, t, e, f, au, bps] = results.map((r) => (r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : null));
+    if (bps) setBlueprints(bps);
+    getSystem().then(setSystem).catch(() => setSystem(null));
     if (p) setProjects(p);
     if (a) setApplications(a);
     if (t) setTestCases(t);
@@ -124,7 +154,7 @@ export function WorkspaceProvider({ children }) {
   const runScan = useCallback(async (url) => {
     setScanning(true);
     try {
-      const result = await securityScan(url, OPERATOR);
+      const result = await securityScan(url, operator);
       const at = new Date().toISOString();
       setScanMeta({
         url: result.url, final_url: result.final_url, status_code: result.status_code, at,
@@ -145,23 +175,23 @@ export function WorkspaceProvider({ children }) {
       setScanning(false);
       getAudit().then(setServerAudit).catch(() => {});
     }
-  }, [noteError]);
+  }, [noteError, operator]);
 
   const approve = useCallback(async (finding) => {
     try {
-      upsertFinding(await approveFinding(finding.key, OPERATOR));
+      upsertFinding(await approveFinding(finding.key, operator));
     } catch (err) {
       noteError('approval', `Approval of ${finding.check_id} failed: ${err.message}`);
       throw err;
     } finally {
       getAudit().then(setServerAudit).catch(() => {});
     }
-  }, [upsertFinding, noteError]);
+  }, [upsertFinding, noteError, operator]);
 
   const retest = useCallback(async (finding) => {
     setRetesting(finding.key);
     try {
-      const updated = await retestFinding(finding.key, OPERATOR);
+      const updated = await retestFinding(finding.key, operator);
       upsertFinding(updated);
       return updated;
     } catch (err) {
@@ -171,7 +201,32 @@ export function WorkspaceProvider({ children }) {
       setRetesting(null);
       getAudit().then(setServerAudit).catch(() => {});
     }
-  }, [upsertFinding, noteError]);
+  }, [upsertFinding, noteError, operator]);
+
+  // ── Codebase ingestion ──────────────────────────────────────
+  const ingest = useCallback(async (source) => {
+    setIngesting(true);
+    try {
+      const bp = await ingestCodebase(source, operator);
+      setBlueprint(bp);
+      return bp;
+    } catch (err) {
+      if (!err.status) noteError('ingest', `Ingestion of ${source} failed: ${err.message}`);
+      throw err;
+    } finally {
+      setIngesting(false);
+      refresh();
+    }
+  }, [operator, noteError, refresh]);
+
+  const openBlueprint = useCallback(async (id) => {
+    setBlueprint(await getBlueprint(id));
+  }, []);
+
+  // Show the newest blueprint by default once the list arrives
+  useEffect(() => {
+    if (!blueprint && blueprints.length) getBlueprint(blueprints[0].id).then(setBlueprint).catch(() => {});
+  }, [blueprints, blueprint]);
 
   // ── QA pipeline runs ────────────────────────────────────────
   const runPipeline = useCallback(async (payload, label) => {
@@ -226,12 +281,13 @@ export function WorkspaceProvider({ children }) {
   );
 
   const value = useMemo(() => ({
+    operator, setOperator, system, blueprints, blueprint, ingest, ingesting, openBlueprint,
     health, projects, applications, testCases, executions, findings, refresh,
     lastScan, scanHistory, scanning, runScan,
     approvals, approve, retests, retest, retesting, selectedKey, setSelectedKey,
     lastRun, running, runPipeline, addTarget, audit,
   }), [health, projects, applications, testCases, executions, findings, refresh, lastScan, scanHistory, scanning, runScan,
-    approvals, approve, retests, retest, retesting, selectedKey, lastRun, running, runPipeline, addTarget, audit]);
+    approvals, approve, retests, retest, retesting, selectedKey, lastRun, running, runPipeline, addTarget, audit, operator, setOperator, system, blueprints, blueprint, ingest, ingesting, openBlueprint]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

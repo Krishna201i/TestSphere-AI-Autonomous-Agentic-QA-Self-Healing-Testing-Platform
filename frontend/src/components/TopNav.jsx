@@ -1,7 +1,8 @@
-import React from 'react';
-import { Bell, ChevronDown, Search } from 'lucide-react';
-import { useWorkspace, OPERATOR } from '../state/Workspace';
-import { healthStats, pct, toDate } from '../lib/derive';
+import React, { useEffect, useRef, useState } from 'react';
+import { Bell, ChevronDown, Search, Server, UserRound } from 'lucide-react';
+import { useWorkspace } from '../state/Workspace';
+import { API_BASE_LABEL } from '../services/api';
+import { healthStats, pct, timeAgo, toDate } from '../lib/derive';
 
 export const PAGES = [
   { id: 'command', label: 'Command Center' },
@@ -11,6 +12,8 @@ export const PAGES = [
   { id: 'validation', label: 'Validation Engine' },
   { id: 'audit', label: 'Audit & Logs' },
 ];
+
+const SEEN_KEY = 'testsphere.notifications.seen';
 
 export function Logo({ size = 40 }) {
   return (
@@ -33,10 +36,65 @@ export function Logo({ size = 40 }) {
   );
 }
 
+/** Menu anchored under its trigger; closes on outside click or Escape. */
+function Popover({ open, onClose, children, label, width = 360 }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (ref.current && !ref.current.parentElement.contains(e.target)) onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, onClose]);
+  if (!open) return null;
+  return <div ref={ref} className="popover" role="dialog" aria-label={label} style={{ width }}>{children}</div>;
+}
+
+function useMenu() {
+  const [open, setOpen] = useState(null);
+  return { open, toggle: (id) => setOpen((cur) => (cur === id ? null : id)), close: () => setOpen(null) };
+}
+
+function loadSeen() {
+  try {
+    return Number(localStorage.getItem(SEEN_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export default function TopNav({ page, onNavigate }) {
-  const { health, audit } = useWorkspace();
+  const { health, audit, system, operator, setOperator } = useWorkspace();
   const h = healthStats(health);
-  const recent = audit.filter((a) => Date.now() - toDate(a.at).getTime() < 3600_000).length;
+  const menu = useMenu();
+  const [seenAt, setSeenAt] = useState(loadSeen);
+  const [draftName, setDraftName] = useState(operator);
+  const unread = audit.filter((a) => toDate(a.at).getTime() > seenAt).length;
+
+  useEffect(() => setDraftName(operator), [operator]);
+
+  function openNotifications() {
+    menu.toggle('bell');
+    const now = Date.now();
+    setSeenAt(now);
+    try {
+      localStorage.setItem(SEEN_KEY, String(now));
+    } catch {
+      // badge just reappears on reload
+    }
+  }
+
+  function go(id, params) {
+    menu.close();
+    onNavigate(id, params);
+  }
+
+  const initials = operator.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
+  const envLabel = system ? `env: ${system.environment} [${system.commit || 'main'}]` : `env: ${import.meta.env.MODE} [offline]`;
 
   return (
     <header className="topbar">
@@ -64,19 +122,84 @@ export default function TopNav({ page, onNavigate }) {
       </nav>
 
       <div className="topbar-right">
-        <button type="button" className="env-select" onClick={() => onNavigate('audit')} title="Search audit log">
-          <Search size={18} />
-          <span className="sep" />
-          <span className="env-label">env: {import.meta.env.MODE} [main]</span>
-          <ChevronDown size={16} />
-        </button>
-        <button type="button" className="icon-btn" aria-label={`${recent} audit events in the last hour`} onClick={() => onNavigate('audit')}>
-          <Bell size={21} />
-          {recent > 0 && <span className="badge">{recent > 99 ? '99+' : recent}</span>}
-        </button>
-        <div className="user">
-          <span className="avatar">DA</span>
-          <span className="name">{OPERATOR}</span>
+        {/* Environment / connection */}
+        <div className="menu-anchor">
+          <button type="button" className="env-select" aria-expanded={menu.open === 'env'} onClick={() => menu.toggle('env')}>
+            <Search size={18} />
+            <span className="sep" />
+            <span className="env-label">{envLabel}</span>
+            <ChevronDown size={16} />
+          </button>
+          <Popover open={menu.open === 'env'} onClose={menu.close} label="Environment">
+            <div className="popover-head"><Server size={16} /> Connected backend</div>
+            <dl className="kv small">
+              <dt>API</dt><dd className="mono">{API_BASE_LABEL}</dd>
+              <dt>Status</dt><dd>{h.online ? <span className="ok-text">online · {h.latency}ms</span> : <span className="bad-text">unreachable</span>}</dd>
+              {system ? (
+                <>
+                  <dt>Version</dt><dd>{system.commit || 'unknown'} · API v{system.api_version}</dd>
+                  <dt>Environment</dt><dd>{system.environment} · {system.database}</dd>
+                  <dt>LLM</dt><dd>{system.llm.provider} / {system.llm.model}{system.llm.provider === 'mock' && <span className="muted"> (offline, scripted)</span>}</dd>
+                  <dt>Scan scope</dt><dd>{system.scan_scope.join(', ')}</dd>
+                  <dt>Ingestion</dt><dd>{system.ingestion.git_hosts.join(', ')}{system.ingestion.local_paths ? ' · local folders' : ''}</dd>
+                  <dt>Memory</dt><dd>{system.memory_backend}</dd>
+                </>
+              ) : (
+                <><dt>Version</dt><dd className="bad-text">This backend has no /api/system — it is running older code.</dd></>
+              )}
+            </dl>
+          </Popover>
+        </div>
+
+        {/* Notifications */}
+        <div className="menu-anchor">
+          <button type="button" className="icon-btn" aria-expanded={menu.open === 'bell'}
+            aria-label={`Notifications${unread ? `, ${unread} new` : ''}`} onClick={openNotifications}>
+            <Bell size={21} />
+            {unread > 0 && <span className="badge">{unread > 99 ? '99+' : unread}</span>}
+          </button>
+          <Popover open={menu.open === 'bell'} onClose={menu.close} label="Notifications" width={400}>
+            <div className="popover-head">Notifications</div>
+            {audit.length === 0 ? <div className="empty">Nothing yet.</div> : (
+              <ul className="notif-list">
+                {audit.slice(0, 8).map((a) => (
+                  <li key={a.id}>
+                    <span className={`timeline-mark mark ${a.level}`} />
+                    <div>
+                      <div className="notif-msg">{a.message}</div>
+                      <div className="small muted">{a.kind}{a.actor ? ` · ${a.actor}` : ''} · {timeAgo(a.at)}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button type="button" className="btn btn-sm" style={{ width: '100%' }} onClick={() => go('audit')}>View all in Audit &amp; Logs</button>
+          </Popover>
+        </div>
+
+        {/* Profile */}
+        <div className="menu-anchor">
+          <button type="button" className="user" aria-expanded={menu.open === 'profile'} onClick={() => menu.toggle('profile')}>
+            <span className="avatar">{initials}</span>
+            <span className="name">{operator}</span>
+          </button>
+          <Popover open={menu.open === 'profile'} onClose={menu.close} label="Profile" width={320}>
+            <div className="popover-head"><UserRound size={16} /> Operator</div>
+            <form onSubmit={(e) => { e.preventDefault(); setOperator(draftName); menu.close(); }} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label className="field">
+                Name recorded on approvals, scans and retests
+                <input className="input" value={draftName} onChange={(e) => setDraftName(e.target.value)} maxLength={64} />
+              </label>
+              <button type="submit" className="btn btn-primary btn-sm">Save</button>
+            </form>
+            <p className="hint" style={{ margin: '10px 0 0' }}>
+              There is no login yet: this name is trusted as typed and stored in this browser only.
+            </p>
+            <div className="popover-links">
+              <button type="button" className="tab" onClick={() => go('audit', { query: operator })}>My activity</button>
+              <button type="button" className="tab" onClick={() => menu.toggle('env')}>Connection</button>
+            </div>
+          </Popover>
         </div>
       </div>
     </header>

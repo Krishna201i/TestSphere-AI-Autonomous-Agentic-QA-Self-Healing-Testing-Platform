@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CheckCircle2, Check, Clock3 } from 'lucide-react';
-import { useWorkspace, OPERATOR } from '../state/Workspace';
+import { useWorkspace } from '../state/Workspace';
 import { timeAgo } from '../lib/derive';
 
 /**
@@ -111,6 +111,7 @@ export function ApprovalControls({ finding }) {
 
 export default function RemediationCard({ onOpen }) {
   const finding = useSelectedProposal();
+  const { operator } = useWorkspace();
   return (
     <section className="card" aria-labelledby="remediation-title">
       <div className="card-head">
@@ -134,7 +135,7 @@ export default function RemediationCard({ onOpen }) {
           </div>
         </div>
       )}
-      <span className="hint">Operator: {OPERATOR}. Every approval and retest is recorded in Audit &amp; Logs.</span>
+      <span className="hint">Operator: {operator}. Every approval and retest is recorded in Audit &amp; Logs.</span>
     </section>
   );
 }

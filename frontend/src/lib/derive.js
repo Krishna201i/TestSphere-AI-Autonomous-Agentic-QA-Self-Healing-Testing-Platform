@@ -82,8 +82,10 @@ export function pipelineStages(ws) {
   const awaitingRetest = findings.filter((f) => ws.approvals[f.key] && ws.retests[f.key]?.result !== 'pass');
 
   const stages = [
-    { id: 'ingest', num: '1.', title: 'Codebase Ingestion', badge: ws.applications.length ? 'Blueprint Ready' : 'Awaiting Target', tone: 'gray', status: 'partial',
-      detail: `${ws.applications.length} target(s) registered. Repository/code ingestion is not built yet (module 5.1).`, page: 'pipeline' },
+    { id: 'ingest', num: '1.', title: 'Codebase Ingestion', badge: ws.blueprints.length ? 'Blueprint Ready' : 'Awaiting Codebase', tone: 'gray', status: 'live',
+      detail: ws.blueprints.length
+        ? `${ws.blueprints.length} codebase(s) analyzed; latest: ${ws.blueprints[0].name} (${ws.blueprints[0].files_total} files, ${ws.blueprints[0].routes} routes, ${ws.blueprints[0].risks} risks).`
+        : 'Ingest a Git repository or local folder to build its blueprint.', page: 'pipeline' },
     { id: 'qa', num: '2A.', title: 'AI QA Agent', badge: 'Functional Tests', tone: 'blue', status: 'live',
       detail: 'Plans tests from the live page, runs them in Playwright and self-heals broken locators.', page: 'pipeline' },
     { id: 'attack', num: '2B.', title: 'AI Attacker Agent', badge: 'Authorized Pen-Test', tone: 'orange', status: 'live',
@@ -99,11 +101,12 @@ export function pipelineStages(ws) {
   ];
 
   let active = 'ingest';
-  if (ws.running) active = 'qa';
+  if (ws.ingesting) active = 'ingest';
+  else if (ws.running) active = 'qa';
   else if (ws.scanning) active = 'attack';
   else if (awaitingApproval.length) active = 'remediate';
   else if (awaitingRetest.length) active = 'validate';
-  else if (ws.applications.length && !ws.lastScan) active = 'attack';
+  else if (ws.blueprints.length && !ws.lastScan) active = 'attack';
   else if (ws.lastScan) active = 'report';
 
   return { stages, active };
@@ -127,4 +130,18 @@ export function timeAgo(iso) {
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
+}
+
+/** Returns an error message for anything but a single http(s) URL, else null. */
+export function urlError(value) {
+  const v = (value || '').trim();
+  if (!v) return 'Enter a URL.';
+  if ((v.match(/https?:\/\//gi) || []).length > 1) return 'That looks like two URLs joined together — paste just one.';
+  try {
+    const u = new URL(v);
+    if (!['http:', 'https:'].includes(u.protocol)) return 'Use an http:// or https:// URL.';
+  } catch {
+    return 'Not a valid URL — include http:// or https://.';
+  }
+  return null;
 }
