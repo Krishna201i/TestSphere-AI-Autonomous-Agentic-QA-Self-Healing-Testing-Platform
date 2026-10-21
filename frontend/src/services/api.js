@@ -50,10 +50,10 @@ export const getTestExecutions = () => request('/api/test-executions');
 export const planAndExecute = (payload) =>
   request('/api/workflow/plan-and-execute', { method: 'POST', body: payload });
 
-export const securityScan = (url) => request('/api/security/scan', { method: 'POST', body: { url } });
-
-/** Retest takes the Finding fields only (strip UI/remediation extras). */
-export function securityRetest(finding) {
-  const { key, remediation, ...core } = finding; // eslint-disable-line no-unused-vars
-  return request('/api/security/retest', { method: 'POST', body: core });
-}
+export const securityScan = (url, actor) => request('/api/security/scan', { method: 'POST', body: { url, actor } });
+export const getFindings = () => request('/api/security/findings');
+export const approveFinding = (key, actor) =>
+  request(`/api/security/findings/${encodeURIComponent(key)}/approve`, { method: 'POST', body: { actor } });
+export const retestFinding = (key, actor) =>
+  request(`/api/security/findings/${encodeURIComponent(key)}/retest`, { method: 'POST', body: { actor } });
+export const getAudit = (limit = 300) => request(`/api/audit?limit=${limit}`);

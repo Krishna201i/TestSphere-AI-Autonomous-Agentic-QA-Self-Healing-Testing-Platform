@@ -4,11 +4,11 @@ import { executionStats, pct, retestStats, timeAgo } from '../lib/derive';
 import { HealthWaveformBox, ValidationRings } from '../components/ValidationCard';
 
 export default function ValidationEngine({ onNavigate }) {
-  const { executions, testCases, lastScan, retests, retest, retesting } = useWorkspace();
+  const { executions, testCases, findings, retests, retest, retesting } = useWorkspace();
   const ex = executionStats(executions);
   const rt = retestStats(retests);
   const nameOf = (id) => testCases.find((t) => t.id === id)?.name || `Test case #${id}`;
-  const approvedOrTested = (lastScan?.findings || []).filter((f) => retests[f.key]);
+  const approvedOrTested = findings.filter((f) => retests[f.key]);
 
   return (
     <div className="page">
