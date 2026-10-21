@@ -134,6 +134,16 @@ export function timeAgo(iso) {
   return `${Math.round(s / 86400)}d ago`;
 }
 
+/** "in 5m" for a future time, "due now" once it has passed. */
+export function timeUntil(iso) {
+  if (!iso) return '';
+  const s = Math.round((toDate(iso).getTime() - Date.now()) / 1000);
+  if (s <= 0) return 'due now';
+  if (s < 3600) return `in ${Math.max(1, Math.round(s / 60))}m`;
+  if (s < 86400) return `in ${Math.round(s / 3600)}h`;
+  return `in ${Math.round(s / 86400)}d`;
+}
+
 /** Returns an error message for anything but a single http(s) URL, else null. */
 export function urlError(value) {
   const v = (value || '').trim();

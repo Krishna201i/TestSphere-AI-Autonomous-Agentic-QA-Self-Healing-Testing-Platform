@@ -35,6 +35,7 @@ logger = logging.getLogger("testsphere.store")
 COLLECTIONS = (
     "projects", "applications", "test_cases", "test_executions",
     "security_findings", "audit_events", "codebase_blueprints", "agent_memory",
+    "users", "pipeline_runs",
 )
 
 
@@ -260,6 +261,44 @@ def describe_firestore_error(exc: BaseException) -> str:
     return "The backend could not use Firestore (check FIREBASE_CREDENTIALS and that Firestore is enabled)."
 
 
+def firebase_app(credentials: str | None, project_id: str | None) -> Any:
+    """The process-wide firebase-admin app (shared by Firestore and Firebase Auth).
+
+    *credentials* is the service-account JSON or a path to it; without it,
+    Application Default Credentials are used.  Under ``FIRESTORE_EMULATOR_HOST``
+    no credentials are needed.
+    """
+    try:
+        import firebase_admin
+        from firebase_admin import credentials as fb_credentials
+    except ImportError as exc:  # pragma: no cover - dependency is in requirements
+        raise StoreUnavailableError("firebase-admin is not installed on the server.") from exc
+
+    try:
+        return firebase_admin.get_app("testsphere")
+    except ValueError:
+        pass
+    try:
+        options = {"projectId": project_id} if project_id else None
+        if os.getenv("FIRESTORE_EMULATOR_HOST"):
+            from google.auth.credentials import AnonymousCredentials
+
+            class _EmulatorCredentials(fb_credentials.Base):
+                def get_credential(self):
+                    return AnonymousCredentials()
+
+            cred = _EmulatorCredentials()
+            options = {"projectId": project_id or "demo-testsphere"}
+        elif credentials:
+            info = credentials.strip()
+            cred = fb_credentials.Certificate(json.loads(info) if info.startswith("{") else info)
+        else:
+            cred = fb_credentials.ApplicationDefault()
+        return firebase_admin.initialize_app(cred, options, name="testsphere")
+    except Exception as exc:
+        raise StoreUnavailableError(describe_firestore_error(exc)) from exc
+
+
 class FirestoreStore(Store):
     """Cloud Firestore backend.
 
@@ -277,33 +316,10 @@ class FirestoreStore(Store):
     @classmethod
     def from_settings(cls, credentials: str | None, project_id: str | None) -> "FirestoreStore":
         try:
-            import firebase_admin
-            from firebase_admin import credentials as fb_credentials, firestore
+            from firebase_admin import firestore
         except ImportError as exc:  # pragma: no cover - dependency is in requirements
             raise StoreUnavailableError("firebase-admin is not installed on the server.") from exc
-
-        try:
-            app = firebase_admin.get_app("testsphere")
-        except ValueError:
-            try:
-                options = {"projectId": project_id} if project_id else None
-                if os.getenv("FIRESTORE_EMULATOR_HOST"):
-                    from google.auth.credentials import AnonymousCredentials
-
-                    class _EmulatorCredentials(fb_credentials.Base):
-                        def get_credential(self):
-                            return AnonymousCredentials()
-
-                    cred = _EmulatorCredentials()
-                    options = {"projectId": project_id or "demo-testsphere"}
-                elif credentials:
-                    info = credentials.strip()
-                    cred = fb_credentials.Certificate(json.loads(info) if info.startswith("{") else info)
-                else:
-                    cred = fb_credentials.ApplicationDefault()
-                app = firebase_admin.initialize_app(cred, options, name="testsphere")
-            except Exception as exc:
-                raise StoreUnavailableError(describe_firestore_error(exc)) from exc
+        app = firebase_app(credentials, project_id)
         try:
             return cls(firestore.client(app))
         except Exception as exc:

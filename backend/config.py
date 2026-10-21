@@ -5,6 +5,7 @@ Reads configuration settings from environment variables with safe defaults.
 Does not hardcode any sensitive information.
 """
 
+import json
 import os
 from typing import List
 
@@ -41,6 +42,31 @@ def _default_allow_local_paths() -> bool:
     return os.getenv("APP_ENV", "development") == "development" and not on_cloud
 
 
+def _default_auth_required() -> bool:
+    """Sign-in is required once Firebase is configured, unless explicitly turned off."""
+    explicit = os.getenv("AUTH_REQUIRED")
+    if explicit is not None:
+        return explicit.lower() in ("true", "1")
+    return bool(os.getenv("FIREBASE_CREDENTIALS") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+
+
+def _default_firebase_project_id() -> str:
+    """FIREBASE_PROJECT_ID, else the project_id inside the service-account JSON."""
+    explicit = os.getenv("FIREBASE_PROJECT_ID")
+    if explicit:
+        return explicit
+    raw = (os.getenv("FIREBASE_CREDENTIALS") or "").strip()
+    try:
+        if raw.startswith("{"):
+            return json.loads(raw).get("project_id", "")
+        if raw and os.path.isfile(raw):
+            with open(raw, encoding="utf-8") as fh:
+                return json.load(fh).get("project_id", "")
+    except (OSError, ValueError):
+        pass
+    return ""
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
@@ -65,7 +91,25 @@ class Settings(BaseSettings):
     LOCAL_DB_PATH: str = Field(default_factory=lambda: os.getenv("LOCAL_DB_PATH", "./data/local_db.json"))
     # Service-account JSON (the whole key file contents) or a path to it
     FIREBASE_CREDENTIALS: str = Field(default_factory=lambda: os.getenv("FIREBASE_CREDENTIALS", ""))
-    FIREBASE_PROJECT_ID: str = Field(default_factory=lambda: os.getenv("FIREBASE_PROJECT_ID", ""))
+    FIREBASE_PROJECT_ID: str = Field(default_factory=lambda: _default_firebase_project_id())
+
+    # Sign-in (Firebase Authentication).  When required, every API call needs
+    # a Firebase ID token and users only see their own data; when off, the
+    # API runs as a single local user (development).
+    AUTH_REQUIRED: bool = Field(default_factory=lambda: _default_auth_required())
+    # Public web-app config handed to the dashboard so it can show the login
+    # page (Firebase console → Project settings → General → Your apps).
+    FIREBASE_WEB_API_KEY: str = Field(default_factory=lambda: os.getenv("FIREBASE_WEB_API_KEY", ""))
+    FIREBASE_AUTH_DOMAIN: str = Field(default_factory=lambda: os.getenv("FIREBASE_AUTH_DOMAIN", ""))
+
+    # Automated pipeline: scheduled re-runs are checked every
+    # SCHEDULER_INTERVAL_SECONDS while the server is awake.  CRON_SECRET lets an
+    # external cron wake a sleeping host and trigger due runs (POST /api/scheduler/tick).
+    SCHEDULER_ENABLED: bool = Field(
+        default_factory=lambda: os.getenv("SCHEDULER_ENABLED", "true").lower() in ("true", "1")
+    )
+    SCHEDULER_INTERVAL_SECONDS: int = Field(default_factory=lambda: int(os.getenv("SCHEDULER_INTERVAL_SECONDS", "60")))
+    CRON_SECRET: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", ""))
 
     # Security scanning: comma-separated extra hosts the passive scanner may
     # contact (loopback is always allowed). Only list hosts you own.
