@@ -87,6 +87,20 @@ async def plan_and_execute_workflow(
             except Exception as exc:
                 live_analysis = None
 
+            # Never synthesize tests from a page that failed to load: a 404 page
+            # would yield a test asserting "Not Found" and pass.
+            if not req.steps and not (live_analysis and live_analysis.get("success")):
+                reason = (
+                    f"HTTP {live_analysis.get('status_code')}" if live_analysis and live_analysis.get("status_code")
+                    else (live_analysis or {}).get("error") or "unreachable"
+                )
+                record_audit(db, actor="dev_active", kind="qa", level="error",
+                             message=f"QA run refused: {target_url} did not load ({reason})")
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Could not load {target_url} ({reason}). Check the URL — no tests were planned from an error page.",
+                )
+
             # Locate or create project
             proj = db.query(Project).first()
             if not proj:
