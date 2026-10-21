@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
+import { toDate } from '../lib/derive';
 
 const KINDS = ['all', 'scan', 'approval', 'retest', 'qa', 'target', 'execution'];
 
 export default function AuditLogs({ params }) {
-  const { audit, executions, testCases, lastScan } = useWorkspace();
+  const { audit, executions, testCases } = useWorkspace();
   const [query, setQuery] = useState(params?.query || '');
   const [kind, setKind] = useState('all');
 
@@ -26,15 +27,10 @@ export default function AuditLogs({ params }) {
         level: e.status === 'FAILED' ? 'error' : e.status === 'HEALED' ? 'warn' : e.status === 'PASSED' ? 'success' : 'info',
         message: `Execution #${e.id} · ${nameOf(e.test_case_id)} → ${e.status}${e.error_message ? ` · ${e.error_message}` : ''}`,
       }));
-    const findingEntries = (lastScan?.findings || []).map((f) => ({
-      id: `finding-${f.key}`,
-      at: f.detected_at,
-      kind: 'scan',
-      level: ['critical', 'high'].includes(f.severity) ? 'error' : 'warn',
-      message: `[${f.severity.toUpperCase()}] ${f.check_id} · ${f.title} · ${f.component}`,
-    }));
-    return [...audit, ...execEntries, ...findingEntries].sort((a, b) => new Date(b.at) - new Date(a.at));
-  }, [audit, executions, lastScan, testCases]); // eslint-disable-line react-hooks/exhaustive-deps
+    // QA runs started from the dashboard are already audited server-side
+    const audited = new Set(audit.filter((a) => a.kind === 'qa' && a.ref).map((a) => `exec-${a.ref}`));
+    return [...audit, ...execEntries.filter((e) => !audited.has(e.id))].sort((a, b) => toDate(b.at) - toDate(a.at));
+  }, [audit, executions, testCases]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = query.trim().toLowerCase();
   const shown = entries.filter((e) => (kind === 'all' || e.kind === kind) && (!q || e.message.toLowerCase().includes(q)));
@@ -53,7 +49,7 @@ export default function AuditLogs({ params }) {
       <div className="page-title">
         <div>
           <h1>Audit &amp; Logs</h1>
-          <p>Who approved what, every scan and retest, and every test execution — in one timeline.</p>
+          <p>Who approved what, every scan and retest, and every test execution — stored on the server, in one timeline.</p>
         </div>
         <button type="button" className="btn" onClick={exportJson} disabled={!shown.length}>Export JSON</button>
       </div>
@@ -75,11 +71,11 @@ export default function AuditLogs({ params }) {
           <ul className="timeline">
             {shown.slice(0, 300).map((e) => (
               <li key={e.id}>
-                <span className="when" title={new Date(e.at).toLocaleString()}>
-                  {new Date(e.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}<br />{new Date(e.at).toLocaleTimeString()}
+                <span className="when" title={toDate(e.at).toLocaleString()}>
+                  {toDate(e.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}<br />{toDate(e.at).toLocaleTimeString()}
                 </span>
                 <span className={`mark ${e.level}`} />
-                <span className="cell-wrap"><span className="kind">{e.kind}</span>{e.message}</span>
+                <span className="cell-wrap"><span className="kind">{e.kind}{e.actor ? ` · ${e.actor}` : ''}</span>{e.message}</span>
               </li>
             ))}
           </ul>

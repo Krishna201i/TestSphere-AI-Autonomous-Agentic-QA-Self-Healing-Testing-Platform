@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Play } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
-import { pipelineStages, timeAgo } from '../lib/derive';
+import { pipelineStages, timeAgo, toDate } from '../lib/derive';
 import { WorkflowPanel } from './CommandCenter';
 
 const STATUS_LABEL = { live: 'Live', partial: 'Partially built', planned: 'Planned' };
@@ -85,7 +85,7 @@ function LastRun() {
             <ul className="timeline">
               {lastRun.events.map((ev, i) => (
                 <li key={i}>
-                  <span className="when">{new Date(ev.timestamp).toLocaleTimeString()}</span>
+                  <span className="when">{toDate(ev.timestamp).toLocaleTimeString()}</span>
                   <span className="mark info" />
                   <span><span className="kind">{ev.event_type}</span>{ev.message}</span>
                 </li>

@@ -57,6 +57,15 @@ export function ApprovalControls({ finding }) {
   const result = retests[finding.key];
   const resolved = result?.result === 'pass';
 
+  async function onApprove() {
+    setError(null);
+    try {
+      await approve(finding);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   async function onRetest() {
     setError(null);
     try {
@@ -77,7 +86,7 @@ export function ApprovalControls({ finding }) {
         <span className="state">{state}</span>
       </div>
       {!approval && (
-        <button type="button" className="btn btn-primary btn-block" onClick={() => approve(finding)}>
+        <button type="button" className="btn btn-primary btn-block" onClick={onApprove}>
           Approve Patch
         </button>
       )}

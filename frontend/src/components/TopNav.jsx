@@ -1,7 +1,7 @@
 import React from 'react';
 import { Bell, ChevronDown, Search } from 'lucide-react';
 import { useWorkspace, OPERATOR } from '../state/Workspace';
-import { healthStats, pct } from '../lib/derive';
+import { healthStats, pct, toDate } from '../lib/derive';
 
 export const PAGES = [
   { id: 'command', label: 'Command Center' },
@@ -36,7 +36,7 @@ export function Logo({ size = 40 }) {
 export default function TopNav({ page, onNavigate }) {
   const { health, audit } = useWorkspace();
   const h = healthStats(health);
-  const recent = audit.filter((a) => Date.now() - new Date(a.at).getTime() < 3600_000).length;
+  const recent = audit.filter((a) => Date.now() - toDate(a.at).getTime() < 3600_000).length;
 
   return (
     <header className="topbar">

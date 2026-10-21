@@ -18,6 +18,7 @@ from backend.models.project import Project
 from backend.models.test_case import TestCase
 from backend.models.test_execution import TestExecution, TestExecutionStatus
 from backend.orchestration.orchestrator import PlatformWorkflowOrchestrator
+from backend.services.security_service import record_audit
 from backend.services.url_analyzer import URLAnalyzerService
 from engine.schemas import RunOptions
 
@@ -176,6 +177,13 @@ async def plan_and_execute_workflow(
         if live_analysis and "analysis" not in res:
             res["analysis"] = live_analysis
 
+        run_status = res.get("status", "UNKNOWN")
+        record_audit(
+            db, actor="dev_active", kind="qa", ref=str(execution.id),
+            level={"FAILED": "error", "HEALED": "warn", "PASSED": "success"}.get(run_status, "info"),
+            message=f"QA run #{execution.id} ({tc.name}) -> {run_status}"
+                    + (f": {res['error_message']}" if res.get("error_message") else ""),
+        )
         return res
     except HTTPException:
         raise

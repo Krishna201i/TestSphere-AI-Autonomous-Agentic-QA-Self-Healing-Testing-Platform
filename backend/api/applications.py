@@ -17,6 +17,7 @@ from backend.api.schemas import (
 from backend.database.session import get_db
 from backend.models.application import Application
 from backend.services.application_service import ApplicationService
+from backend.services.security_service import record_audit
 from backend.services.exceptions import (
     ApplicationNotFoundError,
     ProjectNotFoundError,
@@ -32,7 +33,7 @@ def create_application(
 ) -> Application:
     """Create a new web application under an existing project."""
     try:
-        return ApplicationService.create_application(
+        app = ApplicationService.create_application(
             db=db,
             project_id=payload.project_id,
             name=payload.name,
@@ -44,6 +45,9 @@ def create_application(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found",
         )
+    record_audit(db, actor="dev_active", kind="target", level="success", ref=str(app.id),
+                 message=f"Target registered: {app.name} ({app.base_url})")
+    return app
 
 
 @router.get("", response_model=List[ApplicationResponse])

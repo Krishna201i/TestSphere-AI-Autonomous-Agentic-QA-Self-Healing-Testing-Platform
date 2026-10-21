@@ -8,6 +8,7 @@ from backend.models.project import Project
 from backend.models.application import Application
 from backend.models.test_case import TestCase
 from backend.models.test_execution import TestExecution, TestExecutionStatus
+from backend.models.security import AuditEvent, SecurityFinding
 
 __all__ = [
     "Project",
@@ -15,4 +16,6 @@ __all__ = [
     "TestCase",
     "TestExecution",
     "TestExecutionStatus",
+    "SecurityFinding",
+    "AuditEvent",
 ]

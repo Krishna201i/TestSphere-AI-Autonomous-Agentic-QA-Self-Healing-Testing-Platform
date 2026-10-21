@@ -1,24 +1,31 @@
 /**
- * Workspace state shared by every page: backend data, health pulse, the
- * latest security scan, human approvals, retests, pipeline runs and the
- * audit trail.  Scan/approval/audit state is kept in localStorage so a
- * reload does not lose the remediation loop in progress.
+ * Workspace state shared by every page: backend records, health pulse,
+ * tracked security findings (with approvals and retests), pipeline runs and
+ * the audit trail.
+ *
+ * Findings, approvals, retests and audit events live on the server, so every
+ * viewer sees the same trail.  Only view conveniences (which scan is shown,
+ * the selected finding, the last run's details) are kept in localStorage.
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  approveFinding,
   createApplication,
   createProject,
   getApplications,
+  getAudit,
+  getFindings,
   getProjects,
   getTestCases,
   getTestExecutions,
   planAndExecute,
   probeHealth,
-  securityRetest,
+  retestFinding,
   securityScan,
 } from '../services/api';
+import { toDate } from '../lib/derive';
 
-const STORAGE_KEY = 'testsphere.workspace.v1';
+const STORAGE_KEY = 'testsphere.workspace.v2';
 const HEALTH_INTERVAL_MS = 3000;
 const HEALTH_SAMPLES = 40;
 const DATA_INTERVAL_MS = 15000;
@@ -38,7 +45,7 @@ function savePersisted(value) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
   } catch {
-    // storage full or blocked — state still works for this session
+    // storage full or blocked — the view just won't be restored on reload
   }
 }
 
@@ -50,25 +57,25 @@ export function WorkspaceProvider({ children }) {
   const [applications, setApplications] = useState([]);
   const [testCases, setTestCases] = useState([]);
   const [executions, setExecutions] = useState([]);
+  const [findings, setFindings] = useState([]); // every tracked finding (server)
+  const [serverAudit, setServerAudit] = useState([]);
+  const [clientErrors, setClientErrors] = useState([]); // failures that never reached the server
 
-  const [lastScan, setLastScan] = useState(persisted.lastScan || null);
+  // Scan metadata only; the findings themselves come from `findings`
+  const [scanMeta, setScanMeta] = useState(persisted.scanMeta || null);
   const [scanHistory, setScanHistory] = useState(persisted.scanHistory || []);
   const [scanning, setScanning] = useState(false);
-  const [approvals, setApprovals] = useState(persisted.approvals || {});
-  const [retests, setRetests] = useState(persisted.retests || {});
   const [retesting, setRetesting] = useState(null);
   const [selectedKey, setSelectedKey] = useState(persisted.selectedKey || null);
-
   const [lastRun, setLastRun] = useState(persisted.lastRun || null);
-  const [running, setRunning] = useState(null); // label of the run in progress
-  const [audit, setAudit] = useState(persisted.audit || []);
+  const [running, setRunning] = useState(null);
 
   useEffect(() => {
-    savePersisted({ lastScan, scanHistory, approvals, retests, selectedKey, lastRun, audit });
-  }, [lastScan, scanHistory, approvals, retests, selectedKey, lastRun, audit]);
+    savePersisted({ scanMeta, scanHistory, selectedKey, lastRun });
+  }, [scanMeta, scanHistory, selectedKey, lastRun]);
 
-  const log = useCallback((kind, message, level = 'info') => {
-    setAudit((prev) => [{ id: `${Date.now()}-${Math.random()}`, at: new Date().toISOString(), kind, message, level }, ...prev].slice(0, 300));
+  const noteError = useCallback((kind, message) => {
+    setClientErrors((prev) => [{ id: `c-${Date.now()}`, at: new Date().toISOString(), actor: OPERATOR, kind, level: 'error', message }, ...prev].slice(0, 50));
   }, []);
 
   // ── Health pulse ────────────────────────────────────────────
@@ -88,12 +95,16 @@ export function WorkspaceProvider({ children }) {
 
   // ── Backend records ─────────────────────────────────────────
   const refresh = useCallback(async () => {
-    const results = await Promise.allSettled([getProjects(), getApplications(), getTestCases(), getTestExecutions()]);
-    const [p, a, t, e] = results.map((r) => (r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : null));
+    const results = await Promise.allSettled([
+      getProjects(), getApplications(), getTestCases(), getTestExecutions(), getFindings(), getAudit(),
+    ]);
+    const [p, a, t, e, f, au] = results.map((r) => (r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : null));
     if (p) setProjects(p);
     if (a) setApplications(a);
     if (t) setTestCases(t);
     if (e) setExecutions(e);
+    if (f) setFindings(f);
+    if (au) setServerAudit(au);
   }, []);
 
   useEffect(() => {
@@ -102,83 +113,125 @@ export function WorkspaceProvider({ children }) {
     return () => clearInterval(id);
   }, [refresh]);
 
+  const upsertFinding = useCallback((updated) => {
+    setFindings((prev) => {
+      const rest = prev.filter((f) => f.key !== updated.key);
+      return [updated, ...rest];
+    });
+  }, []);
+
   // ── Security: scan / approve / retest ───────────────────────
   const runScan = useCallback(async (url) => {
     setScanning(true);
-    log('scan', `Passive scan started: ${url}`);
     try {
-      const result = await securityScan(url);
-      const scan = { ...result, at: new Date().toISOString() };
-      setLastScan(scan);
-      setScanHistory((prev) => [...prev, { at: scan.at, url, count: result.findings.length }].slice(-12));
+      const result = await securityScan(url, OPERATOR);
+      const at = new Date().toISOString();
+      setScanMeta({
+        url: result.url, final_url: result.final_url, status_code: result.status_code, at,
+        summary: result.summary, response_headers: result.response_headers,
+        keys: result.findings.map((f) => f.key), resolvedCount: result.resolved.length,
+      });
+      setScanHistory((prev) => [...prev, { at, url, count: result.findings.length }].slice(-12));
+      setFindings((prev) => {
+        const fresh = new Map([...result.findings, ...result.resolved].map((f) => [f.key, f]));
+        return [...fresh.values(), ...prev.filter((f) => !fresh.has(f.key))];
+      });
       setSelectedKey(result.findings.find((f) => f.remediation?.kind === 'header')?.key || result.findings[0]?.key || null);
-      log('scan', `Scan complete: ${result.findings.length} finding(s) on ${url}`, result.findings.length ? 'warn' : 'success');
-      return scan;
+      return result;
     } catch (err) {
-      log('scan', `Scan refused/failed for ${url}: ${err.message}`, 'error');
+      if (!err.status) noteError('scan', `Scan of ${url} failed: ${err.message}`);
       throw err;
     } finally {
       setScanning(false);
+      getAudit().then(setServerAudit).catch(() => {});
     }
-  }, [log]);
+  }, [noteError]);
 
-  const approve = useCallback((finding) => {
-    setApprovals((prev) => ({ ...prev, [finding.key]: { at: new Date().toISOString(), by: OPERATOR } }));
-    log('approval', `${OPERATOR} approved the fix for ${finding.check_id} (${finding.title})`, 'success');
-  }, [log]);
+  const approve = useCallback(async (finding) => {
+    try {
+      upsertFinding(await approveFinding(finding.key, OPERATOR));
+    } catch (err) {
+      noteError('approval', `Approval of ${finding.check_id} failed: ${err.message}`);
+      throw err;
+    } finally {
+      getAudit().then(setServerAudit).catch(() => {});
+    }
+  }, [upsertFinding, noteError]);
 
   const retest = useCallback(async (finding) => {
     setRetesting(finding.key);
-    log('retest', `Retest started for ${finding.check_id} on ${finding.target_url || finding.component}`);
     try {
-      const result = await securityRetest(finding);
-      setRetests((prev) => ({ ...prev, [finding.key]: { result: result.retest_result, status: result.status, at: new Date().toISOString() } }));
-      log('retest', `${finding.check_id}: retest ${result.retest_result.toUpperCase()} — ${result.status}`, result.retest_result === 'pass' ? 'success' : 'warn');
-      return result;
+      const updated = await retestFinding(finding.key, OPERATOR);
+      upsertFinding(updated);
+      return updated;
     } catch (err) {
-      log('retest', `Retest failed for ${finding.check_id}: ${err.message}`, 'error');
+      if (!err.status) noteError('retest', `Retest of ${finding.check_id} failed: ${err.message}`);
       throw err;
     } finally {
       setRetesting(null);
+      getAudit().then(setServerAudit).catch(() => {});
     }
-  }, [log]);
+  }, [upsertFinding, noteError]);
 
   // ── QA pipeline runs ────────────────────────────────────────
   const runPipeline = useCallback(async (payload, label) => {
     setRunning(label);
-    log('qa', `QA pipeline started: ${label}`);
     try {
       const result = await planAndExecute({ headless: true, ...payload });
       setLastRun({ ...result, label, at: new Date().toISOString(), analysis: undefined });
-      log('qa', `QA pipeline finished: ${label} → ${result.status}${result.error_message ? ` (${result.error_message})` : ''}`,
-        result.status === 'FAILED' ? 'error' : result.status === 'HEALED' ? 'warn' : 'success');
-      refresh();
       return result;
     } catch (err) {
-      log('qa', `QA pipeline error for ${label}: ${err.message}`, 'error');
+      noteError('qa', `QA run for ${label} failed: ${err.message}`);
       throw err;
     } finally {
       setRunning(null);
+      refresh();
     }
-  }, [log, refresh]);
+  }, [refresh, noteError]);
 
   const addTarget = useCallback(async ({ projectName, appName, baseUrl }) => {
     let project = projects.find((p) => p.name === projectName);
     if (!project) project = await createProject({ name: projectName });
     const app = await createApplication({ project_id: project.id, name: appName, base_url: baseUrl });
-    log('target', `Target registered: ${appName} (${baseUrl})`, 'success');
     refresh();
     return app;
-  }, [projects, log, refresh]);
+  }, [projects, refresh]);
+
+  // ── Derived views (what the cards consume) ──────────────────
+  // Findings of the scan on screen: the last scan's keys, or else the most
+  // recently scanned target's open findings (e.g. on a fresh browser).
+  const lastScan = useMemo(() => {
+    if (scanMeta) {
+      const byKey = new Map(findings.map((f) => [f.key, f]));
+      return { ...scanMeta, findings: scanMeta.keys.map((k) => byKey.get(k)).filter(Boolean) };
+    }
+    const open = findings.filter((f) => f.status === 'open');
+    if (!open.length) return null;
+    const target = open[0].target_url;
+    const list = open.filter((f) => f.target_url === target);
+    return { url: target, final_url: target, at: list[0].last_seen, findings: list, response_headers: [], summary: null };
+  }, [scanMeta, findings]);
+
+  const approvals = useMemo(() => Object.fromEntries(
+    findings.filter((f) => f.approved_by).map((f) => [f.key, { by: f.approved_by, at: f.approved_at }]),
+  ), [findings]);
+
+  const retests = useMemo(() => Object.fromEntries(
+    findings.filter((f) => f.retest_result).map((f) => [f.key, { result: f.retest_result, status: f.status, at: f.retested_at }]),
+  ), [findings]);
+
+  const audit = useMemo(
+    () => [...serverAudit, ...clientErrors].sort((a, b) => toDate(b.at) - toDate(a.at)),
+    [serverAudit, clientErrors],
+  );
 
   const value = useMemo(() => ({
-    health, projects, applications, testCases, executions, refresh,
+    health, projects, applications, testCases, executions, findings, refresh,
     lastScan, scanHistory, scanning, runScan,
     approvals, approve, retests, retest, retesting, selectedKey, setSelectedKey,
-    lastRun, running, runPipeline, addTarget,
-    audit, log,
-  }), [health, projects, applications, testCases, executions, refresh, lastScan, scanHistory, scanning, runScan,
-    approvals, approve, retests, retest, retesting, selectedKey, lastRun, running, runPipeline, addTarget, audit, log]);
+    lastRun, running, runPipeline, addTarget, audit,
+  }), [health, projects, applications, testCases, executions, findings, refresh, lastScan, scanHistory, scanning, runScan,
+    approvals, approve, retests, retest, retesting, selectedKey, lastRun, running, runPipeline, addTarget, audit]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

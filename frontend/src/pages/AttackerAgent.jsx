@@ -61,7 +61,7 @@ export default function AttackerAgent({ onNavigate }) {
         <section className="card">
           <div className="card-head">
             <h3>Findings</h3>
-            {lastScan && <span className="muted small">{lastScan.final_url} · HTTP {lastScan.status_code} · {timeAgo(lastScan.at)}</span>}
+            {lastScan && <span className="muted small">{lastScan.final_url}{lastScan.status_code ? ` · HTTP ${lastScan.status_code}` : ''} · {timeAgo(lastScan.at)}</span>}
           </div>
           {!lastScan && <div className="empty">Run a scan to see findings.</div>}
           {lastScan && findings.length === 0 && <div className="empty">No weaknesses found by passive checks.</div>}
