@@ -14,6 +14,7 @@ from agents.healer.healing_feedback import (
 )
 from agents.llm import LLMClientSession, MockLLMProvider
 from agents.llm.config import LLMConfig
+from agents.llm.factory import create_llm_client
 from agents.memory.in_memory_store import InMemoryStore
 from agents.orchestration.agent_orchestrator import AgentOrchestrator
 from agents.orchestration.recovery_policy import (
@@ -69,12 +70,20 @@ logger = logging.getLogger("testsphere.orchestration")
 
 
 def create_default_orchestrator() -> AgentOrchestrator:
-    """Create a fully configured AgentOrchestrator with offline mock intelligence."""
+    """Create a fully configured AgentOrchestrator.
+
+    Uses the LLM provider from the environment (``LLM_PROVIDER``); the default
+    ``mock`` provider is pre-loaded with the offline planner scenarios.
+    """
     memory_store = InMemoryStore()
-    config = LLMConfig(provider="mock", model="mock-model", max_retries=0)
-    provider = MockLLMProvider(config)
-    register_planner_scenarios(provider)
-    llm_session = LLMClientSession(provider=provider)
+    config = LLMConfig.from_env()
+    if config.provider == "mock":
+        provider = MockLLMProvider(LLMConfig(provider="mock", model="mock-model", max_retries=0))
+        register_planner_scenarios(provider)
+        llm_session = LLMClientSession(provider=provider)
+    else:
+        llm_session = create_llm_client(config)
+    logger.info("Platform orchestrator using LLM provider: %s", llm_session.provider_name)
 
     failure_analyzer = FailureAnalyzerAgent(memory_store=memory_store)
     healing_engine = HealingDecisionEngine(
@@ -269,6 +278,15 @@ class PlatformWorkflowOrchestrator:
 
         if exec_result.status == ExecutionResultStatus.SUCCESS:
             final_status = TestExecutionStatus.PASSED.value
+            if engine_result.status == TestStatus.HEALED:
+                # The engine healed one or more locators mid-run; keep that visible
+                final_status = TestExecutionStatus.HEALED.value
+                error_msg = "; ".join(
+                    f"Self-healed {st.healing.original_locator} -> {st.healing.selected_locator} "
+                    f"({st.healing.strategy_used}, confidence {st.healing.confidence:.2f})"
+                    for st in engine_result.steps
+                    if st.status == StepStatus.HEALED and st.healing
+                )
             state = await self.ai_orchestrator.submit_execution_result(state, exec_result)
         else:
             # Failure detected -> delegate to Member 1 AI intelligence
@@ -380,6 +398,7 @@ class PlatformWorkflowOrchestrator:
             "error_message": error_msg,
             "dashboard_summary": dashboard_summary.model_dump(),
             "events": [e.model_dump() for e in (state.events if state else [])],
+            "engine_steps": [st.model_dump(mode="json") for st in engine_result.steps],
             "analysis": analysis_data,
         }
 
