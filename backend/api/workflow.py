@@ -11,21 +11,22 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
 from backend.database.session import get_db
 from backend.database.store import Store, StoreUnavailableError
-from backend.models import APPLICATIONS, TEST_CASES
+from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
 from backend.models.test_execution import TestExecutionStatus
 from backend.services.application_service import default_project
 from backend.services.test_case_service import TestCaseService
 from backend.services.test_execution_service import TestExecutionService
-from backend.orchestration.orchestrator import PlatformWorkflowOrchestrator
+from backend.orchestration.orchestrator import get_platform_orchestrator
 from backend.services.security_service import record_audit
 from backend.services.url_analyzer import URLAnalyzerService
 from engine.schemas import RunOptions
 
 router = APIRouter(prefix="/workflow", tags=["Workflow & Orchestration"])
 
-_workflow_orchestrator = PlatformWorkflowOrchestrator()
+_workflow_orchestrator = get_platform_orchestrator()
 
 
 class PlanAndExecuteRequest(BaseModel):
@@ -46,7 +47,7 @@ class AnalyzeURLRequest(BaseModel):
 
 
 @router.post("/analyze", status_code=status.HTTP_200_OK)
-async def analyze_url_endpoint(req: AnalyzeURLRequest) -> Dict[str, Any]:
+async def analyze_url_endpoint(req: AnalyzeURLRequest, _user: User = Depends(get_current_user)) -> Dict[str, Any]:
     """Perform live DOM element extraction, security/a11y audit, and QA synthesis on any URL."""
     return await URLAnalyzerService.analyze_live_website(
         url=req.url,
@@ -59,6 +60,7 @@ async def analyze_url_endpoint(req: AnalyzeURLRequest) -> Dict[str, Any]:
 async def plan_and_execute_workflow(
     payload: Optional[PlanAndExecuteRequest] = None,
     db: Store = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Autonomous plan and execute workflow endpoint.
     
@@ -67,11 +69,12 @@ async def plan_and_execute_workflow(
     creates an execution record, and executes the complete autonomous QA loop.
     """
     req = payload or PlanAndExecuteRequest()
+    actor = actor_for(user, None)
     try:
         live_analysis = None
         if req.test_case_id:
             tc = db.get(TEST_CASES, req.test_case_id)
-            if not tc:
+            if not tc or not (user.local or tc.get("owner_uid") == user.uid):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"TestCase #{req.test_case_id} not found",
@@ -95,7 +98,7 @@ async def plan_and_execute_workflow(
                     f"HTTP {live_analysis.get('status_code')}" if live_analysis and live_analysis.get("status_code")
                     else (live_analysis or {}).get("error") or "unreachable"
                 )
-                record_audit(db, actor="dev_active", kind="qa", level="error",
+                record_audit(db, actor=actor, kind="qa", level="error", owner_uid=user.uid,
                              message=f"QA run refused: {target_url} did not load ({reason})")
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -103,7 +106,7 @@ async def plan_and_execute_workflow(
                 )
 
             # Locate or create project
-            proj = default_project(db)
+            proj = default_project(db, None if user.local else user.uid)
 
             # Determine application name and URL
             resolved_app_name = req.app_name
@@ -116,13 +119,15 @@ async def plan_and_execute_workflow(
             # Locate or create application
             if req.application_id:
                 app_entity = db.get(APPLICATIONS, req.application_id)
-                if not app_entity:
+                if not app_entity or not (user.local or app_entity.get("owner_uid") == user.uid):
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"Application #{req.application_id} not found",
                     )
             else:
-                app_entity = db.find_one(APPLICATIONS, name=resolved_app_name) if resolved_app_name else None
+                app_entity = (
+                    db.find_one(APPLICATIONS, name=resolved_app_name, **scope(user)) if resolved_app_name else None
+                )
                 if not app_entity:
                     app_entity = db.insert(
                         APPLICATIONS,
@@ -130,6 +135,7 @@ async def plan_and_execute_workflow(
                         name=resolved_app_name or "Demo Application",
                         base_url=resolved_app_url,
                         description=None,
+                        owner_uid=user.uid,
                     )
 
             # Determine executable test steps
@@ -153,10 +159,13 @@ async def plan_and_execute_workflow(
                 name=resolved_tc_name or "Autonomous Planned Test Case",
                 description=desc_content,
                 external_id=f"tc-auto-{app_entity.id}",
+                owner_uid=user.uid,
             )
 
         # Create execution record
-        execution = TestExecutionService.create_execution(db, test_case_id=tc.id, status=TestExecutionStatus.PENDING)
+        execution = TestExecutionService.create_execution(
+            db, test_case_id=tc.id, status=TestExecutionStatus.PENDING, owner_uid=user.uid,
+        )
 
         res = await _workflow_orchestrator.execute_test_run(
             db=db,
@@ -169,7 +178,7 @@ async def plan_and_execute_workflow(
 
         run_status = res.get("status", "UNKNOWN")
         record_audit(
-            db, actor="dev_active", kind="qa", ref=str(execution.id),
+            db, actor=actor, kind="qa", ref=str(execution.id), owner_uid=user.uid,
             level={"FAILED": "error", "HEALED": "warn", "PASSED": "success"}.get(run_status, "info"),
             message=f"QA run #{execution.id} ({tc.name}) -> {run_status}"
                     + (f": {res['error_message']}" if res.get("error_message") else ""),
@@ -188,8 +197,10 @@ async def plan_and_execute_workflow(
 async def execute_test_workflow(
     execution_id: int,
     db: Store = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Execute a test execution run with autonomous AI diagnosis and self-healing."""
+    ensure_owned(user, db.get(TEST_EXECUTIONS, execution_id), f"TestExecution #{execution_id}")
     try:
         return await _workflow_orchestrator.execute_test_run(
             db=db,
@@ -210,7 +221,7 @@ async def execute_test_workflow(
 
 
 @router.get("/stream/{workflow_id}")
-async def stream_workflow_events(workflow_id: str) -> StreamingResponse:
+async def stream_workflow_events(workflow_id: str, _user: User = Depends(get_current_user)) -> StreamingResponse:
     """Stream live workflow state transitions and events using Server-Sent Events (SSE)."""
     return StreamingResponse(
         _workflow_orchestrator.stream_execution_events(workflow_id),

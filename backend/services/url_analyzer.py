@@ -151,6 +151,7 @@ class URLAnalyzerService:
                 "buttons": buttons[:8],  # preview top buttons
                 "forms": forms[:4],
                 "headings": headings[:6],
+                "links": links[:30],  # raw hrefs; the pipeline turns same-site ones into page tests
             },
             "health_audit": {
                 "overall_score": overall_score,
