@@ -36,6 +36,8 @@ All settings can be configured via environment variables or a `.env` file at rep
 | `LLM_MAX_TOKENS` | `4096` | Max output tokens per request |
 | `LLM_TIMEOUT` | `60` | Request timeout in seconds |
 | `LLM_MAX_RETRIES` | `2` | Retries for transient errors (timeouts, 429, 5xx, network) |
+| `AGENT_MEMORY_BACKEND` | `database` | `database` persists healing memory in `DATABASE_URL` (survives restarts); `memory` keeps it in-process |
+| `SECURITY_SCAN_ALLOWED_HOSTS` | `""` | Extra hosts the passive scanner may contact (loopback always allowed) |
 
 ### 2.3 Browser Engine Settings
 | Variable | Default Value | Description |
