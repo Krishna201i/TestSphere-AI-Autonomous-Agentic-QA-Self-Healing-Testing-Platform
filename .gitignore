@@ -62,3 +62,9 @@ benchmark_results.md
 
 # --- Ingested repositories (INGEST_WORKSPACE) ---
 data/
+
+# --- Firebase service-account keys (never commit) ---
+*-firebase-adminsdk-*.json
+firebase-key*.json
+serviceAccount*.json
+service-account*.json
