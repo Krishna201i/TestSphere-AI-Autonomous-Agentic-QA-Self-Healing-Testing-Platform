@@ -11,7 +11,7 @@ TestSphere-AI unifies three distinct architectural domains into a unified QA aut
    - Executes test actions deterministically on real Chromium/Firefox/WebKit browsers.
    - Captures screenshots, DOM state dumps, and execution timings.
 3. **Member 3: Platform Backend & APIs** ([`backend/`](file:///backend/))
-   - Manages relational state (projects, test cases, executions) in PostgreSQL / SQLite.
+   - Manages state (projects, test cases, executions, findings, audit trail) in Cloud Firestore (or a local JSON file offline).
    - Exposes REST APIs, orchestration pipelines, and real-time SSE streams.
 
 ---

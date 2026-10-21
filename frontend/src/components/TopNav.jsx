@@ -104,11 +104,16 @@ export default function TopNav({ page, onNavigate }) {
       </div>
       <span className="brand-divider" />
       <div className="workspace-status" aria-live="polite">
-        <div className="live"><span className={`dot ${h.online ? '' : 'off'}`} /> {h.online ? 'Live Workspace' : 'Backend Offline'}</div>
+        <div className="live">
+          <span className={`dot ${!h.online ? 'off' : h.dbDown ? 'warn' : ''}`} />
+          {!h.online ? 'Backend Offline' : h.dbDown ? 'Database Down' : 'Live Workspace'}
+        </div>
         <div className="health">
-          SYS_HEALTH: {h.online
-            ? <span className="ok-text">OK ({pct(h.successRate)})</span>
-            : <span className="bad-text">DOWN ({pct(h.successRate)})</span>}
+          SYS_HEALTH: {!h.online
+            ? <span className="bad-text">DOWN ({pct(h.successRate)})</span>
+            : h.dbDown
+              ? <span className="warn-text">DEGRADED</span>
+              : <span className="ok-text">OK ({pct(h.successRate)})</span>}
         </div>
       </div>
 
@@ -135,6 +140,7 @@ export default function TopNav({ page, onNavigate }) {
             <dl className="kv small">
               <dt>API</dt><dd className="mono">{API_BASE_LABEL}</dd>
               <dt>Status</dt><dd>{h.online ? <span className="ok-text">online · {h.latency}ms</span> : <span className="bad-text">unreachable</span>}</dd>
+              <dt>Database</dt><dd>{h.dbDown ? <span className="warn-text">{h.dbError}</span> : h.online ? <span className="ok-text">connected</span> : '—'}</dd>
               {system ? (
                 <>
                   <dt>Version</dt><dd>{system.commit || 'unknown'} · API v{system.api_version}</dd>

@@ -8,7 +8,6 @@ Does not launch Playwright, execute browser tests, or invoke AI agents.
 
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
 
 from backend.api.schemas import (
     TestExecutionCreate,
@@ -16,7 +15,7 @@ from backend.api.schemas import (
     TestExecutionUpdate,
 )
 from backend.database.session import get_db
-from backend.models.test_execution import TestExecution
+from backend.database.store import Record, Store
 from backend.services.exceptions import (
     InvalidExecutionStatusError,
     TestCaseNotFoundError,
@@ -30,8 +29,8 @@ router = APIRouter(prefix="/test-executions", tags=["Test Executions"])
 @router.post("", response_model=TestExecutionResponse, status_code=status.HTTP_201_CREATED)
 def create_test_execution(
     payload: TestExecutionCreate,
-    db: Session = Depends(get_db),
-) -> TestExecution:
+    db: Store = Depends(get_db),
+) -> Record:
     """Record a new test execution instance."""
     try:
         return TestExecutionService.create_execution(
@@ -58,8 +57,8 @@ def create_test_execution(
 @router.get("", response_model=List[TestExecutionResponse])
 def list_test_executions(
     test_case_id: Optional[int] = Query(None, description="Filter by parent TestCase ID"),
-    db: Session = Depends(get_db),
-) -> List[TestExecution]:
+    db: Store = Depends(get_db),
+) -> List[Record]:
     """Retrieve all test executions, with optional test_case_id filtering."""
     return TestExecutionService.list_executions(db=db, test_case_id=test_case_id)
 
@@ -67,8 +66,8 @@ def list_test_executions(
 @router.get("/{execution_id}", response_model=TestExecutionResponse)
 def get_test_execution(
     execution_id: int,
-    db: Session = Depends(get_db),
-) -> TestExecution:
+    db: Store = Depends(get_db),
+) -> Record:
     """Retrieve a single test execution record by ID."""
     try:
         return TestExecutionService.get_execution(db=db, execution_id=execution_id)
@@ -83,8 +82,8 @@ def get_test_execution(
 def update_test_execution(
     execution_id: int,
     payload: TestExecutionUpdate,
-    db: Session = Depends(get_db),
-) -> TestExecution:
+    db: Store = Depends(get_db),
+) -> Record:
     """Update execution lifecycle state and metrics."""
     try:
         return TestExecutionService.update_execution(
@@ -111,7 +110,7 @@ def update_test_execution(
 @router.delete("/{execution_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_test_execution(
     execution_id: int,
-    db: Session = Depends(get_db),
+    db: Store = Depends(get_db),
 ) -> None:
     """Delete a test execution record."""
     try:

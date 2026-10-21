@@ -1,19 +1,13 @@
 """
 Tests for the /security and /audit API routers (scanner network stubbed,
-isolated in-memory database).
+isolated in-memory store).
 """
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-import backend.models  # noqa: F401  (register tables)
 from backend.api.security import get_scanner
 from backend.config import settings
-from backend.database.session import Base, get_db
 from backend.main import app
 from security import PassiveScanner, ScopePolicy
 
@@ -32,23 +26,11 @@ def state():
 
 @pytest.fixture
 def client(state):
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
-    def override_db():
-        db = Session()
-        try:
-            yield db
-        finally:
-            db.close()
-
+    """Scanner network stubbed; storage is the per-test in-memory store (conftest)."""
     transport = httpx.MockTransport(lambda r: httpx.Response(200, headers=state["headers"], text=""))
-    app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_scanner] = lambda: PassiveScanner(ScopePolicy.of("app.test"), transport=transport)
     yield TestClient(app)
     app.dependency_overrides.clear()
-    Base.metadata.drop_all(bind=engine)
 
 
 def _scan(client, url="http://app.test/"):

@@ -10,16 +10,14 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.database.session import Base, get_db
+from backend.database.session import get_store
 from backend.main import app
-from backend.models.application import Application
-from backend.models.project import Project
-from backend.models.test_case import TestCase
-from backend.models.test_execution import TestExecution, TestExecutionStatus
+from backend.models.test_execution import TestExecutionStatus
+from backend.services.application_service import ApplicationService
+from backend.services.project_service import ProjectService
+from backend.services.test_case_service import TestCaseService
+from backend.services.test_execution_service import TestExecutionService
 from engine.schemas import (
     ActionType,
     StepResult,
@@ -33,60 +31,19 @@ class TestWorkflowAPI(unittest.TestCase):
     """Test suite for /workflow API endpoints."""
 
     def setUp(self) -> None:
-        self.engine = create_engine(
-            "sqlite:///:memory:",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(bind=self.engine)
-        self.TestingSessionLocal = sessionmaker(
-            autocommit=False, autoflush=False, bind=self.engine
-        )
-
-        def override_get_db():
-            db = self.TestingSessionLocal()
-            try:
-                yield db
-            finally:
-                db.close()
-
-        app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
-
-        # Seed data
-        db = self.TestingSessionLocal()
-        self.project = Project(name="API Workflow Project")
-        db.add(self.project)
-        db.commit()
-
-        self.application = Application(
-            project_id=self.project.id,
-            name="Workflow App",
-            base_url="https://workflow.local",
+        db = get_store()  # fresh in-memory store per test (conftest)
+        self.project = ProjectService.create_project(db, name="API Workflow Project")
+        self.application = ApplicationService.create_application(
+            db, self.project.id, name="Workflow App", base_url="https://workflow.local",
         )
-        db.add(self.application)
-        db.commit()
-
-        self.test_case = TestCase(
-            application_id=self.application.id,
-            external_id="TC-FLOW-1",
-            name="Flow Test",
+        self.test_case = TestCaseService.create_test_case(
+            db, self.application.id, external_id="TC-FLOW-1", name="Flow Test",
         )
-        db.add(self.test_case)
-        db.commit()
-
-        self.execution = TestExecution(
-            test_case_id=self.test_case.id,
-            status=TestExecutionStatus.PENDING.value,
+        self.execution = TestExecutionService.create_execution(
+            db, self.test_case.id, status=TestExecutionStatus.PENDING,
         )
-        db.add(self.execution)
-        db.commit()
         self.execution_id = self.execution.id
-        db.close()
-
-    def tearDown(self) -> None:
-        app.dependency_overrides.clear()
-        Base.metadata.drop_all(bind=self.engine)
 
     @patch("backend.orchestration.orchestrator.run_test")
     def test_execute_workflow_endpoint_success(self, mock_run_test: AsyncMock) -> None:
@@ -179,28 +136,7 @@ class TestPlanFromErrorPage(unittest.TestCase):
     """A target that fails to load must not produce a synthesized (passing) test."""
 
     def setUp(self) -> None:
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
-        from sqlalchemy.pool import StaticPool
-        import backend.models  # noqa: F401
-        from backend.database.session import Base, get_db
-
-        engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-        Base.metadata.create_all(bind=engine)
-        Session = sessionmaker(bind=engine)
-
-        def override_db():
-            db = Session()
-            try:
-                yield db
-            finally:
-                db.close()
-
-        app.dependency_overrides[get_db] = override_db
         self.client = TestClient(app)
-
-    def tearDown(self) -> None:
-        app.dependency_overrides.clear()
 
     @patch("backend.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
     def test_404_target_is_refused(self, mock_analyze: AsyncMock) -> None:

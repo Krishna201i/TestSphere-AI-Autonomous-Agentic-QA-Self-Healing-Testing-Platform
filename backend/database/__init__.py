@@ -1,9 +1,10 @@
 """
 TestSphere-AI — Database Package.
 
-Provides database configuration, connection management, and session handling.
+Document storage (Firestore in production) behind the ``Store`` interface.
 """
 
-from backend.database.session import Base, SessionLocal, engine, get_db, init_db
+from backend.database.session import get_db, get_store, init_db, set_store
+from backend.database.store import Record, Store, StoreUnavailableError
 
-__all__ = ["Base", "SessionLocal", "engine", "get_db", "init_db"]
+__all__ = ["get_db", "get_store", "init_db", "set_store", "Record", "Store", "StoreUnavailableError"]

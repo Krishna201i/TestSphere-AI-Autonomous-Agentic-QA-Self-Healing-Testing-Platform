@@ -11,9 +11,6 @@ Verifies:
 import unittest
 from unittest.mock import AsyncMock, patch
 from datetime import datetime, timezone
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from agents.planner.schemas import (
     Assertion,
@@ -21,11 +18,12 @@ from agents.planner.schemas import (
     TestStep as Member1TestStep,
 )
 from agents.schemas.enums import AssertionType, TestAction
-from backend.database.session import Base
-from backend.models.application import Application
-from backend.models.project import Project
-from backend.models.test_case import TestCase
-from backend.models.test_execution import TestExecution, TestExecutionStatus
+from backend.database.session import get_store
+from backend.models.test_execution import TestExecutionStatus
+from backend.services.application_service import ApplicationService
+from backend.services.project_service import ProjectService
+from backend.services.test_case_service import TestCaseService
+from backend.services.test_execution_service import TestExecutionService
 from backend.orchestration.converters import (
     engine_result_to_execution_result,
     map_action_to_engine,
@@ -191,46 +189,20 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
     """Test suite for PlatformWorkflowOrchestrator execution workflow."""
 
     def setUp(self) -> None:
-        self.engine = create_engine(
-            "sqlite:///:memory:",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
+        self.db = get_store()  # fresh in-memory store per test (conftest)
+        self.project = ProjectService.create_project(self.db, name="Orchestration Test Project")
+        self.app = ApplicationService.create_application(
+            self.db, self.project.id, name="Sample App", base_url="https://sample.local",
         )
-        Base.metadata.create_all(bind=self.engine)
-        self.Session = sessionmaker(bind=self.engine)
-        self.db = self.Session()
-
-        # Seed test data
-        self.project = Project(name="Orchestration Test Project")
-        self.db.add(self.project)
-        self.db.commit()
-
-        self.app = Application(
-            project_id=self.project.id,
-            name="Sample App",
-            base_url="https://sample.local",
+        self.tc = TestCaseService.create_test_case(
+            self.db, self.app.id, external_id="TC-LOGIN-001", name="Verify Login Screen",
         )
-        self.db.add(self.app)
-        self.db.commit()
-
-        self.tc = TestCase(
-            application_id=self.app.id,
-            external_id="TC-LOGIN-001",
-            name="Verify Login Screen",
+        self.execution = TestExecutionService.create_execution(
+            self.db, self.tc.id, status=TestExecutionStatus.PENDING,
         )
-        self.db.add(self.tc)
-        self.db.commit()
 
-        self.execution = TestExecution(
-            test_case_id=self.tc.id,
-            status=TestExecutionStatus.PENDING.value,
-        )
-        self.db.add(self.execution)
-        self.db.commit()
-
-    def tearDown(self) -> None:
-        self.db.close()
-        Base.metadata.drop_all(bind=self.engine)
+    def _reload_execution(self):
+        return TestExecutionService.get_execution(self.db, self.execution.id)
 
     def test_create_default_orchestrator(self) -> None:
         orch = create_default_orchestrator()
@@ -260,7 +232,7 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result["status"], "PASSED")
-        self.db.refresh(self.execution)
+        self.execution = self._reload_execution()
         self.assertEqual(self.execution.status, TestExecutionStatus.PASSED.value)
         self.assertEqual(self.execution.duration_ms, 150)
         self.assertIsNotNone(result["dashboard_summary"])
@@ -295,14 +267,15 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.assertIn('[data-testid="login-button"] -> #login-btn', result["error_message"])
         self.assertIn("confidence 0.87", result["error_message"])
         self.assertEqual(result["engine_steps"][0]["healing"]["selected_locator"], "#login-btn")
-        self.db.refresh(self.execution)
+        self.execution = self._reload_execution()
         self.assertEqual(self.execution.status, TestExecutionStatus.HEALED.value)
 
     @patch("backend.orchestration.orchestrator.run_test")
     async def test_browser_failure_is_never_reported_as_passed(self, mock_run_test: AsyncMock) -> None:
         # Even when the stored plain-HTTP page analysis succeeded
-        self.tc.description = '{"steps": [], "analysis": {"success": true, "latency_ms": 120}}'
-        self.db.commit()
+        TestCaseService.update_test_case(
+            self.db, self.tc.id, description='{"steps": [], "analysis": {"success": true, "latency_ms": 120}}',
+        )
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-LOGIN-001",
             status=TestStatus.FAILED,
@@ -323,7 +296,7 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["status"], "FAILED")
         self.assertTrue(result["error_message"].startswith("Not executed: the browser could not start"))
-        self.db.refresh(self.execution)
+        self.execution = self._reload_execution()
         self.assertEqual(self.execution.status, TestExecutionStatus.FAILED.value)
 
 

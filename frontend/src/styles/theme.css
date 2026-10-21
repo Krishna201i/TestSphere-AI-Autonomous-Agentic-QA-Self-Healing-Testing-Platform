@@ -75,6 +75,15 @@ a { color: var(--indigo-2); }
 .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--green); box-shadow: 0 0 0 3px rgba(58, 168, 100, 0.18); }
 .dot.off { background: var(--red); box-shadow: 0 0 0 3px rgba(217, 75, 75, 0.18); }
 .ok-text { color: var(--green); }
+.warn-text { color: #b26b00; }
+.dot.warn { background: var(--amber); box-shadow: 0 0 0 3px rgba(224, 160, 58, 0.2); }
+.alert-banner {
+  margin: 0 34px 18px; padding: 12px 16px;
+  border: 1px solid #f0c27a; border-radius: 12px;
+  background: #fff6e6; color: #6b4300; font-size: 14.5px;
+}
+.alert-banner b { color: #4a2e00; }
+@media (max-width: 640px) { .alert-banner { margin: 0 16px 14px; } }
 .bad-text { color: var(--red); }
 
 .navpills {

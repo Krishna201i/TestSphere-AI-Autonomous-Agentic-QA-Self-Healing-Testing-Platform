@@ -11,11 +11,8 @@ Validates:
 """
 
 import unittest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.database.session import Base
+from backend.database.session import get_store
 from backend.services.exceptions import ProjectNotFoundError
 from backend.services.project_service import ProjectService
 
@@ -25,20 +22,10 @@ class TestProjectService(unittest.TestCase):
 
     def setUp(self) -> None:
         """Create an isolated in-memory database and session."""
-        self.engine = create_engine(
-            "sqlite:///:memory:",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(bind=self.engine)
-        self.Session = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
-        self.session = self.Session()
+        self.session = get_store()
 
     def tearDown(self) -> None:
         """Clean up session and drop all tables."""
-        self.session.close()
-        Base.metadata.drop_all(bind=self.engine)
-        self.engine.dispose()
 
     def test_create_project(self) -> None:
         """Verify project creation persists and returns the instance."""
