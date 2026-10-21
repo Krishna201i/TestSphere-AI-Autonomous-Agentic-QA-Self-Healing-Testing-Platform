@@ -6,7 +6,7 @@ TestSphere-AI is designed to run in both local developer environments and contai
 
 ### Minimum Requirements:
 - **Operating System**: Linux (Ubuntu 22.04+ recommended), macOS, or Windows 10/11
-- **Python**: 3.10, 3.11, or 3.12
+- **Python**: 3.11 or 3.12 (`pyproject.toml` requires >= 3.11)
 - **Memory**: 4 GB RAM minimum (8 GB recommended when running headed Playwright browsers)
 - **Disk Space**: 2 GB free disk space for browser binaries and test artifact storage
 
@@ -52,6 +52,8 @@ All settings can be configured via environment variables or a `.env` file at rep
 ---
 
 ## 3. Docker Containerization
+
+> Example configuration. No `Dockerfile` or `docker-compose.yml` is committed yet; the live deployment uses Render (backend) and Vercel (frontend).
 
 ### 3.1 Dockerfile
 ```dockerfile
@@ -116,7 +118,7 @@ volumes:
 
 ## 4. Continuous Integration (CI/CD) Workflow
 
-Example GitHub Actions workflow running all 1,102 automated tests across Python 3.10, 3.11, and 3.12:
+Example GitHub Actions workflow (not yet committed under `.github/workflows/`) running the full offline test suite (1,246 tests) across Python 3.11 and 3.12:
 
 ```yaml
 name: TestSphere-AI CI
@@ -132,7 +134,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12"]
 
     steps:
     - uses: actions/checkout@v4
