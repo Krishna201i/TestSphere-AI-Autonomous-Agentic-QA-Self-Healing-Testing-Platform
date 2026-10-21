@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from backend.database.session import get_db
@@ -199,7 +200,7 @@ async def plan_and_execute_workflow(
                     + (f": {res['error_message']}" if res.get("error_message") else ""),
         )
         return res
-    except HTTPException:
+    except (HTTPException, OperationalError):
         raise
     except Exception as exc:
         raise HTTPException(
@@ -224,6 +225,8 @@ async def execute_test_workflow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         )
+    except OperationalError:
+        raise  # handled app-wide as 503 with a readable cause
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

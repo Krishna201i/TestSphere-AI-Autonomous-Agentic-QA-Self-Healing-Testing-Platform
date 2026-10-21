@@ -8,7 +8,9 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 import logging
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -25,6 +27,7 @@ from backend.api import (
     test_executions_router,
     workflow_router,
 )
+from backend.database.errors import describe_db_error
 from backend.database.session import init_db
 
 logger = logging.getLogger("testsphere.backend")
@@ -49,6 +52,15 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+
+@app.exception_handler(OperationalError)
+async def database_unavailable(_request: Request, exc: OperationalError) -> JSONResponse:
+    """Database connection failures: 503 with a readable cause instead of a raw driver dump."""
+    logger.error("Database error: %s", exc)
+    return JSONResponse(status_code=503, content={"detail": describe_db_error(exc)})
+
 
 # CORS Middleware setup
 app.add_middleware(

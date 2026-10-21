@@ -105,9 +105,17 @@ def create_memory_store() -> MemoryStore:
 
     if settings.AGENT_MEMORY_BACKEND == "memory":
         return InMemoryStore()
+    from sqlalchemy.exc import SQLAlchemyError
+
     from backend.database.session import engine
 
-    return PersistentMemoryStore(engine)
+    try:
+        return PersistentMemoryStore(engine)
+    except SQLAlchemyError as exc:
+        # Never let a database outage stop the API from starting; healing
+        # memory just isn't persisted until the backend restarts with a DB.
+        logger.error("Healing memory falling back to in-process storage (database unavailable): %s", exc)
+        return InMemoryStore()
 
 
 def create_default_orchestrator(memory_store: Optional[MemoryStore] = None) -> AgentOrchestrator:
