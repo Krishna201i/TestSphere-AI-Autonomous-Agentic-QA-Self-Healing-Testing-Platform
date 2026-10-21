@@ -38,6 +38,12 @@ class Settings(BaseSettings):
         default_factory=lambda: os.getenv("SECURITY_SCAN_ALLOWED_HOSTS", "")
     )
 
+    # Agent healing memory: "database" persists it (survives restarts),
+    # "memory" keeps it in-process only (tests).
+    AGENT_MEMORY_BACKEND: str = Field(
+        default_factory=lambda: os.getenv("AGENT_MEMORY_BACKEND", "database")
+    )
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

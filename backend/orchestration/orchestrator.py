@@ -16,6 +16,8 @@ from agents.llm import LLMClientSession, MockLLMProvider
 from agents.llm.config import LLMConfig
 from agents.llm.factory import create_llm_client
 from agents.memory.in_memory_store import InMemoryStore
+from agents.memory.memory_interface import MemoryStore
+from agents.memory.persistent_store import PersistentMemoryStore
 from agents.orchestration.agent_orchestrator import AgentOrchestrator
 from agents.orchestration.recovery_policy import (
     RecoveryAction,
@@ -97,13 +99,25 @@ def apply_healed_selector(
     return plan.model_copy(update={"steps": steps})
 
 
-def create_default_orchestrator() -> AgentOrchestrator:
+def create_memory_store() -> MemoryStore:
+    """Healing memory backend from ``AGENT_MEMORY_BACKEND`` (database by default)."""
+    from backend.config import settings
+
+    if settings.AGENT_MEMORY_BACKEND == "memory":
+        return InMemoryStore()
+    from backend.database.session import engine
+
+    return PersistentMemoryStore(engine)
+
+
+def create_default_orchestrator(memory_store: Optional[MemoryStore] = None) -> AgentOrchestrator:
     """Create a fully configured AgentOrchestrator.
 
     Uses the LLM provider from the environment (``LLM_PROVIDER``); the default
     ``mock`` provider is pre-loaded with the offline planner scenarios.
+    Healing memory persists across restarts unless ``AGENT_MEMORY_BACKEND=memory``.
     """
-    memory_store = InMemoryStore()
+    memory_store = memory_store or create_memory_store()
     config = LLMConfig.from_env()
     if config.provider == "mock":
         provider = MockLLMProvider(LLMConfig(provider="mock", model="mock-model", max_retries=0))
