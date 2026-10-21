@@ -315,7 +315,8 @@ class FirestoreStore(Store):
         except StoreUnavailableError:
             raise
         except Exception as exc:
-            logger.error("Firestore error: %s", exc)
+            # google-api errors carry ~30 lines of metadata; the first line is the useful part
+            logger.error("Firestore error: %s", (str(exc).splitlines() or [repr(exc)])[0][:300])
             raise StoreUnavailableError(describe_firestore_error(exc)) from exc
 
     def _next_id(self, collection: str) -> int:
