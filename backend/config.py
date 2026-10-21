@@ -44,6 +44,18 @@ class Settings(BaseSettings):
         default_factory=lambda: os.getenv("AGENT_MEMORY_BACKEND", "database")
     )
 
+    # Codebase ingestion: where clones go, which Git hosts may be cloned, and
+    # whether local folder paths are accepted (development only by default).
+    INGEST_WORKSPACE: str = Field(default_factory=lambda: os.getenv("INGEST_WORKSPACE", "./data/repos"))
+    INGEST_GIT_HOSTS: str = Field(
+        default_factory=lambda: os.getenv("INGEST_GIT_HOSTS", "github.com,gitlab.com,bitbucket.org")
+    )
+    INGEST_ALLOW_LOCAL_PATHS: bool = Field(
+        default_factory=lambda: os.getenv(
+            "INGEST_ALLOW_LOCAL_PATHS", "true" if os.getenv("APP_ENV", "development") == "development" else "false"
+        ).lower() in ("true", "1")
+    )
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
