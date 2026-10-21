@@ -75,7 +75,7 @@ export function ApprovalControls({ finding }) {
     }
   }
 
-  let state = <><Clock3 size={16} /> Auto-pilot off / Awaiting Human Auth</>;
+  let state = <><Clock3 size={16} /> Awaiting human approval</>;
   if (resolved) state = <><CheckCircle2 size={17} color="var(--green)" /> Retest passed · resolved <Check size={15} /></>;
   else if (approval) state = <><CheckCircle2 size={17} color="var(--green)" /> Approved by {approval.by} · {timeAgo(approval.at)}</>;
 

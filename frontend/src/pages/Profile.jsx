@@ -120,7 +120,7 @@ export default function Profile({ onNavigate }) {
             </div>
           )}
           <div className="popover-links">
-            <button type="button" className="tab" onClick={() => onNavigate('automation')}>Automation</button>
+            <button type="button" className="tab" onClick={() => onNavigate('autopilot')}>Autopilot</button>
             <button type="button" className="tab" onClick={() => onNavigate('audit', { query: name })}>My activity</button>
           </div>
         </section>

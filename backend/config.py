@@ -42,6 +42,14 @@ def _default_allow_local_paths() -> bool:
     return os.getenv("APP_ENV", "development") == "development" and not on_cloud
 
 
+def _default_allow_private_targets() -> bool:
+    explicit = os.getenv("ALLOW_PRIVATE_TARGETS")
+    if explicit is not None:
+        return explicit.lower() in ("true", "1")
+    on_cloud = any(os.getenv(marker) for marker in _CLOUD_MARKERS)
+    return os.getenv("APP_ENV", "development") == "development" and not on_cloud
+
+
 def _default_auth_required() -> bool:
     """Sign-in is required once Firebase is configured, unless explicitly turned off."""
     explicit = os.getenv("AUTH_REQUIRED")
@@ -130,6 +138,10 @@ class Settings(BaseSettings):
         default_factory=lambda: os.getenv("INGEST_GIT_HOSTS", "github.com,gitlab.com,bitbucket.org")
     )
     INGEST_ALLOW_LOCAL_PATHS: bool = Field(default_factory=lambda: _default_allow_local_paths())
+
+    # Whether tests and page analysis may target private/internal addresses
+    # (localhost, 10.x, 169.254.x ...). Off on hosted servers (SSRF), on in local development.
+    ALLOW_PRIVATE_TARGETS: bool = Field(default_factory=lambda: _default_allow_private_targets())
 
     model_config = {
         "env_file": ".env",

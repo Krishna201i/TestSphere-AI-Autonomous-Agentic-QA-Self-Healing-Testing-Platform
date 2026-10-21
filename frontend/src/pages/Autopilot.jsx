@@ -245,7 +245,7 @@ function ProjectRow({ project, latest, onRun, onChanged }) {
   );
 }
 
-export default function Automation() {
+export default function Autopilot() {
   const { projects, refresh, system } = useWorkspace();
   const [runs, setRuns] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -299,7 +299,7 @@ export default function Automation() {
     <div className="page">
       <div className="page-title">
         <div>
-          <h1>Automation</h1>
+          <h1>Autopilot</h1>
           <p>One pipeline from URL to report: codebase ingestion → page analysis → test planning → execution → self-healing → security scan → regression report. Run it on demand, on a schedule, or on every GitHub push.</p>
         </div>
       </div>
