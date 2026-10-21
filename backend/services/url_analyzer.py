@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from backend.netguard import guard_request
+
 logger = logging.getLogger("testsphere.analyzer")
 
 
@@ -62,6 +64,7 @@ class URLAnalyzerService:
                 timeout=12.0,
                 follow_redirects=True,
                 verify=False,
+                event_hooks={"request": [guard_request]},
             ) as client:
                 res = await client.get(
                     normalized_url,
