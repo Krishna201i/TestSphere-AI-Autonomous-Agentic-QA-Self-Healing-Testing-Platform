@@ -12,11 +12,11 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.database.session import get_db
-from backend.models.security import CodebaseBlueprint
+from backend.database.store import Record, Store
+from backend.models import BLUEPRINTS
 from backend.services.security_service import record_audit
 from ingestion import SourceError, analyze_repo, clone, is_git_url, repo_name, resolve_local
 
@@ -32,7 +32,7 @@ def _git_hosts() -> frozenset:
     return frozenset(h.strip().lower() for h in settings.INGEST_GIT_HOSTS.split(",") if h.strip())
 
 
-def _summary(row: CodebaseBlueprint) -> Dict[str, Any]:
+def _summary(row: Record) -> Dict[str, Any]:
     data = json.loads(row.data)
     langs = data.get("languages", {})
     return {
@@ -59,7 +59,7 @@ def _ingest(source: str) -> Dict[str, Any]:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def ingest(req: IngestRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def ingest(req: IngestRequest, db: Store = Depends(get_db)) -> Dict[str, Any]:
     """Fetch and analyze a codebase. Runs in a worker thread (cloning can take a while)."""
     source = req.source.strip()
     if not source:
@@ -70,10 +70,7 @@ def ingest(req: IngestRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
         record_audit(db, actor=req.actor, kind="ingest", level="error", message=f"Ingestion failed for {source}: {exc}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    row = CodebaseBlueprint(source=source, name=blueprint["name"], data=json.dumps(blueprint))
-    db.add(row)
-    db.commit()
-    db.refresh(row)
+    row = db.insert(BLUEPRINTS, source=source, name=blueprint["name"], data=json.dumps(blueprint))
     summary = _summary(row)
     record_audit(
         db, actor=req.actor, kind="ingest", level="warn" if summary["risks"] else "success", ref=str(row.id),
@@ -84,14 +81,14 @@ def ingest(req: IngestRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 
 @router.get("")
-def list_blueprints(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
-    rows = db.query(CodebaseBlueprint).order_by(CodebaseBlueprint.id.desc()).limit(50).all()
+def list_blueprints(db: Store = Depends(get_db)) -> List[Dict[str, Any]]:
+    rows = db.find(BLUEPRINTS, order_by="id", descending=True, limit=50)
     return [_summary(r) for r in rows]
 
 
 @router.get("/{blueprint_id}")
-def get_blueprint(blueprint_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    row = db.query(CodebaseBlueprint).filter(CodebaseBlueprint.id == blueprint_id).first()
+def get_blueprint(blueprint_id: int, db: Store = Depends(get_db)) -> Dict[str, Any]:
+    row = db.get(BLUEPRINTS, blueprint_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blueprint not found")
     return {"id": row.id, **json.loads(row.data)}

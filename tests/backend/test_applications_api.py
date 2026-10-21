@@ -15,11 +15,7 @@ Validates:
 
 import unittest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.database.session import Base, get_db
 from backend.main import app
 
 
@@ -28,24 +24,7 @@ class TestApplicationsAPI(unittest.TestCase):
 
     def setUp(self) -> None:
         """Set up an isolated in-memory test database and client."""
-        self.engine = create_engine(
-            "sqlite:///:memory:",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(bind=self.engine)
-        self.TestingSessionLocal = sessionmaker(
-            autocommit=False, autoflush=False, bind=self.engine
-        )
 
-        def override_get_db():
-            db = self.TestingSessionLocal()
-            try:
-                yield db
-            finally:
-                db.close()
-
-        app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
 
         # Create a sample project to attach applications to
@@ -55,8 +34,6 @@ class TestApplicationsAPI(unittest.TestCase):
     def tearDown(self) -> None:
         """Clean up database tables and reset dependency overrides."""
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(bind=self.engine)
-        self.engine.dispose()
 
     def test_create_application_success(self) -> None:
         """Verify creating an application returns 201 and payload."""

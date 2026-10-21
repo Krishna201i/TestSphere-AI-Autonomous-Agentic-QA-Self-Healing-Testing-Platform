@@ -1,73 +1,55 @@
 """
-TestSphere-AI — Database Session & Connection Management.
+TestSphere-AI — Storage provider.
 
-Configures database connection using SQLAlchemy.
-Defaults to local SQLite without creating unnecessary tables.
+Creates the configured ``Store`` once per process and hands it to route
+handlers through the ``get_db`` dependency (name kept for compatibility).
 """
 
-from typing import Generator
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
-from sqlalchemy.pool import StaticPool
+import logging
+import threading
+from typing import Generator, Optional
 
 from backend.config import settings
+from backend.database.store import Store, StoreUnavailableError, create_store
 
-# Engine setup
-connect_args = {}
-engine_kwargs = {}
-db_url = settings.DATABASE_URL
+logger = logging.getLogger("testsphere.database")
 
-# Normalize legacy postgres:// URI scheme to postgresql:// for SQLAlchemy
-if db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
-
-if db_url.startswith("sqlite"):
-    connect_args["check_same_thread"] = False
-else:
-    engine_kwargs["pool_pre_ping"] = True
-    engine_kwargs["pool_recycle"] = 300
-
-# For in-memory sqlite testing or standard file-based sqlite
-if db_url == "sqlite:///:memory:":
-    engine = create_engine(
-        db_url,
-        connect_args=connect_args,
-        poolclass=StaticPool,
-    )
-else:
-    engine = create_engine(
-        db_url,
-        connect_args=connect_args,
-        **engine_kwargs,
-    )
-
-# Session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Declarative Base for models (SQLAlchemy 2.0 style)
-class Base(DeclarativeBase):
-    pass
+_store: Optional[Store] = None
+_lock = threading.Lock()
 
 
-def get_db() -> Generator:
-    """Dependency provider for FastAPI route handlers."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def get_store() -> Store:
+    """The process-wide store; raises ``StoreUnavailableError`` if it cannot be created."""
+    global _store
+    if _store is None:
+        with _lock:
+            if _store is None:
+                _store = create_store(
+                    settings.DATABASE_BACKEND,
+                    local_path=settings.LOCAL_DB_PATH,
+                    credentials=settings.FIREBASE_CREDENTIALS or None,
+                    project_id=settings.FIREBASE_PROJECT_ID or None,
+                )
+                logger.info("Storage backend: %s", _store.name)
+    return _store
+
+
+def set_store(store: Optional[Store]) -> None:
+    """Replace the process-wide store (tests)."""
+    global _store
+    with _lock:
+        _store = store
+
+
+def get_db() -> Generator[Store, None, None]:
+    """FastAPI dependency yielding the store."""
+    yield get_store()
 
 
 def init_db() -> bool:
-    """Verify database connection and initialize Member 3 tables."""
+    """Verify the storage backend is reachable at startup."""
     try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        # Import models so Base.metadata discovers all Member 3 tables
-        import backend.models  # noqa: F401
-        Base.metadata.create_all(bind=engine)
-        # Dummy auto-seeding removed: platform starts clean with real live data only
+        get_store().ping()
         return True
-    except Exception as exc:
-        raise RuntimeError(f"Database initialization failed: {exc}") from exc
-
+    except StoreUnavailableError as exc:
+        raise RuntimeError(f"Storage initialization failed: {exc}") from exc

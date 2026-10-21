@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { WorkspaceProvider } from './state/Workspace';
+import { WorkspaceProvider, useWorkspace } from './state/Workspace';
+import { healthStats } from './lib/derive';
 import TopNav, { PAGES } from './components/TopNav';
 import CommandCenter from './pages/CommandCenter';
 import PipelineVisualizer from './pages/PipelineVisualizer';
@@ -7,6 +8,18 @@ import AttackerAgent from './pages/AttackerAgent';
 import RemediationBridge from './pages/RemediationBridge';
 import ValidationEngine from './pages/ValidationEngine';
 import AuditLogs from './pages/AuditLogs';
+
+/** Shown while the API is up but its database is not — explains why actions fail. */
+function DatabaseBanner() {
+  const { health } = useWorkspace();
+  const h = healthStats(health);
+  if (!h.dbDown) return null;
+  return (
+    <div className="alert-banner" role="alert">
+      <b>The backend cannot reach its database</b>, so saving and running tests will fail. {h.dbError}
+    </div>
+  );
+}
 
 const VIEWS = {
   command: CommandCenter,
@@ -48,6 +61,7 @@ export default function App() {
   return (
     <WorkspaceProvider>
       <TopNav page={page} onNavigate={navigate} />
+      <DatabaseBanner />
       <main>
         <View onNavigate={navigate} params={params} />
       </main>

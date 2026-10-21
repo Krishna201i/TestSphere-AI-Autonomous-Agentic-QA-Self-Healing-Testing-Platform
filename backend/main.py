@@ -8,7 +8,8 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 import logging
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -26,6 +27,7 @@ from backend.api import (
     workflow_router,
 )
 from backend.database.session import init_db
+from backend.database.store import StoreUnavailableError
 
 logger = logging.getLogger("testsphere.backend")
 
@@ -49,6 +51,15 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+
+@app.exception_handler(StoreUnavailableError)
+async def database_unavailable(_request: Request, exc: StoreUnavailableError) -> JSONResponse:
+    """Storage failures: 503 with a readable cause instead of a raw driver dump."""
+    logger.error("Database error: %s", exc)
+    return JSONResponse(status_code=503, content={"detail": f"Database unavailable: {exc}"})
+
 
 # CORS Middleware setup
 app.add_middleware(

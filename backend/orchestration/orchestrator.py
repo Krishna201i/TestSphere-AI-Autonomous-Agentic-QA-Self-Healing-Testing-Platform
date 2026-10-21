@@ -4,7 +4,6 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, List, Optional
-from sqlalchemy.orm import Session
 
 from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.healer.healing_decision import HealingDecisionEngine
@@ -51,9 +50,9 @@ from agents.schemas.member3_contract import (
     format_sse_event,
 )
 
-from backend.models.application import Application
-from backend.models.test_case import TestCase
-from backend.models.test_execution import TestExecution, TestExecutionStatus
+from backend.database.store import Store, StoreUnavailableError
+from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
+from backend.models.test_execution import TestExecutionStatus
 from backend.orchestration.converters import (
     engine_result_to_execution_result,
     test_case_to_engine_plan,
@@ -105,9 +104,15 @@ def create_memory_store() -> MemoryStore:
 
     if settings.AGENT_MEMORY_BACKEND == "memory":
         return InMemoryStore()
-    from backend.database.session import engine
+    from backend.database.session import get_store
 
-    return PersistentMemoryStore(engine)
+    try:
+        return PersistentMemoryStore(get_store())
+    except StoreUnavailableError as exc:
+        # Never let a database outage stop the API from starting; healing
+        # memory just isn't persisted until the backend restarts with a DB.
+        logger.error("Healing memory falling back to in-process storage (database unavailable): %s", exc)
+        return InMemoryStore()
 
 
 def create_default_orchestrator(memory_store: Optional[MemoryStore] = None) -> AgentOrchestrator:
@@ -165,7 +170,7 @@ class PlatformWorkflowOrchestrator:
 
     async def execute_test_run(
         self,
-        db: Session,
+        db: Store,
         execution_id: int,
         options: Optional[RunOptions] = None,
     ) -> Dict[str, Any]:
@@ -180,23 +185,21 @@ class PlatformWorkflowOrchestrator:
         7. Records feedback into memory and updates DB execution status.
         8. Returns dashboard summary and event stream.
         """
-        execution = db.query(TestExecution).filter(TestExecution.id == execution_id).first()
+        execution = db.get(TEST_EXECUTIONS, execution_id)
         if not execution:
             raise ValueError(f"TestExecution #{execution_id} not found")
 
-        test_case = db.query(TestCase).filter(TestCase.id == execution.test_case_id).first()
+        test_case = db.get(TEST_CASES, execution.test_case_id)
         if not test_case:
             raise ValueError(f"TestCase #{execution.test_case_id} not found")
 
-        app = db.query(Application).filter(Application.id == test_case.application_id).first()
+        app = db.get(APPLICATIONS, test_case.application_id)
         if not app:
             raise ValueError(f"Application #{test_case.application_id} not found")
 
         # Mark as RUNNING
         start_time = datetime.now(timezone.utc)
-        execution.status = TestExecutionStatus.RUNNING.value
-        execution.started_at = start_time
-        db.commit()
+        execution = db.update(TEST_EXECUTIONS, execution.id, status=TestExecutionStatus.RUNNING.value, started_at=start_time)
 
         # Build application context
         app_context = ApplicationContext(
@@ -407,12 +410,10 @@ class PlatformWorkflowOrchestrator:
 
         # Update database execution record
         end_time = datetime.now(timezone.utc)
-        execution.status = final_status
-        execution.completed_at = end_time
-        execution.duration_ms = duration_ms
-        execution.error_message = error_msg
-        db.commit()
-        db.refresh(execution)
+        execution = db.update(
+            TEST_EXECUTIONS, execution.id,
+            status=final_status, completed_at=end_time, duration_ms=duration_ms, error_message=error_msg,
+        )
 
         # Retrieve AI state & dashboard summary
         state = self.ai_orchestrator.get_state(workflow_id)

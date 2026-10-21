@@ -10,13 +10,14 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
 
 from backend.database.session import get_db
-from backend.models.application import Application
-from backend.models.project import Project
-from backend.models.test_case import TestCase
-from backend.models.test_execution import TestExecution, TestExecutionStatus
+from backend.database.store import Store, StoreUnavailableError
+from backend.models import APPLICATIONS, TEST_CASES
+from backend.models.test_execution import TestExecutionStatus
+from backend.services.application_service import default_project
+from backend.services.test_case_service import TestCaseService
+from backend.services.test_execution_service import TestExecutionService
 from backend.orchestration.orchestrator import PlatformWorkflowOrchestrator
 from backend.services.security_service import record_audit
 from backend.services.url_analyzer import URLAnalyzerService
@@ -57,7 +58,7 @@ async def analyze_url_endpoint(req: AnalyzeURLRequest) -> Dict[str, Any]:
 @router.post("/plan-and-execute", status_code=status.HTTP_200_OK)
 async def plan_and_execute_workflow(
     payload: Optional[PlanAndExecuteRequest] = None,
-    db: Session = Depends(get_db),
+    db: Store = Depends(get_db),
 ) -> Dict[str, Any]:
     """Autonomous plan and execute workflow endpoint.
     
@@ -69,7 +70,7 @@ async def plan_and_execute_workflow(
     try:
         live_analysis = None
         if req.test_case_id:
-            tc = db.query(TestCase).filter(TestCase.id == req.test_case_id).first()
+            tc = db.get(TEST_CASES, req.test_case_id)
             if not tc:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -102,15 +103,7 @@ async def plan_and_execute_workflow(
                 )
 
             # Locate or create project
-            proj = db.query(Project).first()
-            if not proj:
-                proj = Project(
-                    name="TestSphere Auto QA",
-                    description="Autonomous agentic QA testing workspace",
-                )
-                db.add(proj)
-                db.commit()
-                db.refresh(proj)
+            proj = default_project(db)
 
             # Determine application name and URL
             resolved_app_name = req.app_name
@@ -122,31 +115,22 @@ async def plan_and_execute_workflow(
 
             # Locate or create application
             if req.application_id:
-                app_entity = (
-                    db.query(Application)
-                    .filter(Application.id == req.application_id)
-                    .first()
-                )
+                app_entity = db.get(APPLICATIONS, req.application_id)
                 if not app_entity:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"Application #{req.application_id} not found",
                     )
             else:
-                app_entity = (
-                    db.query(Application)
-                    .filter(Application.name == resolved_app_name)
-                    .first()
-                )
+                app_entity = db.find_one(APPLICATIONS, name=resolved_app_name) if resolved_app_name else None
                 if not app_entity:
-                    app_entity = Application(
+                    app_entity = db.insert(
+                        APPLICATIONS,
                         project_id=proj.id,
                         name=resolved_app_name or "Demo Application",
                         base_url=resolved_app_url,
+                        description=None,
                     )
-                    db.add(app_entity)
-                    db.commit()
-                    db.refresh(app_entity)
 
             # Determine executable test steps
             effective_steps = req.steps
@@ -163,24 +147,16 @@ async def plan_and_execute_workflow(
                 "prompt": req.prompt,
             })
 
-            tc = TestCase(
+            tc = TestCaseService.create_test_case(
+                db,
                 application_id=app_entity.id,
                 name=resolved_tc_name or "Autonomous Planned Test Case",
                 description=desc_content,
                 external_id=f"tc-auto-{app_entity.id}",
             )
-            db.add(tc)
-            db.commit()
-            db.refresh(tc)
 
         # Create execution record
-        execution = TestExecution(
-            test_case_id=tc.id,
-            status=TestExecutionStatus.PENDING.value,
-        )
-        db.add(execution)
-        db.commit()
-        db.refresh(execution)
+        execution = TestExecutionService.create_execution(db, test_case_id=tc.id, status=TestExecutionStatus.PENDING)
 
         res = await _workflow_orchestrator.execute_test_run(
             db=db,
@@ -199,7 +175,7 @@ async def plan_and_execute_workflow(
                     + (f": {res['error_message']}" if res.get("error_message") else ""),
         )
         return res
-    except HTTPException:
+    except (HTTPException, StoreUnavailableError):
         raise
     except Exception as exc:
         raise HTTPException(
@@ -211,7 +187,7 @@ async def plan_and_execute_workflow(
 @router.post("/execute/{execution_id}", status_code=status.HTTP_200_OK)
 async def execute_test_workflow(
     execution_id: int,
-    db: Session = Depends(get_db),
+    db: Store = Depends(get_db),
 ) -> Dict[str, Any]:
     """Execute a test execution run with autonomous AI diagnosis and self-healing."""
     try:
@@ -224,6 +200,8 @@ async def execute_test_workflow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         )
+    except StoreUnavailableError:
+        raise  # handled app-wide as 503 with a readable cause
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

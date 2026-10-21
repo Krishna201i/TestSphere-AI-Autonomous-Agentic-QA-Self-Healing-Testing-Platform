@@ -10,7 +10,7 @@ export function HealthWaveformBox() {
   return (
     <div className="subbox">
       <div className="wave-head">
-        <h4>{h.online ? '200 OK' : 'Backend Unreachable'} Health Waveform</h4>
+        <h4>{!h.online ? 'Backend Unreachable' : h.dbDown ? 'Degraded (database down)' : '200 OK'} Health Waveform</h4>
         <span className="meta">
           Response Time: <b>{h.latency == null ? '—' : `${h.latency}ms`}</b>{'  '}
           Success Rate: <b>{pct(h.successRate)}</b>
