@@ -173,3 +173,46 @@ class TestWorkflowAPI(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class TestPlanFromErrorPage(unittest.TestCase):
+    """A target that fails to load must not produce a synthesized (passing) test."""
+
+    def setUp(self) -> None:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+        import backend.models  # noqa: F401
+        from backend.database.session import Base, get_db
+
+        engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(bind=engine)
+        Session = sessionmaker(bind=engine)
+
+        def override_db():
+            db = Session()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db] = override_db
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        app.dependency_overrides.clear()
+
+    @patch("backend.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
+    def test_404_target_is_refused(self, mock_analyze: AsyncMock) -> None:
+        mock_analyze.return_value = {"success": False, "status_code": 404, "page_title": "Error response"}
+        res = self.client.post("/api/workflow/plan-and-execute", json={"app_url": "http://127.0.0.1:1/missing"})
+        self.assertEqual(res.status_code, 422)
+        self.assertIn("HTTP 404", res.json()["detail"])
+        self.assertEqual(self.client.get("/api/test-cases").json(), [])
+
+    @patch("backend.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
+    def test_unreachable_target_is_refused(self, mock_analyze: AsyncMock) -> None:
+        mock_analyze.side_effect = RuntimeError("connection refused")
+        res = self.client.post("/api/workflow/plan-and-execute", json={"app_url": "http://127.0.0.1:1/"})
+        self.assertEqual(res.status_code, 422)
+        self.assertIn("unreachable", res.json()["detail"])

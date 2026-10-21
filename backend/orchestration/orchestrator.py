@@ -14,7 +14,10 @@ from agents.healer.healing_feedback import (
 )
 from agents.llm import LLMClientSession, MockLLMProvider
 from agents.llm.config import LLMConfig
+from agents.llm.factory import create_llm_client
 from agents.memory.in_memory_store import InMemoryStore
+from agents.memory.memory_interface import MemoryStore
+from agents.memory.persistent_store import PersistentMemoryStore
 from agents.orchestration.agent_orchestrator import AgentOrchestrator
 from agents.orchestration.recovery_policy import (
     RecoveryAction,
@@ -68,13 +71,61 @@ from engine.schemas import (
 logger = logging.getLogger("testsphere.orchestration")
 
 
-def create_default_orchestrator() -> AgentOrchestrator:
-    """Create a fully configured AgentOrchestrator with offline mock intelligence."""
-    memory_store = InMemoryStore()
-    config = LLMConfig(provider="mock", model="mock-model", max_retries=0)
-    provider = MockLLMProvider(config)
-    register_planner_scenarios(provider)
-    llm_session = LLMClientSession(provider=provider)
+def apply_healed_selector(
+    plan: EngineTestPlan,
+    broken_selector: str,
+    failed_step: int,
+    healed_selector: str,
+) -> EngineTestPlan:
+    """Return a copy of *plan* with the healed selector on the broken step(s) only.
+
+    Steps whose primary locator equals *broken_selector* are updated; if none
+    match, only the step that failed (1-based *failed_step*) is.  Every other
+    step keeps its own locator.
+    """
+    matches = [
+        bool(broken_selector) and st.target is not None and st.target.primary_locator == broken_selector
+        for st in plan.steps
+    ]
+    if not any(matches):
+        matches = [idx == failed_step - 1 and st.target is not None for idx, st in enumerate(plan.steps)]
+
+    steps: List[EngineStep] = []
+    for step, hit in zip(plan.steps, matches):
+        step_copy = step.model_copy(deep=True)
+        if hit:
+            step_copy.target.primary_locator = healed_selector
+        steps.append(step_copy)
+    return plan.model_copy(update={"steps": steps})
+
+
+def create_memory_store() -> MemoryStore:
+    """Healing memory backend from ``AGENT_MEMORY_BACKEND`` (database by default)."""
+    from backend.config import settings
+
+    if settings.AGENT_MEMORY_BACKEND == "memory":
+        return InMemoryStore()
+    from backend.database.session import engine
+
+    return PersistentMemoryStore(engine)
+
+
+def create_default_orchestrator(memory_store: Optional[MemoryStore] = None) -> AgentOrchestrator:
+    """Create a fully configured AgentOrchestrator.
+
+    Uses the LLM provider from the environment (``LLM_PROVIDER``); the default
+    ``mock`` provider is pre-loaded with the offline planner scenarios.
+    Healing memory persists across restarts unless ``AGENT_MEMORY_BACKEND=memory``.
+    """
+    memory_store = memory_store or create_memory_store()
+    config = LLMConfig.from_env()
+    if config.provider == "mock":
+        provider = MockLLMProvider(LLMConfig(provider="mock", model="mock-model", max_retries=0))
+        register_planner_scenarios(provider)
+        llm_session = LLMClientSession(provider=provider)
+    else:
+        llm_session = create_llm_client(config)
+    logger.info("Platform orchestrator using LLM provider: %s", llm_session.provider_name)
 
     failure_analyzer = FailureAnalyzerAgent(memory_store=memory_store)
     healing_engine = HealingDecisionEngine(
@@ -269,6 +320,15 @@ class PlatformWorkflowOrchestrator:
 
         if exec_result.status == ExecutionResultStatus.SUCCESS:
             final_status = TestExecutionStatus.PASSED.value
+            if engine_result.status == TestStatus.HEALED:
+                # The engine healed one or more locators mid-run; keep that visible
+                final_status = TestExecutionStatus.HEALED.value
+                error_msg = "; ".join(
+                    f"Self-healed {st.healing.original_locator} -> {st.healing.selected_locator} "
+                    f"({st.healing.strategy_used}, confidence {st.healing.confidence:.2f})"
+                    for st in engine_result.steps
+                    if st.status == StepStatus.HEALED and st.healing
+                )
             state = await self.ai_orchestrator.submit_execution_result(state, exec_result)
         else:
             # Failure detected -> delegate to Member 1 AI intelligence
@@ -286,15 +346,13 @@ class PlatformWorkflowOrchestrator:
                     "Self-healing proposed replacement selector: %s. Validating with engine...",
                     recommendation.target_selector,
                 )
-                # Build healed plan with replacement selector
-                healed_steps: List[EngineStep] = []
-                for s in engine_plan.steps:
-                    step_copy = s.model_copy(deep=True)
-                    if step_copy.target:
-                        step_copy.target.primary_locator = recommendation.target_selector
-                    healed_steps.append(step_copy)
-
-                healed_plan = engine_plan.model_copy(update={"steps": healed_steps})
+                fc = exec_result.failure_context
+                healed_plan = apply_healed_selector(
+                    engine_plan,
+                    broken_selector=recommendation.original_selector or (fc.target_selector if fc else ""),
+                    failed_step=fc.failed_step if fc else 0,
+                    healed_selector=recommendation.target_selector,
+                )
                 validation_result = await run_test(healed_plan, options=run_opts)
 
                 validation_success = validation_result.status in (
@@ -336,19 +394,16 @@ class PlatformWorkflowOrchestrator:
                     or "Test execution failed"
                 )
 
-        # Fallback: if browser execution failed due to environment (missing binaries on container)
-        # but real live website inspection succeeded, mark as PASSED and record real live latency & events.
-        if (
-            final_status != TestExecutionStatus.PASSED.value
-            and error_msg
-            and "Browser execution error" in error_msg
-            and analysis_data
-            and analysis_data.get("success")
-        ):
-            logger.info("Playwright browser binary not found on container; verified via real HTTP-DOM live inspection.")
-            final_status = TestExecutionStatus.PASSED.value
-            error_msg = None
-            duration_ms = analysis_data.get("latency_ms", 750)
+        # The browser could not start (e.g. Chromium missing on the host): no
+        # step ran, so this is a failure — never report it as passed, even if
+        # the plain-HTTP page inspection worked.
+        if error_msg and "Browser execution error" in error_msg:
+            final_status = TestExecutionStatus.FAILED.value
+            error_msg = (
+                "Not executed: the browser could not start on this server, so no test steps ran. "
+                "Install it with `python -m playwright install --with-deps chromium`. "
+                f"Details: {error_msg}"
+            )
 
         # Update database execution record
         end_time = datetime.now(timezone.utc)
@@ -380,6 +435,7 @@ class PlatformWorkflowOrchestrator:
             "error_message": error_msg,
             "dashboard_summary": dashboard_summary.model_dump(),
             "events": [e.model_dump() for e in (state.events if state else [])],
+            "engine_steps": [st.model_dump(mode="json") for st in engine_result.steps],
             "analysis": analysis_data,
         }
 

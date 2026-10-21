@@ -116,7 +116,11 @@ _INTERACTIVE_SELECTORS = [
 # ---------------------------------------------------------------------------
 
 
-async def build_fingerprint(page: Page, locator_str: str) -> ElementFingerprint | None:
+async def build_fingerprint(
+    page: Page,
+    locator_str: str,
+    timeout_ms: float = 2_000,
+) -> ElementFingerprint | None:
     """
     Capture a rich ``ElementFingerprint`` for the element matched by *locator_str*.
 
@@ -130,6 +134,9 @@ async def build_fingerprint(page: Page, locator_str: str) -> ElementFingerprint 
         The Playwright page on which to locate the element.
     locator_str:
         Any valid Playwright locator (``#id``, ``//xpath``, ``[role=...]``, …).
+    timeout_ms:
+        How long to wait for the element.  Kept short: callers fingerprint
+        elements they expect to be present, so a miss should fail fast.
 
     Returns
     -------
@@ -139,9 +146,9 @@ async def build_fingerprint(page: Page, locator_str: str) -> ElementFingerprint 
     try:
         locator = page.locator(locator_str).first
 
-        info: dict = await locator.evaluate(_FINGERPRINT_JS)
+        info: dict = await locator.evaluate(_FINGERPRINT_JS, timeout=timeout_ms)
 
-        bb_raw = await locator.bounding_box()
+        bb_raw = await locator.bounding_box(timeout=timeout_ms)
         bbox = BoundingBox(**bb_raw) if bb_raw else None
 
         return ElementFingerprint(

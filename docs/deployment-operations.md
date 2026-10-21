@@ -6,7 +6,7 @@ TestSphere-AI is designed to run in both local developer environments and contai
 
 ### Minimum Requirements:
 - **Operating System**: Linux (Ubuntu 22.04+ recommended), macOS, or Windows 10/11
-- **Python**: 3.10, 3.11, or 3.12
+- **Python**: 3.11 or 3.12 (`pyproject.toml` requires >= 3.11)
 - **Memory**: 4 GB RAM minimum (8 GB recommended when running headed Playwright browsers)
 - **Disk Space**: 2 GB free disk space for browser binaries and test artifact storage
 
@@ -28,13 +28,19 @@ All settings can be configured via environment variables or a `.env` file at rep
 ### 2.2 AI Agent Settings
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `LLM_PROVIDER` | `mock` | LLM provider: `mock`, `openai`, `anthropic`, `gemini` |
-| `OPENAI_API_KEY` | `""` | OpenAI API key (required if `LLM_PROVIDER=openai`) |
-| `ANTHROPIC_API_KEY` | `""` | Anthropic API key (required if `LLM_PROVIDER=anthropic`) |
-| `GEMINI_API_KEY` | `""` | Google Gemini API key (required if `LLM_PROVIDER=gemini`) |
-| `LLM_MODEL` | `gpt-4o` | LLM model identifier |
-| `LLM_TEMPERATURE` | `0.1` | Sampling temperature for test synthesis and healing decisions |
-| `LLM_MAX_RETRIES` | `3` | Maximum LLM client retry attempts before error escalation |
+| `LLM_PROVIDER` | `mock` | `mock` (offline, deterministic) or `api` (any OpenAI-compatible chat API). `local` is reserved, not yet implemented |
+| `LLM_API_KEY` | `""` | API key for the configured endpoint (required if `LLM_PROVIDER=api`) |
+| `LLM_BASE_URL` | OpenAI | Base URL of the OpenAI-compatible endpoint (OpenAI, Anthropic, Gemini, Groq, OpenRouter) |
+| `LLM_MODEL` | `mock-model` | Model identifier sent to the endpoint |
+| `LLM_TEMPERATURE` | `0.2` | Sampling temperature for test synthesis and healing decisions |
+| `LLM_MAX_TOKENS` | `4096` | Max output tokens per request |
+| `LLM_TIMEOUT` | `60` | Request timeout in seconds |
+| `LLM_MAX_RETRIES` | `2` | Retries for transient errors (timeouts, 429, 5xx, network) |
+| `AGENT_MEMORY_BACKEND` | `database` | `database` persists healing memory in `DATABASE_URL` (survives restarts); `memory` keeps it in-process |
+| `INGEST_WORKSPACE` | `./data/repos` | Where ingested repositories are cloned |
+| `INGEST_GIT_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts public repositories may be cloned from (https only) |
+| `INGEST_ALLOW_LOCAL_PATHS` | `true` locally in development; `false` on Render/Heroku/Railway/Fly/Cloud Run unless set | Accept local folder paths for ingestion (reads the server's disk); never enable on a public server |
+| `SECURITY_SCAN_ALLOWED_HOSTS` | `""` | Extra hosts the passive scanner may contact (loopback always allowed) |
 
 ### 2.3 Browser Engine Settings
 | Variable | Default Value | Description |
@@ -49,6 +55,8 @@ All settings can be configured via environment variables or a `.env` file at rep
 ---
 
 ## 3. Docker Containerization
+
+> Example configuration. No `Dockerfile` or `docker-compose.yml` is committed yet; the live deployment uses Render (backend) and Vercel (frontend).
 
 ### 3.1 Dockerfile
 ```dockerfile
@@ -113,7 +121,7 @@ volumes:
 
 ## 4. Continuous Integration (CI/CD) Workflow
 
-Example GitHub Actions workflow running all 1,102 automated tests across Python 3.10, 3.11, and 3.12:
+Example GitHub Actions workflow (not yet committed under `.github/workflows/`) running the full offline test suite (1,246 tests) across Python 3.11 and 3.12:
 
 ```yaml
 name: TestSphere-AI CI
@@ -129,7 +137,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12"]
 
     steps:
     - uses: actions/checkout@v4

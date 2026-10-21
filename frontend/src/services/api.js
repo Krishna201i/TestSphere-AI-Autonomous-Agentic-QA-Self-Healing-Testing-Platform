@@ -1,222 +1,86 @@
 /**
- * TestSphere-AI — API Client & Telemetry Stream Bridge
+ * TestSphere-AI — API client for the FastAPI backend.
+ *
+ * Base URL: VITE_API_URL when set; same-origin when served by Vite (proxy,
+ * port 3000) or by the backend itself (port 8000); otherwise 127.0.0.1:8000.
  */
 
 function getApiBase() {
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL.replace(/\/$/, '');
-  }
-  if (typeof window !== 'undefined') {
-    // If the browser is on port 8000 or Vite dev server on port 3000 with proxy
-    if (window.location.port === '8000' || window.location.port === '3000') {
-      return '';
-    }
-  }
-  // Otherwise, default directly to the FastAPI backend running on 127.0.0.1:8000
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL.replace(/\/$/, '');
+  if (typeof window !== 'undefined' && ['3000', '8000'].includes(window.location.port)) return '';
   return 'http://127.0.0.1:8000';
 }
 
 const BASE_URL = getApiBase();
 
+/** Where the dashboard sends API calls, for display ("same origin" when proxied). */
+export const API_BASE_LABEL = BASE_URL || (typeof window !== 'undefined' ? `${window.location.origin} (same origin)` : 'same origin');
+
 /**
- * Fetch with automatic fallback directly to http://127.0.0.1:8000
+ * Fetch JSON from the backend.  Errors carry a `kind` the UI can explain:
+ *   network  — backend unreachable
+ *   outdated — endpoint missing (backend runs older code than the dashboard)
+ *   refused  — 403 (e.g. target outside the authorized scope)
+ *   http     — anything else; `message` is the server's detail
  */
-async function fetchWithFallback(endpoint, options = {}) {
-  const url = `${BASE_URL}${endpoint}`;
+async function request(path, { method = 'GET', body } = {}) {
+  let res;
   try {
-    const res = await fetch(url, options);
-    if (res.ok) return res;
-  } catch (err) {
-    if (!url.startsWith('http://127.0.0.1:8000')) {
-      const fallbackUrl = `http://127.0.0.1:8000${endpoint}`;
-      try {
-        const res2 = await fetch(fallbackUrl, options);
-        if (res2.ok) return res2;
-      } catch (err2) {
-        throw err2;
-      }
-    }
+    res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    const err = new Error(`Cannot reach the backend at ${API_BASE_LABEL}. Is it running?`);
+    err.kind = 'network';
     throw err;
   }
-  // If response not ok, try fallback
-  if (!url.startsWith('http://127.0.0.1:8000')) {
-    try {
-      const fallbackUrl = `http://127.0.0.1:8000${endpoint}`;
-      const res2 = await fetch(fallbackUrl, options);
-      if (res2.ok) return res2;
-    } catch {
-      // ignore
-    }
-  }
-  return await fetch(url, options);
-}
-
-export async function checkBackendHealth() {
-  try {
-    const res = await fetchWithFallback('/api/health');
-    if (!res.ok) throw new Error(`Health check returned status ${res.status}`);
-    const data = await res.json();
-    return data;
-  } catch (err) {
-    console.warn('Backend health check offline:', err.message);
-    return null;
-  }
-}
-
-export async function getProjects() {
-  try {
-    const res = await fetchWithFallback('/api/projects');
-    if (!res.ok) throw new Error(`Failed to fetch projects`);
-    return await res.json();
-  } catch (err) {
-    console.warn('Error fetching projects:', err.message);
-    return [];
-  }
-}
-
-export async function createProject(payload) {
-  const res = await fetchWithFallback('/api/projects', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error('Failed to create project');
-  return await res.json();
-}
-
-export async function getApplications(projectId = null) {
-  try {
-    const endpoint = projectId 
-      ? `/api/applications?project_id=${projectId}` 
-      : `/api/applications`;
-    const res = await fetchWithFallback(endpoint);
-    if (!res.ok) throw new Error(`Failed to fetch applications`);
-    return await res.json();
-  } catch (err) {
-    console.warn('Error fetching applications:', err.message);
-    return [];
-  }
-}
-
-export async function createApplication(payload) {
-  const res = await fetchWithFallback('/api/applications', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error('Failed to create application');
-  return await res.json();
-}
-
-export async function getTestCases(appId = null) {
-  try {
-    const endpoint = appId 
-      ? `/api/test-cases?application_id=${appId}` 
-      : `/api/test-cases`;
-    const res = await fetchWithFallback(endpoint);
-    if (!res.ok) throw new Error(`Failed to fetch test cases`);
-    return await res.json();
-  } catch (err) {
-    console.warn('Error fetching test cases:', err.message);
-    return [];
-  }
-}
-
-export async function getTestExecutions() {
-  try {
-    const res = await fetchWithFallback('/api/test-executions');
-    if (!res.ok) throw new Error(`Failed to fetch test executions`);
-    return await res.json();
-  } catch (err) {
-    console.warn('Error fetching test executions:', err.message);
-    return [];
-  }
-}
-
-export async function planAndExecuteWorkflow(payload) {
-  const res = await fetchWithFallback('/api/workflow/plan-and-execute', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.detail || `Execution failed with status ${res.status}`);
-  }
-
-  return await res.json();
-}
-
-export async function analyzeWebsiteUrl(url, prompt = null, testCaseName = null) {
-  const res = await fetchWithFallback('/api/workflow/analyze', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      url,
-      prompt,
-      test_case_name: testCaseName,
-    }),
-  });
-
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.detail || `Analysis failed with status ${res.status}`);
-  }
-
-  return await res.json();
-}
-
-export function subscribeToWorkflowStream(workflowId, onEvent, onError) {
-  const sseBase = BASE_URL || 'http://127.0.0.1:8000';
-  const sseUrl = `${sseBase}/api/workflow/stream/${workflowId}`;
-  const eventSource = new EventSource(sseUrl);
-
-  const eventTypes = [
-    'WORKFLOW_STARTED',
-    'TEST_PLAN_GENERATED',
-    'EXECUTION_RESULT_RECEIVED',
-    'FAILURE_ANALYSIS_COMPLETED',
-    'CANDIDATES_GENERATED',
-    'CANDIDATES_RANKED',
-    'HEALING_DECISION_CREATED',
-    'HEALING_RECOMMENDATION_SENT',
-    'HEALING_RESULT_RECEIVED',
-    'WORKFLOW_COMPLETED',
-    'STATE_TRANSITION',
-    'ping'
-  ];
-
-  eventTypes.forEach(type => {
-    eventSource.addEventListener(type, (e) => {
-      try {
-        const parsed = JSON.parse(e.data);
-        onEvent({ type, data: parsed });
-      } catch {
-        onEvent({ type, data: e.data });
-      }
-    });
-  });
-
-  eventSource.onmessage = (e) => {
-    try {
-      const parsed = JSON.parse(e.data);
-      onEvent({ type: 'message', data: parsed });
-    } catch {
-      onEvent({ type: 'message', data: e.data });
+    const data = await res.json().catch(() => ({}));
+    let detail = typeof data.detail === 'string' ? data.detail : `Request failed (${res.status})`;
+    let kind = res.status === 403 ? 'refused' : 'http';
+    if (res.status === 404 && (data.detail === 'Not Found' || !data.detail)) {
+      kind = 'outdated';
+      detail = `The backend at ${API_BASE_LABEL} has no ${path.split('?')[0]} endpoint — it is running an older version. Deploy or restart it with the latest code.`;
     }
-  };
-
-  eventSource.onerror = (err) => {
-    if (onError) onError(err);
-    eventSource.close();
-  };
-
-  return () => {
-    eventSource.close();
-  };
+    const err = new Error(detail);
+    err.status = res.status;
+    err.kind = kind;
+    throw err;
+  }
+  return res.status === 204 ? null : res.json();
 }
+
+/** Health probe that also measures round-trip latency. */
+export async function probeHealth() {
+  const started = performance.now();
+  try {
+    const data = await request('/api/health');
+    return { ok: data?.status === 'ok', ms: Math.round(performance.now() - started) };
+  } catch {
+    return { ok: false, ms: Math.round(performance.now() - started) };
+  }
+}
+
+export const getProjects = () => request('/api/projects');
+export const createProject = (payload) => request('/api/projects', { method: 'POST', body: payload });
+export const getApplications = () => request('/api/applications');
+export const createApplication = (payload) => request('/api/applications', { method: 'POST', body: payload });
+export const getTestCases = () => request('/api/test-cases');
+export const getTestExecutions = () => request('/api/test-executions');
+
+export const planAndExecute = (payload) =>
+  request('/api/workflow/plan-and-execute', { method: 'POST', body: payload });
+
+export const securityScan = (url, actor) => request('/api/security/scan', { method: 'POST', body: { url, actor } });
+export const getFindings = () => request('/api/security/findings');
+export const approveFinding = (key, actor) =>
+  request(`/api/security/findings/${encodeURIComponent(key)}/approve`, { method: 'POST', body: { actor } });
+export const retestFinding = (key, actor) =>
+  request(`/api/security/findings/${encodeURIComponent(key)}/retest`, { method: 'POST', body: { actor } });
+export const getAudit = (limit = 300) => request(`/api/audit?limit=${limit}`);
+export const getSystem = () => request('/api/system');
+export const ingestCodebase = (source, actor) => request('/api/ingest', { method: 'POST', body: { source, actor } });
+export const listBlueprints = () => request('/api/ingest');
+export const getBlueprint = (id) => request(`/api/ingest/${id}`);

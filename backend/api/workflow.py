@@ -18,6 +18,7 @@ from backend.models.project import Project
 from backend.models.test_case import TestCase
 from backend.models.test_execution import TestExecution, TestExecutionStatus
 from backend.orchestration.orchestrator import PlatformWorkflowOrchestrator
+from backend.services.security_service import record_audit
 from backend.services.url_analyzer import URLAnalyzerService
 from engine.schemas import RunOptions
 
@@ -85,6 +86,20 @@ async def plan_and_execute_workflow(
                 )
             except Exception as exc:
                 live_analysis = None
+
+            # Never synthesize tests from a page that failed to load: a 404 page
+            # would yield a test asserting "Not Found" and pass.
+            if not req.steps and not (live_analysis and live_analysis.get("success")):
+                reason = (
+                    f"HTTP {live_analysis.get('status_code')}" if live_analysis and live_analysis.get("status_code")
+                    else (live_analysis or {}).get("error") or "unreachable"
+                )
+                record_audit(db, actor="dev_active", kind="qa", level="error",
+                             message=f"QA run refused: {target_url} did not load ({reason})")
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Could not load {target_url} ({reason}). Check the URL — no tests were planned from an error page.",
+                )
 
             # Locate or create project
             proj = db.query(Project).first()
@@ -176,6 +191,13 @@ async def plan_and_execute_workflow(
         if live_analysis and "analysis" not in res:
             res["analysis"] = live_analysis
 
+        run_status = res.get("status", "UNKNOWN")
+        record_audit(
+            db, actor="dev_active", kind="qa", ref=str(execution.id),
+            level={"FAILED": "error", "HEALED": "warn", "PASSED": "success"}.get(run_status, "info"),
+            message=f"QA run #{execution.id} ({tc.name}) -> {run_status}"
+                    + (f": {res['error_message']}" if res.get("error_message") else ""),
+        )
         return res
     except HTTPException:
         raise
