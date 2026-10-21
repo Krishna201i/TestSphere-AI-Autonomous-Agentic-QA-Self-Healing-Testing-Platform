@@ -18,9 +18,13 @@ Responsibilities
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import subprocess
+import sys
+import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 try:
     from playwright.async_api import (
         Browser,
@@ -44,6 +48,50 @@ if TYPE_CHECKING:
     pass  # keep imports clean; Page/Browser imported above for runtime use
 
 log = logging.getLogger(__name__)
+
+_install_lock = threading.Lock()
+_install_state: dict = {"attempted": False, "error": None}
+
+
+def _is_missing_browser(exc: BaseException) -> bool:
+    return "Executable doesn't exist" in str(exc)
+
+
+def install_chromium() -> Optional[str]:
+    """Download Chromium for this Playwright version, once per process.
+
+    Hosts whose build step did not install the browser (or dropped it before
+    runtime) recover on the first test instead of failing every run.  Returns
+    None on success, else the reason it failed (cached, so later tests fail fast).
+    """
+    with _install_lock:
+        if _install_state["attempted"]:
+            return _install_state["error"]
+        _install_state["attempted"] = True
+        log.warning("Chromium is missing; installing it now (one-time, can take a minute)...")
+        try:
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"],
+                           check=True, capture_output=True, text=True, timeout=600)
+            log.warning("Chromium installed at runtime.")
+        except (OSError, subprocess.SubprocessError) as exc:
+            detail = getattr(exc, "stderr", None) or str(exc)
+            _install_state["error"] = f"automatic Chromium install failed: {detail.strip()[-400:]}"
+            log.error("%s", _install_state["error"])
+        return _install_state["error"]
+
+
+def chromium_status() -> dict:
+    """Whether this Playwright's Chromium is on disk (for /api/system)."""
+    if not PLAYWRIGHT_INSTALLED:
+        return {"installed": False, "path": None, "error": "playwright package missing"}
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as pw:
+            path = pw.chromium.executable_path
+        return {"installed": Path(path).exists(), "path": path, "error": _install_state["error"]}
+    except Exception as exc:  # e.g. called inside a running event loop
+        return {"installed": None, "path": None, "error": str(exc)[:200]}
 
 
 class BrowserSession:
@@ -92,10 +140,15 @@ class BrowserSession:
             self._config.headless,
             self._config.slow_mo_ms,
         )
-        self._browser = await self._pw.chromium.launch(
-            headless=self._config.headless,
-            slow_mo=self._config.slow_mo_ms,
-        )
+        try:
+            self._browser = await self._launch()
+        except Exception as exc:
+            if not _is_missing_browser(exc):
+                raise
+            failure = await asyncio.to_thread(install_chromium)
+            if failure:
+                raise RuntimeError(f"{exc}\n({failure})") from exc
+            self._browser = await self._launch()
         self._context = await self._browser.new_context(
             viewport={"width": 1280, "height": 720},
             ignore_https_errors=True,
@@ -104,6 +157,12 @@ class BrowserSession:
             await self._context.tracing.start(screenshots=True, snapshots=True)
             log.debug("Tracing started")
         return self
+
+    async def _launch(self) -> "Browser":
+        return await self._pw.chromium.launch(
+            headless=self._config.headless,
+            slow_mo=self._config.slow_mo_ms,
+        )
 
     async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         await self._stop_tracing()
