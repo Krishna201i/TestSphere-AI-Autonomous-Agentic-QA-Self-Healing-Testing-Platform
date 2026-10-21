@@ -69,6 +69,34 @@ from engine.schemas import (
 logger = logging.getLogger("testsphere.orchestration")
 
 
+def apply_healed_selector(
+    plan: EngineTestPlan,
+    broken_selector: str,
+    failed_step: int,
+    healed_selector: str,
+) -> EngineTestPlan:
+    """Return a copy of *plan* with the healed selector on the broken step(s) only.
+
+    Steps whose primary locator equals *broken_selector* are updated; if none
+    match, only the step that failed (1-based *failed_step*) is.  Every other
+    step keeps its own locator.
+    """
+    matches = [
+        bool(broken_selector) and st.target is not None and st.target.primary_locator == broken_selector
+        for st in plan.steps
+    ]
+    if not any(matches):
+        matches = [idx == failed_step - 1 and st.target is not None for idx, st in enumerate(plan.steps)]
+
+    steps: List[EngineStep] = []
+    for step, hit in zip(plan.steps, matches):
+        step_copy = step.model_copy(deep=True)
+        if hit:
+            step_copy.target.primary_locator = healed_selector
+        steps.append(step_copy)
+    return plan.model_copy(update={"steps": steps})
+
+
 def create_default_orchestrator() -> AgentOrchestrator:
     """Create a fully configured AgentOrchestrator.
 
@@ -304,15 +332,13 @@ class PlatformWorkflowOrchestrator:
                     "Self-healing proposed replacement selector: %s. Validating with engine...",
                     recommendation.target_selector,
                 )
-                # Build healed plan with replacement selector
-                healed_steps: List[EngineStep] = []
-                for s in engine_plan.steps:
-                    step_copy = s.model_copy(deep=True)
-                    if step_copy.target:
-                        step_copy.target.primary_locator = recommendation.target_selector
-                    healed_steps.append(step_copy)
-
-                healed_plan = engine_plan.model_copy(update={"steps": healed_steps})
+                fc = exec_result.failure_context
+                healed_plan = apply_healed_selector(
+                    engine_plan,
+                    broken_selector=recommendation.original_selector or (fc.target_selector if fc else ""),
+                    failed_step=fc.failed_step if fc else 0,
+                    healed_selector=recommendation.target_selector,
+                )
                 validation_result = await run_test(healed_plan, options=run_opts)
 
                 validation_success = validation_result.status in (
@@ -354,19 +380,16 @@ class PlatformWorkflowOrchestrator:
                     or "Test execution failed"
                 )
 
-        # Fallback: if browser execution failed due to environment (missing binaries on container)
-        # but real live website inspection succeeded, mark as PASSED and record real live latency & events.
-        if (
-            final_status != TestExecutionStatus.PASSED.value
-            and error_msg
-            and "Browser execution error" in error_msg
-            and analysis_data
-            and analysis_data.get("success")
-        ):
-            logger.info("Playwright browser binary not found on container; verified via real HTTP-DOM live inspection.")
-            final_status = TestExecutionStatus.PASSED.value
-            error_msg = None
-            duration_ms = analysis_data.get("latency_ms", 750)
+        # The browser could not start (e.g. Chromium missing on the host): no
+        # step ran, so this is a failure — never report it as passed, even if
+        # the plain-HTTP page inspection worked.
+        if error_msg and "Browser execution error" in error_msg:
+            final_status = TestExecutionStatus.FAILED.value
+            error_msg = (
+                "Not executed: the browser could not start on this server, so no test steps ran. "
+                "Install it with `python -m playwright install --with-deps chromium`. "
+                f"Details: {error_msg}"
+            )
 
         # Update database execution record
         end_time = datetime.now(timezone.utc)
