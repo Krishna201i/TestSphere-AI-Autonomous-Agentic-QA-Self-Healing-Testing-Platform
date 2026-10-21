@@ -5,7 +5,7 @@ Encapsulates storage operations for test cases.
 Does not import or modify Member 1 TestCase AI logic.
 """
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from backend.database.store import Record, Store
 from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
@@ -19,19 +19,22 @@ class TestCaseService:
     def create_test_case(
         db: Store, application_id: int, external_id: Optional[str], name: str, description: Optional[str] = None,
         category: Optional[str] = None, priority: Optional[str] = None, version: int = 1,
+        owner_uid: Optional[str] = None,
     ) -> Record:
-        if not db.get(APPLICATIONS, application_id):
+        app = db.get(APPLICATIONS, application_id)
+        if not app:
             raise ApplicationNotFoundError(f"Application with ID {application_id} not found")
         return db.insert(
             TEST_CASES, application_id=application_id, external_id=external_id, name=name,
             description=description, category=category, priority=priority, version=version,
+            owner_uid=owner_uid or app.get("owner_uid"),
         )
 
     @staticmethod
-    def list_test_cases(db: Store, application_id: Optional[int] = None) -> List[Record]:
+    def list_test_cases(db: Store, application_id: Optional[int] = None, **filters: Any) -> List[Record]:
         if application_id is not None:
-            return db.find(TEST_CASES, application_id=application_id)
-        return db.find(TEST_CASES)
+            filters["application_id"] = application_id
+        return db.find(TEST_CASES, **filters)
 
     @staticmethod
     def get_test_case(db: Store, test_case_id: int) -> Record:

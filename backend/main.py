@@ -4,6 +4,8 @@ TestSphere-AI — Main FastAPI Application Entrypoint.
 Exposes REST API endpoints and coordinates the TestSphere-AI platform services.
 """
 
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 import logging
@@ -19,14 +21,17 @@ from backend.api import (
     audit_router,
     health_router,
     ingest_router,
+    me_router,
+    pipelines_router,
     projects_router,
     security_router,
     system_router,
     test_cases_router,
     test_executions_router,
+    webhooks_router,
     workflow_router,
 )
-from backend.database.session import init_db
+from backend.database.session import get_store, init_db
 from backend.database.store import StoreUnavailableError
 
 logger = logging.getLogger("testsphere.backend")
@@ -41,7 +46,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Database connection verified successfully.")
     except Exception as exc:
         logger.warning(f"Database connection initialization check encountered: {exc}")
+    try:
+        from backend.pipeline.runner import recover_interrupted
+
+        if interrupted := recover_interrupted(get_store()):
+            logger.warning("Marked %d pipeline run(s) interrupted by the restart.", interrupted)
+    except Exception as exc:
+        logger.warning("Could not check for interrupted pipeline runs: %s", exc)
+    scheduler_task = None
+    if settings.SCHEDULER_ENABLED:
+        from backend.pipeline.scheduler import scheduler_loop
+
+        scheduler_task = asyncio.create_task(scheduler_loop())
+    logger.info("Sign-in %s.", "required (Firebase Auth)" if settings.AUTH_REQUIRED else "OFF: single local user")
     yield
+    if scheduler_task:
+        scheduler_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await scheduler_task
     logger.info("TestSphere-AI backend shutting down.")
 
 
@@ -82,6 +104,9 @@ api_routers = [
     audit_router,
     ingest_router,
     system_router,
+    me_router,
+    pipelines_router,
+    webhooks_router,
 ]
 for router in api_routers:
     app.include_router(router, prefix="/api")

@@ -14,11 +14,13 @@ from backend.orchestration.converters import (
 from backend.orchestration.orchestrator import (
     PlatformWorkflowOrchestrator,
     create_default_orchestrator,
+    get_platform_orchestrator,
 )
 
 __all__ = [
     "PlatformWorkflowOrchestrator",
     "create_default_orchestrator",
+    "get_platform_orchestrator",
     "map_action_to_engine",
     "map_assertion_to_engine",
     "test_case_to_engine_plan",
