@@ -7,8 +7,16 @@ Does not hardcode any sensitive information.
 
 import os
 from typing import List
+
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+# Load .env into the process environment first: several defaults below are
+# derived from other variables via os.getenv (e.g. DATABASE_BACKEND from
+# FIREBASE_CREDENTIALS), which pydantic-settings' own .env loading does not
+# cover.  Real environment variables still take precedence.
+load_dotenv()
 
 
 def _default_database_backend() -> str:
