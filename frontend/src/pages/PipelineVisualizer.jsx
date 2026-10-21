@@ -1,21 +1,27 @@
 import React, { useState } from 'react';
 import { Play } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
-import { pipelineStages, timeAgo, toDate } from '../lib/derive';
+import { pipelineStages, timeAgo, toDate, urlError } from '../lib/derive';
 import { WorkflowPanel } from './CommandCenter';
+import CodebaseIngestion from '../components/CodebaseIngestion';
 
 const STATUS_LABEL = { live: 'Live', partial: 'Partially built', planned: 'Planned' };
 const STEP_STATUS = { passed: 'PASSED', failed: 'FAILED', healed: 'HEALED' };
 
 function RunQA() {
   const { runPipeline, running, applications } = useWorkspace();
-  const [url, setUrl] = useState(applications[0]?.base_url || '');
+  const [url, setUrl] = useState('');
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState(null);
 
   async function onRun(e) {
     e.preventDefault();
     setError(null);
+    const bad = urlError(url);
+    if (bad) {
+      setError(bad);
+      return;
+    }
     try {
       await runPipeline({ app_url: url.trim(), prompt: prompt.trim() || null }, url.trim());
     } catch (err) {
@@ -41,6 +47,14 @@ function RunQA() {
           </button>
         </div>
       </form>
+      {applications.length > 0 && (
+        <div className="form-row small" style={{ alignItems: 'center' }}>
+          <span className="muted">Registered targets:</span>
+          {applications.slice(0, 6).map((a) => (
+            <button key={a.id} type="button" className="tab" onClick={() => setUrl(a.base_url)}>{a.name}</button>
+          ))}
+        </div>
+      )}
       {running && <div className="hint">Analyzing the page, planning steps and running them in Playwright: {running}</div>}
       {error && <div className="error-text">{error}</div>}
     </section>
@@ -121,8 +135,8 @@ function Targets() {
 
   return (
     <section className="card">
-      <div className="card-head"><h3>Targets</h3><span className="pill gray">1 · Codebase Ingestion</span></div>
-      <p className="hint" style={{ margin: 0 }}>Registered applications. Connecting a code repository (the full blueprint) is module 5.1 and not built yet.</p>
+      <div className="card-head"><h3>Targets</h3><span className="pill gray">Live URLs</span></div>
+      <p className="hint" style={{ margin: 0 }}>Running applications to test (base URLs). Analyze their source in Codebase Ingestion above.</p>
       {applications.length === 0 ? <div className="empty">No targets yet.</div> : (
         <div className="table-wrap">
           <table className="table">
@@ -205,6 +219,7 @@ export default function PipelineVisualizer({ onNavigate }) {
         </div>
       </section>
 
+      <CodebaseIngestion />
       <RunQA />
       <LastRun />
       <div className="grid-2">

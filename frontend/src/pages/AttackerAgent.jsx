@@ -2,12 +2,12 @@ import React, { useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { RadarChart } from '../components/charts';
-import { RADAR_AXES, SEVERITY_ORDER, radarValues, timeAgo } from '../lib/derive';
+import { RADAR_AXES, SEVERITY_ORDER, radarValues, timeAgo, urlError } from '../lib/derive';
 
 export default function AttackerAgent({ onNavigate }) {
   const ws = useWorkspace();
   const { lastScan, scanning, runScan, selectedKey, setSelectedKey, retests } = ws;
-  const [url, setUrl] = useState(lastScan?.url || ws.applications[0]?.base_url || 'http://127.0.0.1:8000/');
+  const [url, setUrl] = useState('');
   const [error, setError] = useState(null);
 
   const findings = lastScan?.findings || [];
@@ -16,8 +16,14 @@ export default function AttackerAgent({ onNavigate }) {
   async function onScan(e) {
     e.preventDefault();
     setError(null);
+    const target = url.trim() || lastScan?.url || '';  // empty field = rescan the last target
+    const bad = urlError(target);
+    if (bad) {
+      setError(bad);
+      return;
+    }
     try {
-      await runScan(url.trim());
+      await runScan(target);
     } catch (err) {
       setError(err.status === 403
         ? `${err.message}. Add the host to SECURITY_SCAN_ALLOWED_HOSTS on the backend if you own it.`
@@ -39,7 +45,7 @@ export default function AttackerAgent({ onNavigate }) {
         <form className="form-row" onSubmit={onScan}>
           <label className="field" style={{ flex: 4 }}>
             Target URL
-            <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://127.0.0.1:8000/" required />
+            <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={lastScan?.url || 'http://127.0.0.1:8000/'} />
           </label>
           <div style={{ display: 'flex', alignItems: 'flex-end' }}>
             <button className="btn btn-primary" type="submit" disabled={scanning}>{scanning ? 'Scanning…' : 'Run passive scan'}</button>
@@ -54,7 +60,10 @@ export default function AttackerAgent({ onNavigate }) {
           </div>
         )}
         {error && <div className="error-text">{error}</div>}
-        <div className="hint">Loopback hosts are always in scope. Other hosts must be listed by the backend operator — only scan systems you own or are authorized to test.</div>
+        <div className="hint">
+          In scope on this backend: <b>{ws.system ? ws.system.scan_scope.join(', ') : 'unknown (backend offline or outdated)'}</b>.
+          To scan a site you own or are authorized to test, add its host to <code>SECURITY_SCAN_ALLOWED_HOSTS</code> on the backend and restart it.
+        </div>
       </section>
 
       <div className="grid-main-side">

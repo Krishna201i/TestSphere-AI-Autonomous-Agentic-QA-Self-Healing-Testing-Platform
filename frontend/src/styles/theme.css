@@ -134,6 +134,43 @@ a { color: var(--indigo-2); }
   font-size: 13px; font-weight: 700;
 }
 
+/* ── Menus ───────────────────────────────────────────────── */
+.menu-anchor { position: relative; }
+button.user { border: 0; background: transparent; padding: 2px 4px; border-radius: 999px; cursor: pointer; }
+button.user:hover { background: rgba(0, 0, 0, 0.04); }
+.popover {
+  position: absolute; right: 0; top: calc(100% + 10px); z-index: 50;
+  max-width: calc(100vw - 32px);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(40, 30, 20, 0.16);
+  padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  text-align: left;
+}
+.popover-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; }
+.popover .kv { font-size: 13px; }
+.popover-links { display: flex; gap: 6px; flex-wrap: wrap; }
+.notif-list { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
+.notif-list li { display: grid; grid-template-columns: 12px 1fr; gap: 8px; padding: 8px 2px; border-bottom: 1px solid #f0ece6; }
+.notif-list .mark { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; background: #b9b4ab; }
+.notif-list .mark.success { background: var(--green); }
+.notif-list .mark.warn { background: var(--amber); }
+.notif-list .mark.error { background: var(--red); }
+.notif-list .mark.info { background: var(--blue); }
+.notif-msg { font-size: 13.5px; overflow-wrap: anywhere; }
+
+/* ── Blueprint ───────────────────────────────────────────── */
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.stat-tile { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.stat-tile .v { font-size: 24px; font-weight: 600; line-height: 1.1; }
+.stat-tile .l { font-size: 12.5px; color: var(--muted); }
+.lang-bar { display: flex; height: 10px; border-radius: 999px; overflow: hidden; background: #eee9e2; }
+.lang-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--text-2); }
+.lang-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+.pill-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
 /* ── Page layout ─────────────────────────────────────────── */
 .page { padding: 8px 34px 40px; display: flex; flex-direction: column; gap: 26px; }
 .page-title { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
