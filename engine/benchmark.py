@@ -242,11 +242,8 @@ def _set_healing(enabled: bool) -> None:
     if not enabled:
         _runner._attempt_healing = _noop_healing  # type: ignore[attr-defined]
         return
-    try:
-        from engine.healer import attempt_healing  # type: ignore
-        _runner._attempt_healing = attempt_healing  # type: ignore[attr-defined]
-    except (ImportError, AttributeError):
-        pass  # healer stub stays
+    from engine.healer import attempt_healing
+    _runner._attempt_healing = attempt_healing  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
