@@ -60,6 +60,9 @@ benchmark_results.md
 # --- Browser automation output ---
 .playwright-mcp/
 
+# --- Playwright browsers installed by build.sh / render-build.sh ---
+.playwright-browsers/
+
 # --- Ingested repositories (INGEST_WORKSPACE) ---
 data/
 
