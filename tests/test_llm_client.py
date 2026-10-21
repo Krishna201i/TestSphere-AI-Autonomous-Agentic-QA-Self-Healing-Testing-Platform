@@ -388,10 +388,11 @@ class TestProviderFactory:
         with pytest.raises(LLMConfigurationError, match="not yet implemented"):
             get_llm_provider(config)
 
-    def test_api_not_implemented(self):
+    def test_api_returns_api_provider(self):
         config = LLMConfig(provider="api", model="gpt-4", api_key="sk-test")
-        with pytest.raises(LLMConfigurationError, match="not yet implemented"):
-            get_llm_provider(config)
+        from agents.llm.providers.api import APIProvider
+
+        assert isinstance(get_llm_provider(config), APIProvider)
 
     def test_unknown_provider(self):
         config = LLMConfig(provider="nonexistent", model="m")

@@ -18,7 +18,7 @@ Provider selection is driven by ``LLM_PROVIDER`` env var::
 
     LLM_PROVIDER=mock   →  MockLLMProvider  (default, no deps)
     LLM_PROVIDER=local  →  LocalLLMProvider (future)
-    LLM_PROVIDER=api    →  APIProvider      (future)
+    LLM_PROVIDER=api    →  APIProvider      (OpenAI-compatible chat API)
 """
 
 from __future__ import annotations
@@ -71,11 +71,10 @@ def get_llm_provider(config: LLMConfig | None = None) -> LLMClient:
         )
 
     if provider == "api":
-        raise LLMConfigurationError(
-            "LLM_PROVIDER='api' is not yet implemented. "
-            "It will be available in a future development day.",
-            provider="api",
-        )
+        from agents.llm.providers.api import APIProvider
+
+        logger.info("Creating APIProvider (model=%s)", config.model)
+        return APIProvider(config)
 
     raise LLMConfigurationError(
         f"Unknown LLM_PROVIDER '{provider}'. "

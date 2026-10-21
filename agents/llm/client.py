@@ -48,7 +48,7 @@ class LLMClient(ABC):
     Concrete implementations:
       - ``MockLLMProvider`` — deterministic mock (Day 2)
       - ``LocalLLMProvider`` — local model via Ollama etc. (future)
-      - ``APIProvider`` — cloud API like OpenAI (future)
+      - ``APIProvider`` — OpenAI-compatible cloud API
     """
 
     def __init__(self, config: LLMConfig) -> None:
