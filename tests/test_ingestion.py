@@ -243,3 +243,19 @@ def test_git_checkout_respects_gitignore(tmp_path: Path) -> None:
     files = {r.file for r in bp.routes}
     assert files == {"app.py"}  # ignored dir and test fixtures excluded
     assert bp.files_total == 3  # app.py, .gitignore, tests/test_app.py
+
+
+@pytest.mark.parametrize(("env", "expected"), [
+    ({}, True),                                            # local development
+    ({"APP_ENV": "production"}, False),
+    ({"RENDER": "true"}, False),                           # public host, APP_ENV unset
+    ({"RENDER": "true", "INGEST_ALLOW_LOCAL_PATHS": "true"}, True),  # explicit opt-in
+    ({"INGEST_ALLOW_LOCAL_PATHS": "false"}, False),
+])
+def test_local_path_default_is_safe_on_cloud_hosts(monkeypatch, env, expected) -> None:
+    from backend.config import _CLOUD_MARKERS, _default_allow_local_paths
+    for var in ("APP_ENV", "INGEST_ALLOW_LOCAL_PATHS", *_CLOUD_MARKERS):
+        monkeypatch.delenv(var, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    assert _default_allow_local_paths() is expected

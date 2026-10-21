@@ -39,7 +39,7 @@ All settings can be configured via environment variables or a `.env` file at rep
 | `AGENT_MEMORY_BACKEND` | `database` | `database` persists healing memory in `DATABASE_URL` (survives restarts); `memory` keeps it in-process |
 | `INGEST_WORKSPACE` | `./data/repos` | Where ingested repositories are cloned |
 | `INGEST_GIT_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts public repositories may be cloned from (https only) |
-| `INGEST_ALLOW_LOCAL_PATHS` | `true` in development | Accept local folder paths for ingestion; keep `false` on a public server |
+| `INGEST_ALLOW_LOCAL_PATHS` | `true` locally in development; `false` on Render/Heroku/Railway/Fly/Cloud Run unless set | Accept local folder paths for ingestion (reads the server's disk); never enable on a public server |
 | `SECURITY_SCAN_ALLOWED_HOSTS` | `""` | Extra hosts the passive scanner may contact (loopback always allowed) |
 
 ### 2.3 Browser Engine Settings

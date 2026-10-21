@@ -11,6 +11,19 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
+# Set by common hosting platforms; their servers are public, so local-path
+# ingestion (reading the server's own disk) must be opted into explicitly there.
+_CLOUD_MARKERS = ("RENDER", "DYNO", "RAILWAY_ENVIRONMENT", "FLY_APP_NAME", "K_SERVICE", "VERCEL")
+
+
+def _default_allow_local_paths() -> bool:
+    explicit = os.getenv("INGEST_ALLOW_LOCAL_PATHS")
+    if explicit is not None:
+        return explicit.lower() in ("true", "1")
+    on_cloud = any(os.getenv(marker) for marker in _CLOUD_MARKERS)
+    return os.getenv("APP_ENV", "development") == "development" and not on_cloud
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
@@ -50,11 +63,7 @@ class Settings(BaseSettings):
     INGEST_GIT_HOSTS: str = Field(
         default_factory=lambda: os.getenv("INGEST_GIT_HOSTS", "github.com,gitlab.com,bitbucket.org")
     )
-    INGEST_ALLOW_LOCAL_PATHS: bool = Field(
-        default_factory=lambda: os.getenv(
-            "INGEST_ALLOW_LOCAL_PATHS", "true" if os.getenv("APP_ENV", "development") == "development" else "false"
-        ).lower() in ("true", "1")
-    )
+    INGEST_ALLOW_LOCAL_PATHS: bool = Field(default_factory=lambda: _default_allow_local_paths())
 
     model_config = {
         "env_file": ".env",
