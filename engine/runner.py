@@ -16,9 +16,9 @@ Design notes
 - Screenshots and DOM snapshots are written on **every failure** via
   engine/artifacts.py; they are also captured for HEALED steps so the
   healing event is fully auditable.
-- Healing is **not** wired in this module; that comes in Step 4 (healer.py).
-  The step executor has a hook (``_attempt_healing``) that returns ``None``
-  in this version and is replaced by the real implementation later.
+- When a step's primary locator fails, ``_attempt_healing`` (engine/healer.py)
+  tries stored fallbacks, then a fingerprint scan of the live DOM; an accepted
+  locator is retried and the step is reported as HEALED.
 - No database access; all output is returned as a ``TestResult`` value.
 """
 
@@ -43,10 +43,12 @@ except ImportError:
 
 from .artifacts import write_dom_snapshot, write_screenshot
 from .browser import BrowserSession
-from .detector import build_fingerprint, extract_candidates  # noqa: F401 (extract_candidates used by healer)
+from .detector import build_fingerprint
+from .healer import attempt_healing as _attempt_healing
 from .locators import generate_locators, rank_locators
 from .schemas import (
     ActionType,
+    ElementFingerprint,
     EngineConfig,
     HealingReport,
     RunOptions,
@@ -169,10 +171,12 @@ async def _execute_step(
     healing: HealingReport | None = None
 
     try:
+        # Fingerprint before acting: a click that navigates removes the element
+        pre_action_fp = await _fingerprint_if_present(page, step)
         locator_used = await _perform_action(page, step, config)
         # Step 3: enrich target with fingerprint + ranked fallback locators
         if locator_used and step.target is not None:
-            await _enrich_target(page, step.target, locator_used)
+            await _enrich_target(page, step.target, locator_used, pre_action_fp)
         duration_ms = _elapsed_ms(step_start)
         return StepResult(
             step_id=step.step_id,
@@ -187,7 +191,7 @@ async def _execute_step(
         duration_ms = _elapsed_ms(step_start)
         error_msg = str(exc)
 
-        # Healing hook — returns None until healer.py is wired in (Step 4)
+        # Healing hook — engine/healer.py (module-level name so it can be swapped out)
         healing = await _attempt_healing(page, step, config, exc)
 
         if healing and healing.selected_locator:
@@ -333,28 +337,6 @@ async def _perform_action_with_locator(
 
 
 # ---------------------------------------------------------------------------
-# Healing hook (stub — replaced by healer.py in Step 4)
-# ---------------------------------------------------------------------------
-
-
-async def _attempt_healing(
-    page: Page,  # noqa: ARG001
-    step: Step,  # noqa: ARG001
-    config: EngineConfig,  # noqa: ARG001
-    exc: Exception,  # noqa: ARG001
-) -> HealingReport | None:
-    """
-    Healing hook.
-
-    Returns ``None`` in this version.  Step 4 (healer.py) replaces this
-    with real fallback + fingerprint healing logic.
-
-    ponytail: stub; upgrade path = import and call healer.attempt_healing()
-    """
-    return None
-
-
-# ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
 
@@ -390,15 +372,35 @@ def _aggregate_status(results: list[StepResult]) -> TestStatus:
     return TestStatus.PASSED
 
 
-async def _enrich_target(page: Page, target: Target, locator_str: str) -> None:
+async def _fingerprint_if_present(page: Page, step: Step) -> ElementFingerprint | None:
+    """Fingerprint the step's primary target if it is already in the DOM (no waiting)."""
+    if step.target is None or step.action in (ActionType.GOTO, ActionType.WAIT_FOR):
+        return None
+    try:
+        if await page.locator(step.target.primary_locator).count() == 0:
+            return None
+    except Exception:  # invalid selector — let the action itself report it
+        return None
+    return await build_fingerprint(page, step.target.primary_locator)
+
+
+async def _enrich_target(
+    page: Page,
+    target: Target,
+    locator_str: str,
+    fp: ElementFingerprint | None = None,
+) -> None:
     """
     Post-success enrichment: attach a fresh ``ElementFingerprint`` and extend
     ``Target.fallback_locators`` with generated, ranked alternatives.
 
-    Best-effort — silently does nothing if fingerprint capture fails (e.g.
-    when a click triggered page navigation before we could inspect the element).
+    *fp* is the fingerprint captured before the action, if any; otherwise one
+    is captured now.  Best-effort — silently does nothing if capture fails
+    (e.g. the element only appeared during the action and a navigation then
+    removed it).
     """
-    fp = await build_fingerprint(page, locator_str)
+    if fp is None:
+        fp = await build_fingerprint(page, locator_str)
     if fp is None:
         return
 

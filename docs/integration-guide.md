@@ -32,24 +32,28 @@ LLM_MOCK_SCENARIO=standard_ecommerce
 - Simulates edge cases: hallucinated selectors, duplicate tests, unexpected token drops, and recovery failures.
 
 ### 2.2 Production AI Providers
-Switch to cloud LLM providers simply by setting environment variables in `.env`:
+Set `LLM_PROVIDER=api` to use any OpenAI-compatible chat-completions endpoint. Pick the vendor with `LLM_BASE_URL`:
 
 ```ini
-# OpenAI
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-LLM_MODEL=gpt-4o
+# OpenAI (default base URL)
+LLM_PROVIDER=api
+LLM_API_KEY=sk-...
+LLM_MODEL=gpt-4o-mini
 
-# Anthropic Claude
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-...
-LLM_MODEL=claude-3-5-sonnet-20241022
+# Anthropic Claude (OpenAI-compatible endpoint)
+LLM_PROVIDER=api
+LLM_API_KEY=sk-ant-...
+LLM_BASE_URL=https://api.anthropic.com/v1
+LLM_MODEL=claude-sonnet-5-5
 
-# Google Gemini
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=AIzaSy...
-LLM_MODEL=gemini-1.5-pro
+# Google Gemini (OpenAI-compatible endpoint)
+LLM_PROVIDER=api
+LLM_API_KEY=AIza...
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+LLM_MODEL=gemini-2.5-flash
 ```
+
+Leave `LLM_PROVIDER=mock` for tests and CI; no key or network is needed.
 
 ---
 
@@ -124,6 +128,20 @@ eventSource.onerror = (err) => {
   eventSource.close();
 };
 ```
+
+---
+
+### 4.3 Passive Security Scan
+
+`POST /api/security/scan` runs the passive scanner (`security/`) against one URL: a single GET per page, no attack payloads. Findings use the shared `Finding` schema and come back most severe first.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/security/scan   -H "Content-Type: application/json" -d '{"url": "http://127.0.0.1:5173/"}'
+```
+
+After a fix, post a finding back to `POST /api/security/retest` to get `retest_result: pass|fail`.
+
+Only loopback hosts are in scope by default. Add hosts you own with `SECURITY_SCAN_ALLOWED_HOSTS` (comma-separated). Requests cannot widen the scope, and out-of-scope URLs return `403`. From the command line: `python -m security <url> [--allow HOST]`.
 
 ---
 

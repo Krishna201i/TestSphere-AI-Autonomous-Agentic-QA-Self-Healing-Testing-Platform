@@ -34,8 +34,10 @@ from backend.orchestration.converters import (
 )
 from backend.orchestration.orchestrator import (
     PlatformWorkflowOrchestrator,
+    apply_healed_selector,
     create_default_orchestrator,
 )
+from engine.schemas import HealingReport
 from engine.schemas import (
     ActionType,
     Step,
@@ -262,6 +264,99 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.execution.status, TestExecutionStatus.PASSED.value)
         self.assertEqual(self.execution.duration_ms, 150)
         self.assertIsNotNone(result["dashboard_summary"])
+
+    @patch("backend.orchestration.orchestrator.run_test")
+    async def test_engine_heal_is_recorded_as_healed(self, mock_run_test: AsyncMock) -> None:
+        mock_run_test.return_value = EngineTestResult(
+            test_id="TC-LOGIN-001",
+            status=TestStatus.HEALED,
+            started_at=datetime.now(timezone.utc),
+            duration_ms=200,
+            steps=[
+                StepResult(
+                    step_id="click-login",
+                    status=StepStatus.HEALED,
+                    duration_ms=200,
+                    locator_used="#login-btn",
+                    healing=HealingReport(
+                        original_locator='[data-testid="login-button"]',
+                        selected_locator="#login-btn",
+                        confidence=0.87,
+                        strategy_used="fallback[0]",
+                    ),
+                )
+            ],
+            artifacts_dir="artifacts",
+        )
+
+        result = await PlatformWorkflowOrchestrator().execute_test_run(db=self.db, execution_id=self.execution.id)
+
+        self.assertEqual(result["status"], "HEALED")
+        self.assertIn('[data-testid="login-button"] -> #login-btn', result["error_message"])
+        self.assertIn("confidence 0.87", result["error_message"])
+        self.assertEqual(result["engine_steps"][0]["healing"]["selected_locator"], "#login-btn")
+        self.db.refresh(self.execution)
+        self.assertEqual(self.execution.status, TestExecutionStatus.HEALED.value)
+
+    @patch("backend.orchestration.orchestrator.run_test")
+    async def test_browser_failure_is_never_reported_as_passed(self, mock_run_test: AsyncMock) -> None:
+        # Even when the stored plain-HTTP page analysis succeeded
+        self.tc.description = '{"steps": [], "analysis": {"success": true, "latency_ms": 120}}'
+        self.db.commit()
+        mock_run_test.return_value = EngineTestResult(
+            test_id="TC-LOGIN-001",
+            status=TestStatus.FAILED,
+            started_at=datetime.now(timezone.utc),
+            duration_ms=5,
+            steps=[
+                StepResult(
+                    step_id="browser",
+                    status=StepStatus.FAILED,
+                    duration_ms=5,
+                    error="Browser execution error: Executable doesn't exist",
+                )
+            ],
+            artifacts_dir="artifacts",
+        )
+
+        result = await PlatformWorkflowOrchestrator().execute_test_run(db=self.db, execution_id=self.execution.id)
+
+        self.assertEqual(result["status"], "FAILED")
+        self.assertTrue(result["error_message"].startswith("Not executed: the browser could not start"))
+        self.db.refresh(self.execution)
+        self.assertEqual(self.execution.status, TestExecutionStatus.FAILED.value)
+
+
+class TestApplyHealedSelector(unittest.TestCase):
+    """The healed selector must only replace the broken step's locator."""
+
+    def _plan(self) -> EngineTestPlan:
+        return EngineTestPlan(
+            test_id="t",
+            name="t",
+            base_url="https://app.local",
+            steps=[
+                Step(step_id="goto", action=ActionType.GOTO, value="https://app.local"),
+                Step(step_id="user", action=ActionType.FILL, value="a", target=Target(description="u", primary_locator="#username")),
+                Step(step_id="pass", action=ActionType.FILL, value="b", target=Target(description="p", primary_locator="#password")),
+                Step(step_id="submit", action=ActionType.CLICK, target=Target(description="s", primary_locator="#submit")),
+            ],
+        )
+
+    def test_replaces_only_steps_using_the_broken_selector(self) -> None:
+        healed = apply_healed_selector(self._plan(), "#submit", failed_step=4, healed_selector="#login-btn")
+        locators = [s.target.primary_locator if s.target else None for s in healed.steps]
+        self.assertEqual(locators, [None, "#username", "#password", "#login-btn"])
+
+    def test_falls_back_to_failed_step_when_selector_unknown(self) -> None:
+        healed = apply_healed_selector(self._plan(), "", failed_step=2, healed_selector="#user-field")
+        locators = [s.target.primary_locator if s.target else None for s in healed.steps]
+        self.assertEqual(locators, [None, "#user-field", "#password", "#submit"])
+
+    def test_original_plan_is_untouched(self) -> None:
+        plan = self._plan()
+        apply_healed_selector(plan, "#submit", failed_step=4, healed_selector="#x")
+        self.assertEqual(plan.steps[3].target.primary_locator, "#submit")
 
 
 if __name__ == "__main__":

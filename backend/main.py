@@ -15,8 +15,12 @@ from fastapi.staticfiles import StaticFiles
 from backend.config import settings
 from backend.api import (
     applications_router,
+    audit_router,
     health_router,
+    ingest_router,
     projects_router,
+    security_router,
+    system_router,
     test_cases_router,
     test_executions_router,
     workflow_router,
@@ -63,6 +67,10 @@ api_routers = [
     test_cases_router,
     test_executions_router,
     workflow_router,
+    security_router,
+    audit_router,
+    ingest_router,
+    system_router,
 ]
 for router in api_routers:
     app.include_router(router, prefix="/api")

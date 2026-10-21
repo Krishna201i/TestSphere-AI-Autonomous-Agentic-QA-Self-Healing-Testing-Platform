@@ -663,11 +663,12 @@ class TestProviderSwitching:
         with pytest.raises(LLMConfigurationError, match="not yet implemented"):
             get_llm_provider(config)
 
-    def test_api_not_yet_implemented(self):
-        """LLM_PROVIDER=api should raise LLMConfigurationError."""
+    def test_api_returns_api_provider(self):
+        """LLM_PROVIDER=api should return an APIProvider."""
         config = LLMConfig(provider="api", model="gpt-4", api_key="sk-test")
-        with pytest.raises(LLMConfigurationError, match="not yet implemented"):
-            get_llm_provider(config)
+        from agents.llm.providers.api import APIProvider
+
+        assert isinstance(get_llm_provider(config), APIProvider)
 
     def test_create_llm_client_returns_session(self):
         """create_llm_client() should return an LLMClientSession."""
