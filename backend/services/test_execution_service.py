@@ -6,7 +6,7 @@ Does NOT execute browser automation, invoke Playwright, or trigger AI agents.
 """
 
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from backend.database.store import Record, Store
 from backend.models import TEST_CASES, TEST_EXECUTIONS
@@ -34,19 +34,22 @@ class TestExecutionService:
         db: Store, test_case_id: int, status: Union[str, TestExecutionStatus] = TestExecutionStatus.PENDING,
         started_at: Optional[datetime] = None, completed_at: Optional[datetime] = None,
         duration_ms: Optional[int] = None, error_message: Optional[str] = None,
+        owner_uid: Optional[str] = None,
     ) -> Record:
-        if not db.get(TEST_CASES, test_case_id):
+        test_case = db.get(TEST_CASES, test_case_id)
+        if not test_case:
             raise TestCaseNotFoundError(f"Test case with ID {test_case_id} not found")
         return db.insert(
             TEST_EXECUTIONS, test_case_id=test_case_id, status=TestExecutionService._validate_status(status),
             started_at=started_at, completed_at=completed_at, duration_ms=duration_ms, error_message=error_message,
+            owner_uid=owner_uid or test_case.get("owner_uid"),
         )
 
     @staticmethod
-    def list_executions(db: Store, test_case_id: Optional[int] = None) -> List[Record]:
+    def list_executions(db: Store, test_case_id: Optional[int] = None, **filters: Any) -> List[Record]:
         if test_case_id is not None:
-            return db.find(TEST_EXECUTIONS, test_case_id=test_case_id)
-        return db.find(TEST_EXECUTIONS)
+            filters["test_case_id"] = test_case_id
+        return db.find(TEST_EXECUTIONS, **filters)
 
     @staticmethod
     def get_execution(db: Store, execution_id: int) -> Record:

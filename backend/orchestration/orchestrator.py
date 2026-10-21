@@ -162,6 +162,18 @@ def create_default_orchestrator(memory_store: Optional[MemoryStore] = None) -> A
     )
 
 
+_platform_orchestrator: Optional["PlatformWorkflowOrchestrator"] = None
+
+
+def get_platform_orchestrator() -> "PlatformWorkflowOrchestrator":
+    """The process-wide orchestrator shared by single runs and the automated pipeline
+    (one healing memory, one set of workflow states)."""
+    global _platform_orchestrator
+    if _platform_orchestrator is None:
+        _platform_orchestrator = PlatformWorkflowOrchestrator()
+    return _platform_orchestrator
+
+
 class PlatformWorkflowOrchestrator:
     """Coordinates test execution runs with AI failure diagnosis and self-healing."""
 

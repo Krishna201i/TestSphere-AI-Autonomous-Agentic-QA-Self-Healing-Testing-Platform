@@ -7,7 +7,7 @@ Does not modify or duplicate any shared contracts.
 
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.models.test_execution import TestExecutionStatus
 
@@ -17,15 +17,57 @@ from backend.models.test_execution import TestExecutionStatus
 # ============================================================================
 
 
-class ProjectCreate(BaseModel):
+SCHEDULE_CHOICES = (15, 30, 60, 180, 360, 720, 1440, 10080)  # minutes; None = no schedule
+
+
+def _check_http_url(value: Optional[str], what: str) -> Optional[str]:
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return ""  # explicit clear
+    if not value.lower().startswith(("http://", "https://")):
+        raise ValueError(f"{what} must start with http:// or https://")
+    return value
+
+
+class _ProjectPipelineFields(BaseModel):
+    """What the automated pipeline needs to know about a project."""
+
+    app_url: Optional[str] = Field(None, max_length=1024, description="Live URL the pipeline tests")
+    repo_url: Optional[str] = Field(None, max_length=1024, description="Git repository to ingest (optional)")
+    prompt: Optional[str] = Field(None, max_length=500, description="What to test, in plain words (optional)")
+    schedule_minutes: Optional[int] = Field(None, description=f"Re-run interval in minutes, one of {SCHEDULE_CHOICES}")
+
+    @field_validator("app_url")
+    @classmethod
+    def _app_url(cls, v: Optional[str]) -> Optional[str]:
+        return _check_http_url(v, "App URL")
+
+    @field_validator("repo_url")
+    @classmethod
+    def _repo_url(cls, v: Optional[str]) -> Optional[str]:
+        return _check_http_url(v, "Repository URL")
+
+    @field_validator("schedule_minutes")
+    @classmethod
+    def _schedule(cls, v: Optional[int]) -> Optional[int]:
+        if v in (None, 0):
+            return None
+        if v not in SCHEDULE_CHOICES:
+            raise ValueError(f"schedule_minutes must be one of {SCHEDULE_CHOICES}")
+        return v
+
+
+class ProjectCreate(_ProjectPipelineFields):
     """Payload to create a new testing project."""
 
     name: str = Field(..., min_length=1, max_length=255, description="Project name")
     description: Optional[str] = Field(None, description="Optional project description")
 
 
-class ProjectUpdate(BaseModel):
-    """Payload to update an existing project."""
+class ProjectUpdate(_ProjectPipelineFields):
+    """Payload to update an existing project (send null/\"\" to clear a pipeline field)."""
 
     name: Optional[str] = Field(None, min_length=1, max_length=255, description="Updated project name")
     description: Optional[str] = Field(None, description="Updated description")
@@ -37,6 +79,15 @@ class ProjectResponse(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
+    app_url: Optional[str] = None
+    repo_url: Optional[str] = None
+    prompt: Optional[str] = None
+    schedule_minutes: Optional[int] = None
+    next_run_at: Optional[datetime] = None
+    last_run_id: Optional[int] = None
+    last_run_status: Optional[str] = None
+    last_run_at: Optional[datetime] = None
+    webhook_secret: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

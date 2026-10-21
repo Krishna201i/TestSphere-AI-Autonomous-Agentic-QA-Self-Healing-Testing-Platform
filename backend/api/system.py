@@ -18,7 +18,7 @@ from security.scope import LOOPBACK_HOSTS
 
 router = APIRouter(prefix="/system", tags=["System"])
 
-API_VERSION = 2  # bump when the dashboard needs new endpoints
+API_VERSION = 3  # bump when the dashboard needs new endpoints
 
 
 @lru_cache(maxsize=1)
@@ -47,4 +47,16 @@ def system_info() -> Dict[str, Any]:
             "git_hosts": [h.strip() for h in settings.INGEST_GIT_HOSTS.split(",") if h.strip()],
             "local_paths": settings.INGEST_ALLOW_LOCAL_PATHS,
         },
+        # Public Firebase web config (not secret) so the dashboard can render sign-in
+        "auth": {
+            "required": settings.AUTH_REQUIRED,
+            "provider": "firebase" if settings.AUTH_REQUIRED else "local",
+            "firebase": {
+                "apiKey": settings.FIREBASE_WEB_API_KEY,
+                "authDomain": settings.FIREBASE_AUTH_DOMAIN
+                or (f"{settings.FIREBASE_PROJECT_ID}.firebaseapp.com" if settings.FIREBASE_PROJECT_ID else ""),
+                "projectId": settings.FIREBASE_PROJECT_ID,
+            } if settings.AUTH_REQUIRED else None,
+        },
+        "scheduler": {"enabled": settings.SCHEDULER_ENABLED, "external_tick": bool(settings.CRON_SECRET)},
     }

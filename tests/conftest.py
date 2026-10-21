@@ -8,6 +8,9 @@ import pytest
 # touch the dev database or Firestore.
 os.environ.setdefault("AGENT_MEMORY_BACKEND", "memory")
 os.environ.setdefault("DATABASE_BACKEND", "memory")
+# Single local user (auth tests turn sign-in on explicitly); no background scheduler.
+os.environ.setdefault("AUTH_REQUIRED", "false")
+os.environ.setdefault("SCHEDULER_ENABLED", "false")
 
 
 @pytest.fixture(autouse=True)

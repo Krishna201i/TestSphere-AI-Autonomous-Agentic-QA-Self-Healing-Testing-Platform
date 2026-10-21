@@ -4,7 +4,7 @@ TestSphere-AI — Application Service.
 Encapsulates storage and business operations for web applications under test.
 """
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from backend.database.store import Record, Store
 from backend.models import APPLICATIONS, PROJECTS, TEST_CASES
@@ -13,10 +13,15 @@ from backend.services.exceptions import ApplicationNotFoundError, ProjectNotFoun
 DEFAULT_PROJECT = {"name": "TestSphere Auto QA", "description": "Autonomous agentic QA testing workspace"}
 
 
-def default_project(db: Store) -> Record:
-    """The first project, created on demand."""
-    existing = db.find(PROJECTS, limit=1)
-    return existing[0] if existing else db.insert(PROJECTS, **DEFAULT_PROJECT)
+def default_project(db: Store, owner_uid: Optional[str] = None) -> Record:
+    """The user's first project (any user's when *owner_uid* is None), created on demand."""
+    filters = {"owner_uid": owner_uid} if owner_uid else {}
+    existing = db.find(PROJECTS, limit=1, **filters)
+    if existing:
+        return existing[0]
+    from backend.services.project_service import ProjectService
+
+    return ProjectService.create_project(db, owner_uid=owner_uid, **DEFAULT_PROJECT)
 
 
 class ApplicationService:
@@ -25,19 +30,21 @@ class ApplicationService:
     @staticmethod
     def create_application(
         db: Store, project_id: Optional[int], name: str, base_url: str, description: Optional[str] = None,
+        owner_uid: Optional[str] = None,
     ) -> Record:
         if project_id is not None:
             if not db.get(PROJECTS, project_id):
                 raise ProjectNotFoundError(f"Project with ID {project_id} not found")
         else:
-            project_id = default_project(db)["id"]
-        return db.insert(APPLICATIONS, project_id=project_id, name=name, base_url=base_url, description=description)
+            project_id = default_project(db, owner_uid)["id"]
+        return db.insert(APPLICATIONS, project_id=project_id, name=name, base_url=base_url, description=description,
+                         owner_uid=owner_uid)
 
     @staticmethod
-    def list_applications(db: Store, project_id: Optional[int] = None) -> List[Record]:
+    def list_applications(db: Store, project_id: Optional[int] = None, **filters: Any) -> List[Record]:
         if project_id is not None:
-            return db.find(APPLICATIONS, project_id=project_id)
-        return db.find(APPLICATIONS)
+            filters["project_id"] = project_id
+        return db.find(APPLICATIONS, **filters)
 
     @staticmethod
     def get_application(db: Store, application_id: int) -> Record:
