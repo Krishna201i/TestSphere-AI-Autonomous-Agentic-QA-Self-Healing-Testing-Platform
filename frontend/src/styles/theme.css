@@ -534,3 +534,5 @@ img.avatar { object-fit: cover; }
   .diff-col { border-right: 0; border-bottom: 1px solid var(--border); }
   .card-head h3 { font-size: 20px; }
 }
+.auth-diag { display: flex; flex-direction: column; gap: 8px; align-items: center; border-top: 1px solid var(--border); padding-top: 12px; }
+.auth-diag .kv { width: 100%; }
