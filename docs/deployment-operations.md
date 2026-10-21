@@ -28,13 +28,14 @@ All settings can be configured via environment variables or a `.env` file at rep
 ### 2.2 AI Agent Settings
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `LLM_PROVIDER` | `mock` | LLM provider: `mock`, `openai`, `anthropic`, `gemini` |
-| `OPENAI_API_KEY` | `""` | OpenAI API key (required if `LLM_PROVIDER=openai`) |
-| `ANTHROPIC_API_KEY` | `""` | Anthropic API key (required if `LLM_PROVIDER=anthropic`) |
-| `GEMINI_API_KEY` | `""` | Google Gemini API key (required if `LLM_PROVIDER=gemini`) |
-| `LLM_MODEL` | `gpt-4o` | LLM model identifier |
-| `LLM_TEMPERATURE` | `0.1` | Sampling temperature for test synthesis and healing decisions |
-| `LLM_MAX_RETRIES` | `3` | Maximum LLM client retry attempts before error escalation |
+| `LLM_PROVIDER` | `mock` | `mock` (offline, deterministic) or `api` (any OpenAI-compatible chat API). `local` is reserved, not yet implemented |
+| `LLM_API_KEY` | `""` | API key for the configured endpoint (required if `LLM_PROVIDER=api`) |
+| `LLM_BASE_URL` | OpenAI | Base URL of the OpenAI-compatible endpoint (OpenAI, Anthropic, Gemini, Groq, OpenRouter) |
+| `LLM_MODEL` | `mock-model` | Model identifier sent to the endpoint |
+| `LLM_TEMPERATURE` | `0.2` | Sampling temperature for test synthesis and healing decisions |
+| `LLM_MAX_TOKENS` | `4096` | Max output tokens per request |
+| `LLM_TIMEOUT` | `60` | Request timeout in seconds |
+| `LLM_MAX_RETRIES` | `2` | Retries for transient errors (timeouts, 429, 5xx, network) |
 
 ### 2.3 Browser Engine Settings
 | Variable | Default Value | Description |
