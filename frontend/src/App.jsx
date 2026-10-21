@@ -1,8 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { WorkspaceProvider, useWorkspace } from './state/Workspace';
+import { AuthProvider, useAuth } from './state/Auth';
 import { healthStats } from './lib/derive';
 import TopNav, { PAGES } from './components/TopNav';
 import CommandCenter from './pages/CommandCenter';
+import Automation from './pages/Automation';
+import Profile from './pages/Profile';
+import { AuthGate } from './pages/Login';
 import PipelineVisualizer from './pages/PipelineVisualizer';
 import AttackerAgent from './pages/AttackerAgent';
 import RemediationBridge from './pages/RemediationBridge';
@@ -23,6 +27,8 @@ function DatabaseBanner() {
 
 const VIEWS = {
   command: CommandCenter,
+  automation: Automation,
+  profile: Profile,
   pipeline: PipelineVisualizer,
   attacker: AttackerAgent,
   remediation: RemediationBridge,
@@ -30,12 +36,30 @@ const VIEWS = {
   audit: AuditLogs,
 };
 
+// Reachable by link (profile menu), not shown as a nav pill
+const EXTRA_PAGES = [{ id: 'profile', label: 'Profile' }];
+
 function pageFromHash() {
   const id = window.location.hash.replace(/^#\/?/, '');
-  return PAGES.some((p) => p.id === id) ? id : 'command';
+  return [...PAGES, ...EXTRA_PAGES].some((p) => p.id === id) ? id : 'command';
 }
 
 export default function App() {
+  return (
+    <AuthProvider>
+      <SignedIn />
+    </AuthProvider>
+  );
+}
+
+/** The dashboard only mounts once signed in; it remounts per user so no data leaks across accounts. */
+function SignedIn() {
+  const auth = useAuth();
+  if (auth.status !== 'signedIn') return <AuthGate />;
+  return <Dashboard key={auth.user.uid} />;
+}
+
+function Dashboard() {
   const [page, setPage] = useState(pageFromHash);
   const [params, setParams] = useState(null);
 
@@ -46,7 +70,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const label = PAGES.find((p) => p.id === page)?.label;
+    const label = [...PAGES, ...EXTRA_PAGES].find((p) => p.id === page)?.label;
     document.title = `${label} · TestSphere AI`;
   }, [page]);
 

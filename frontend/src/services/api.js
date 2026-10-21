@@ -16,19 +16,34 @@ const BASE_URL = getApiBase();
 /** Where the dashboard sends API calls, for display ("same origin" when proxied). */
 export const API_BASE_LABEL = BASE_URL || (typeof window !== 'undefined' ? `${window.location.origin} (same origin)` : 'same origin');
 
+// Set by the auth provider: returns a fresh Firebase ID token (or null when
+// sign-in is off), and is told when the backend rejects the session.
+let tokenProvider = async () => null;
+let onUnauthorized = () => {};
+
+export function configureAuth({ getToken, unauthorized }) {
+  tokenProvider = getToken || (async () => null);
+  onUnauthorized = unauthorized || (() => {});
+}
+
 /**
  * Fetch JSON from the backend.  Errors carry a `kind` the UI can explain:
  *   network  — backend unreachable
+ *   auth     — 401, the session expired (the user is sent back to sign-in)
  *   outdated — endpoint missing (backend runs older code than the dashboard)
  *   refused  — 403 (e.g. target outside the authorized scope)
  *   http     — anything else; `message` is the server's detail
  */
 async function request(path, { method = 'GET', body } = {}) {
   let res;
+  const headers = {};
+  if (body) headers['Content-Type'] = 'application/json';
+  const token = await tokenProvider();
+  if (token) headers.Authorization = `Bearer ${token}`;
   try {
     res = await fetch(`${BASE_URL}${path}`, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers,
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
@@ -39,7 +54,8 @@ async function request(path, { method = 'GET', body } = {}) {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     let detail = typeof data.detail === 'string' ? data.detail : `Request failed (${res.status})`;
-    let kind = res.status === 403 ? 'refused' : 'http';
+    let kind = res.status === 403 ? 'refused' : res.status === 401 ? 'auth' : 'http';
+    if (res.status === 401 && token) onUnauthorized(detail);
     if (res.status === 404 && (data.detail === 'Not Found' || !data.detail)) {
       kind = 'outdated';
       detail = `The backend at ${API_BASE_LABEL} has no ${path.split('?')[0]} endpoint — it is running an older version. Deploy or restart it with the latest code.`;
@@ -90,3 +106,19 @@ export const getSystem = () => request('/api/system');
 export const ingestCodebase = (source, actor) => request('/api/ingest', { method: 'POST', body: { source, actor } });
 export const listBlueprints = () => request('/api/ingest');
 export const getBlueprint = (id) => request(`/api/ingest/${id}`);
+
+export const updateProject = (id, payload) => request(`/api/projects/${id}`, { method: 'PUT', body: payload });
+export const rotateWebhookSecret = (id) => request(`/api/projects/${id}/webhook-secret`, { method: 'POST' });
+export const runProjectPipeline = (projectId, ingest = false) =>
+  request('/api/pipelines/run', { method: 'POST', body: { project_id: projectId, ingest } });
+export const quickPipeline = (payload) => request('/api/pipelines/quick', { method: 'POST', body: payload });
+export const getPipelineRuns = (limit = 30) => request(`/api/pipelines/runs?limit=${limit}`);
+export const getPipelineRun = (id) => request(`/api/pipelines/runs/${id}`);
+
+export const getMe = () => request('/api/me');
+export const recordLogin = () => request('/api/me/login', { method: 'POST' });
+export const updateMe = (payload) => request('/api/me', { method: 'PUT', body: payload });
+
+/** Webhook URL GitHub should call for a project (absolute, using the API base). */
+export const webhookUrl = (projectId) =>
+  `${BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '')}/api/webhooks/github/${projectId}`;
