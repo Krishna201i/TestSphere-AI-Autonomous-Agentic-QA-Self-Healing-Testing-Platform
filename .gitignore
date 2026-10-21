@@ -52,3 +52,7 @@ frontend/dist/
 # --- OS ---
 Thumbs.db
 *.pdf
+
+# --- Benchmark output (python -m engine.benchmark) ---
+benchmark_results.csv
+benchmark_results.md
