@@ -65,6 +65,8 @@ export function healthStats(samples = []) {
   const last = samples[samples.length - 1];
   return {
     online: Boolean(last?.ok),
+    dbDown: Boolean(last?.ok && last.db === 'error'),
+    dbError: last?.dbError || null,
     successRate: samples.length ? ok.length / samples.length : null,
     latency: last?.ok ? last.ms : null,
   };

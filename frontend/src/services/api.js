@@ -57,9 +57,15 @@ export async function probeHealth() {
   const started = performance.now();
   try {
     const data = await request('/api/health');
-    return { ok: data?.status === 'ok', ms: Math.round(performance.now() - started) };
+    // "degraded" = API up but its database is down
+    return {
+      ok: data?.status === 'ok' || data?.status === 'degraded',
+      db: data?.database || 'ok',
+      dbError: data?.database_error || null,
+      ms: Math.round(performance.now() - started),
+    };
   } catch {
-    return { ok: false, ms: Math.round(performance.now() - started) };
+    return { ok: false, db: 'unknown', dbError: null, ms: Math.round(performance.now() - started) };
   }
 }
 
