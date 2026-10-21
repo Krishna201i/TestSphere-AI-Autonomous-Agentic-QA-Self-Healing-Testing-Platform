@@ -53,3 +53,15 @@ class AuditEvent(Base):
     level: Mapped[str] = mapped_column(String(16), default="info", nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     ref: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, doc="Finding key, execution id, …")
+
+
+class CodebaseBlueprint(Base):
+    """Result of ingesting a codebase (module 5.1)."""
+
+    __tablename__ = "codebase_blueprints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    data: Mapped[str] = mapped_column(Text, nullable=False, doc="Blueprint JSON")

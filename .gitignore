@@ -59,3 +59,6 @@ benchmark_results.md
 
 # --- Browser automation output ---
 .playwright-mcp/
+
+# --- Ingested repositories (INGEST_WORKSPACE) ---
+data/

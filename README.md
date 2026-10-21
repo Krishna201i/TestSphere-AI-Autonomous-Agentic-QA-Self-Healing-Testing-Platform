@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/Tests-1246%20Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-1272%20Passed-brightgreen.svg)]()
 [![Engine](https://img.shields.io/badge/Engine-Playwright-orange.svg)]()
 [![Backend](https://img.shields.io/badge/Backend-FastAPI-teal.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -23,7 +23,7 @@
 | Validation | Live | Security retests and test re-execution; findings auto-resolve or reopen as regressions |
 | Audit trail | Live | Scans, approvals, retests, QA runs and targets stored server-side (`/api/audit`) |
 | Healing memory | Live | Persisted in `DATABASE_URL` across restarts |
-| Repository ingestion (5.1) | Not built | |
+| Codebase ingestion (5.1) | Live | `ingestion/`: public Git URL or local folder → blueprint (languages, frameworks, dependencies, test suites, HTTP routes, committed secrets); static only |
 | Deployment & rollback (5.7) | Not built | |
 
 **Self-healing benchmark** (`python -m engine.benchmark`, 6 broken-page mutants of the demo app): 4/4 healable mutants healed, 2/2 unhealable mutants refused, 0 false heals (verified against ground truth).
