@@ -6,13 +6,12 @@ import { API_BASE_LABEL } from '../services/api';
 import { healthStats, pct, timeAgo, toDate } from '../lib/derive';
 
 export const PAGES = [
-  { id: 'command', label: 'Command Center' },
-  { id: 'automation', label: 'Automation' },
-  { id: 'pipeline', label: 'Pipeline Visualizer' },
-  { id: 'attacker', label: 'Attacker Agent' },
-  { id: 'remediation', label: 'Remediation Bridge' },
-  { id: 'validation', label: 'Validation Engine' },
-  { id: 'audit', label: 'Audit & Logs' },
+  { id: 'home', label: 'Home' },
+  { id: 'autopilot', label: 'Autopilot' },
+  { id: 'reports', label: 'Reports' },
+  { id: 'security', label: 'Security' },
+  { id: 'visualizer', label: 'Visualizer' },
+  { id: 'audit', label: 'Audit' },
 ];
 
 const SEEN_KEY = 'testsphere.notifications.seen';

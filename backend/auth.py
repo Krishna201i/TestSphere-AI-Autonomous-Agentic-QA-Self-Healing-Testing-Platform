@@ -51,7 +51,9 @@ def verify_token(token: str) -> Dict[str, Any]:
     from firebase_admin import auth
 
     app = firebase_app(settings.FIREBASE_CREDENTIALS or None, settings.FIREBASE_PROJECT_ID or None)
-    return auth.verify_id_token(token, app=app)
+    # A little clock skew tolerance: a host clock a few seconds behind Google's
+    # otherwise rejects brand-new tokens as "used too early".
+    return auth.verify_id_token(token, app=app, clock_skew_seconds=30)
 
 
 def get_current_user(authorization: Optional[str] = Header(None)) -> User:
@@ -72,10 +74,17 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> User:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail=f"Sign-in is unavailable on this server: {exc}") from exc
     except Exception as exc:
-        logger.info("Rejected ID token: %s", (str(exc).splitlines() or [repr(exc)])[0][:200])
+        reason = (str(exc).splitlines() or [repr(exc)])[0][:200]
+        logger.info("Rejected ID token: %s", reason)
+        detail = "Your session has expired or is invalid. Sign in again."
+        if "audience" in reason.lower() or "aud" in reason.lower().split():
+            # The dashboard's Firebase project differs from the backend's credentials
+            detail = (f"This server checks sign-ins for Firebase project '{settings.FIREBASE_PROJECT_ID}', but your "
+                      "token is from another project. Make FIREBASE_WEB_API_KEY and FIREBASE_CREDENTIALS come from "
+                      "the same Firebase project.")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Your session has expired or is invalid. Sign in again.",
+            detail=detail,
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
     return User(

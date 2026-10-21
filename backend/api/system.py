@@ -7,6 +7,7 @@ Never returns secrets.
 """
 
 import subprocess
+import time
 from functools import lru_cache
 from typing import Any, Dict
 
@@ -28,6 +29,18 @@ def _git_commit() -> str | None:
         return out.stdout.strip() or None
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+_browser_cache: Dict[str, Any] = {"at": 0.0, "value": None}
+
+
+def _browser_status() -> Dict[str, Any]:
+    """Chromium availability, cached for a minute (probing starts the Playwright driver)."""
+    if time.monotonic() - _browser_cache["at"] > 60 or _browser_cache["value"] is None:
+        from engine.browser import chromium_status
+
+        _browser_cache.update(at=time.monotonic(), value=chromium_status())
+    return _browser_cache["value"]
 
 
 @router.get("")
@@ -59,4 +72,5 @@ def system_info() -> Dict[str, Any]:
             } if settings.AUTH_REQUIRED else None,
         },
         "scheduler": {"enabled": settings.SCHEDULER_ENABLED, "external_tick": bool(settings.CRON_SECRET)},
+        "browser": _browser_status(),
     }

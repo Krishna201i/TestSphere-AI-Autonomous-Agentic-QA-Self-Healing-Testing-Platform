@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogIn, RefreshCw, UserPlus } from 'lucide-react';
+import { LogIn, RefreshCw, Stethoscope, UserPlus } from 'lucide-react';
 import { authMessage, useAuth } from '../state/Auth';
 import { Logo } from '../components/TopNav';
 import { API_BASE_LABEL } from '../services/api';
@@ -51,8 +51,35 @@ export function AuthGate() {
   return <Login />;
 }
 
+/** "Connection check": shows exactly which piece of sign-in is broken. */
+function Diagnostics() {
+  const { diagnose } = useAuth();
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+  async function run() {
+    setBusy(true);
+    try {
+      setRows(await diagnose());
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="auth-diag">
+      <button type="button" className="link-btn" onClick={run} disabled={busy}>
+        <Stethoscope size={14} style={{ verticalAlign: '-2px' }} /> {busy ? 'Checking…' : 'Trouble signing in? Run a connection check'}
+      </button>
+      {rows && (
+        <dl className="kv small">
+          {rows.map(([k, v]) => <React.Fragment key={k}><dt>{k}</dt><dd className="cell-wrap">{v}</dd></React.Fragment>)}
+        </dl>
+      )}
+    </div>
+  );
+}
+
 function Login() {
-  const { signIn, signUp, signInWithGoogle, resetPassword } = useAuth();
+  const { signIn, signUp, signInWithGoogle, resetPassword, notice: sessionNotice, clearNotice } = useAuth();
   const [mode, setMode] = useState('signin'); // signin | signup | reset
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [busy, setBusy] = useState(false);
@@ -64,6 +91,7 @@ function Login() {
   async function attempt(fn) {
     setError(null);
     setNotice(null);
+    clearNotice();
     setBusy(true);
     try {
       await fn();
@@ -101,6 +129,7 @@ function Login() {
         </div>
       )}
       {mode === 'reset' && <h2 className="auth-title">Reset your password</h2>}
+      {sessionNotice && <div className="subbox small cell-wrap bad-text" role="alert">{sessionNotice}</div>}
 
       <form className="auth-form" onSubmit={onSubmit}>
         {mode === 'signup' && (
@@ -142,6 +171,7 @@ function Login() {
       ) : (
         <button type="button" className="link-btn" onClick={() => switchTo('signin')}>Back to sign in</button>
       )}
+      <Diagnostics />
     </AuthShell>
   );
 }

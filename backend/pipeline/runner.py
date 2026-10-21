@@ -274,12 +274,15 @@ async def _stage_codebase(state: _RunState, project: Record) -> Optional[Dict[st
 
 async def _reachable(urls: List[str]) -> Dict[str, Optional[int]]:
     """HTTP status per URL (None when unreachable), checked concurrently."""
+    from backend.netguard import BlockedTargetError, guard_request
+
     async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, verify=False,
-                                 headers={"User-Agent": URLAnalyzerService.USER_AGENT}) as client:
+                                 headers={"User-Agent": URLAnalyzerService.USER_AGENT},
+                                 event_hooks={"request": [guard_request]}) as client:
         async def one(url: str) -> Optional[int]:
             try:
                 return (await client.get(url)).status_code
-            except httpx.HTTPError:
+            except (httpx.HTTPError, BlockedTargetError):
                 return None
         codes = await asyncio.gather(*(one(u) for u in urls))
     return dict(zip(urls, codes))
