@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/Tests-1272%20Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-1320%20Passed-brightgreen.svg)]()
 [![Engine](https://img.shields.io/badge/Engine-Playwright-orange.svg)]()
 [![Backend](https://img.shields.io/badge/Backend-FastAPI-teal.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -1050,6 +1050,14 @@ cp .env.example .env
 
 ```bash
 python -m pytest tests/ -q
+```
+
+The storage contract tests also run against the real Firestore emulator (needs Java):
+
+```bash
+curl -o firestore-emulator.jar https://storage.googleapis.com/firebase-preview-drop/emulator/cloud-firestore-emulator-v1.19.7.jar
+java -jar firestore-emulator.jar --host=127.0.0.1 --port=8085 &
+FIRESTORE_EMULATOR_HOST=127.0.0.1:8085 python -m pytest tests/backend/test_store.py -q
 ```
 
 ### 4. Run the Platform
