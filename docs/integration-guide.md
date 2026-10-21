@@ -131,6 +131,20 @@ eventSource.onerror = (err) => {
 
 ---
 
+### 4.3 Passive Security Scan
+
+`POST /api/security/scan` runs the passive scanner (`security/`) against one URL: a single GET per page, no attack payloads. Findings use the shared `Finding` schema and come back most severe first.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/security/scan   -H "Content-Type: application/json" -d '{"url": "http://127.0.0.1:5173/"}'
+```
+
+After a fix, post a finding back to `POST /api/security/retest` to get `retest_result: pass|fail`.
+
+Only loopback hosts are in scope by default. Add hosts you own with `SECURITY_SCAN_ALLOWED_HOSTS` (comma-separated). Requests cannot widen the scope, and out-of-scope URLs return `403`. From the command line: `python -m security <url> [--allow HOST]`.
+
+---
+
 ## 5. Verification & Testing
 
 Verify that all components are properly wired together by running the complete integration test suite:
