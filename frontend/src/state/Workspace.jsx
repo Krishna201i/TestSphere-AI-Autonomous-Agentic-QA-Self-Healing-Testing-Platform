@@ -15,6 +15,7 @@ import {
   getApplications,
   getAudit,
   getBlueprint,
+  getExecutionStats,
   getFindings,
   getSystem,
   ingestCodebase,
@@ -75,6 +76,7 @@ export function WorkspaceProvider({ children }) {
   const [applications, setApplications] = useState([]);
   const [testCases, setTestCases] = useState([]);
   const [executions, setExecutions] = useState([]);
+  const [executionTotals, setExecutionTotals] = useState(null); // over all executions; `executions` is the recent ones
   const [findings, setFindings] = useState([]); // every tracked finding (server)
   const [serverAudit, setServerAudit] = useState([]);
   const [clientErrors, setClientErrors] = useState([]); // failures that never reached the server
@@ -129,6 +131,7 @@ export function WorkspaceProvider({ children }) {
     const [p, a, t, e, f, au, bps] = results.map((r) => (r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : null));
     if (bps) setBlueprints(bps);
     getSystem().then(setSystem).catch(() => setSystem(null));
+    getExecutionStats().then(setExecutionTotals).catch(() => setExecutionTotals(null)); // older backend: count the list
     if (p) setProjects(p);
     if (a) setApplications(a);
     if (t) setTestCases(t);
@@ -282,11 +285,11 @@ export function WorkspaceProvider({ children }) {
 
   const value = useMemo(() => ({
     operator, setOperator, system, blueprints, blueprint, ingest, ingesting, openBlueprint,
-    health, projects, applications, testCases, executions, findings, refresh,
+    health, projects, applications, testCases, executions, executionTotals, findings, refresh,
     lastScan, scanHistory, scanning, runScan,
     approvals, approve, retests, retest, retesting, selectedKey, setSelectedKey,
     lastRun, running, runPipeline, addTarget, audit,
-  }), [health, projects, applications, testCases, executions, findings, refresh, lastScan, scanHistory, scanning, runScan,
+  }), [health, projects, applications, testCases, executions, executionTotals, findings, refresh, lastScan, scanHistory, scanning, runScan,
     approvals, approve, retests, retest, retesting, selectedKey, lastRun, running, runPipeline, addTarget, audit, operator, setOperator, system, blueprints, blueprint, ingest, ingesting, openBlueprint]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

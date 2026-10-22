@@ -176,6 +176,10 @@ class Settings(BaseSettings):
     # (localhost, 10.x, 169.254.x ...). Off on hosted servers (SSRF), on in local development.
     ALLOW_PRIVATE_TARGETS: bool = Field(default_factory=lambda: _default_allow_private_targets())
 
+    # Shown on the dashboard's privacy notice: who users contact about their
+    # data (e-mail or URL of the operator / grievance officer).
+    PRIVACY_CONTACT: str = Field(default_factory=lambda: os.getenv("PRIVACY_CONTACT", ""))
+
     # Logging & error reporting (see backend/observability.py)
     LOG_LEVEL: str = Field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     SENTRY_DSN: str = Field(default_factory=lambda: os.getenv("SENTRY_DSN", ""))

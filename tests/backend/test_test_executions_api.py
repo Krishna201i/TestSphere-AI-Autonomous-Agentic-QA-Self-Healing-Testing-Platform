@@ -151,3 +151,22 @@ class TestTestExecutionsAPI(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_list_limit_returns_the_newest_oldest_first_and_stats_count_all():
+    from fastapi.testclient import TestClient
+
+    from backend.database.session import get_store
+    from backend.main import app
+
+    db = get_store()
+    statuses = ["PASSED", "FAILED", "HEALED", "PASSED", "RUNNING", "PASSED"]
+    for status in statuses:
+        db.insert("test_executions", test_case_id=1, status=status, owner_uid="local-dev")
+    client = TestClient(app)
+
+    recent = client.get("/api/test-executions?limit=2").json()
+    assert [r["id"] for r in recent] == [5, 6]
+    assert len(client.get("/api/test-executions").json()) == len(statuses)
+
+    assert client.get("/api/test-executions/stats").json() == {"total": 5, "passed": 3, "healed": 1, "failed": 1}

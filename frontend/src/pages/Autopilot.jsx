@@ -11,6 +11,7 @@ import {
   webhookUrl,
 } from '../services/api';
 import { timeAgo, timeUntil, urlError } from '../lib/derive';
+import { selectableRow } from '../lib/a11y';
 
 const SCHEDULES = [
   [null, 'Off'], [15, 'Every 15 min'], [30, 'Every 30 min'], [60, 'Hourly'], [180, 'Every 3 hours'],
@@ -334,7 +335,7 @@ export default function Autopilot() {
               <thead><tr><th>Run</th><th>Project</th><th>Trigger</th><th>Status</th><th>Result</th><th>When</th></tr></thead>
               <tbody>
                 {runs.map((r) => (
-                  <tr key={r.id} className={`selectable ${r.id === shownId ? 'selected' : ''}`} onClick={() => setSelectedId(r.id)}>
+                  <tr key={r.id} className={`selectable ${r.id === shownId ? 'selected' : ''}`} {...selectableRow(() => setSelectedId(r.id), r.id === shownId)}>
                     <td>#{r.id}</td>
                     <td className="cell-wrap">{r.project_name}</td>
                     <td className="small">{TRIGGER_LABEL[r.trigger] || r.trigger}</td>

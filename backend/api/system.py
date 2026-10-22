@@ -72,9 +72,21 @@ def _auth_config() -> dict[str, Any]:
     }
 
 
+def _privacy_facts() -> dict[str, Any]:
+    """What the privacy notice must disclose (shown before sign-in)."""
+    provider = LLMConfig.from_env().provider
+    return {
+        "contact": settings.PRIVACY_CONTACT or None,
+        # where page content goes for AI planning/healing: a third-party API, this machine, or nowhere
+        "ai_processing": {"api": "cloud", "local": "local"}.get(provider, "none"),
+        "error_reporting": bool(settings.SENTRY_DSN),
+    }
+
+
 @router.get("")
 def system_info(authorization: str | None = Header(None)) -> dict[str, Any]:
-    public = {"service": settings.APP_NAME, "api_version": API_VERSION, "auth": _auth_config()}
+    public = {"service": settings.APP_NAME, "api_version": API_VERSION, "auth": _auth_config(),
+              "privacy": _privacy_facts()}
     if not _signed_in(authorization):
         return public
     llm = LLMConfig.from_env()
