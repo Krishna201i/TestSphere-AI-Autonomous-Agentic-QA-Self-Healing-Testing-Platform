@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import ssl
 import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -19,6 +20,35 @@ import httpx
 from backend.netguard import guard_request
 
 logger = logging.getLogger("testsphere.analyzer")
+
+
+def is_certificate_error(exc: BaseException) -> bool:
+    """Whether *exc* (or anything it wraps) is a failed TLS certificate check."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        if isinstance(exc, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(exc):
+            return True
+        seen.add(id(exc))
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+async def get_verifying_first(url: str, *, timeout: float, headers: Dict[str, str]) -> tuple[httpx.Response, bool]:
+    """GET *url* with certificate verification; returns ``(response, certificate_valid)``.
+
+    A site whose certificate fails verification (expired, self-signed staging)
+    is still fetched, without verification, so it can be tested; the caller
+    reports the invalid certificate instead of silently trusting it.
+    """
+    options = dict(timeout=timeout, follow_redirects=True, event_hooks={"request": [guard_request]})
+    try:
+        async with httpx.AsyncClient(**options) as client:
+            return await client.get(url, headers=headers), True
+    except httpx.ConnectError as exc:
+        if not is_certificate_error(exc):
+            raise
+    async with httpx.AsyncClient(verify=False, **options) as client:  # noqa: S501  # nosec B501 - reported as a finding
+        return await client.get(url, headers=headers), False
 
 
 class URLAnalyzerService:
@@ -58,22 +88,19 @@ class URLAnalyzerService:
         html = ""
         headers: Dict[str, str] = {}
         error_encountered: Optional[str] = None
+        certificate_valid: Optional[bool] = None
 
         try:
-            async with httpx.AsyncClient(
-                timeout=12.0,
-                follow_redirects=True,
-                verify=False,
-                event_hooks={"request": [guard_request]},
-            ) as client:
-                res = await client.get(
-                    normalized_url,
-                    headers={"User-Agent": cls.USER_AGENT, "Accept": "text/html,*/*"},
-                )
-                latency_ms = int((time.perf_counter() - start_time) * 1000)
-                status_code = res.status_code
-                html = res.text
-                headers = dict(res.headers)
+            res, certificate_valid = await get_verifying_first(
+                normalized_url, timeout=12.0,
+                headers={"User-Agent": cls.USER_AGENT, "Accept": "text/html,*/*"},
+            )
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+            status_code = res.status_code
+            html = res.text
+            headers = dict(res.headers)
+            if not certificate_valid:
+                logger.info("Analyzed %s despite an invalid TLS certificate", normalized_url)
         except Exception as exc:
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             error_encountered = str(exc)
@@ -100,7 +127,7 @@ class URLAnalyzerService:
         images = cls._extract_images(html)
 
         # Audits & Health Scoring
-        security_audit = cls._audit_security(normalized_url, headers)
+        security_audit = cls._audit_security(normalized_url, headers, certificate_valid)
         a11y_audit = cls._audit_accessibility(inputs, buttons, images)
         perf_audit = cls._audit_performance(latency_ms, len(html))
 
@@ -311,15 +338,17 @@ class URLAnalyzerService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _audit_security(cls, url: str, headers: Dict[str, str]) -> Dict[str, Any]:
+    def _audit_security(cls, url: str, headers: Dict[str, str],
+                        certificate_valid: Optional[bool] = None) -> Dict[str, Any]:
         is_https = url.startswith("https://")
+        bad_certificate = is_https and certificate_valid is False
         h_lower = {k.lower(): v for k, v in headers.items()}
         hsts = "strict-transport-security" in h_lower
         x_frame = "x-frame-options" in h_lower
         x_content = "x-content-type-options" in h_lower
         csp = "content-security-policy" in h_lower
 
-        score = 60 if is_https else 20
+        score = 60 if is_https and not bad_certificate else 20
         if hsts: score += 15
         if x_frame: score += 10
         if x_content: score += 10
@@ -333,7 +362,9 @@ class URLAnalyzerService:
             "x_frame_options": x_frame,
             "x_content_type_options": x_content,
             "csp": csp,
-            "summary": "High Security SSL" if score >= 80 else ("Moderate" if score >= 50 else "Insecure HTTP"),
+            "certificate_valid": certificate_valid,
+            "summary": ("Invalid TLS certificate" if bad_certificate
+                        else "High Security SSL" if score >= 80 else ("Moderate" if score >= 50 else "Insecure HTTP")),
         }
 
     @classmethod
