@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.config import settings
+from backend.config import settings, startup_safety_problem
 from backend.api import (
     applications_router,
     audit_router,
@@ -46,6 +46,11 @@ set_request_guard(check_target)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown events."""
+    if problem := startup_safety_problem():
+        logger.critical("Refusing to start: %s", problem)
+        raise RuntimeError(problem)
+    if not settings.AUTH_REQUIRED and settings.APP_ENV != "development":
+        logger.warning("Sign-in is OFF (AUTH_REQUIRED=false): anyone who can reach this server shares one account.")
     logger.info("Initializing TestSphere-AI backend services...")
     try:
         init_db()
@@ -89,11 +94,11 @@ async def database_unavailable(_request: Request, exc: StoreUnavailableError) ->
     return JSONResponse(status_code=503, content={"detail": f"Database unavailable: {exc}"})
 
 
-# CORS Middleware setup
+# CORS: only for a dashboard hosted on another origin (CORS_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
