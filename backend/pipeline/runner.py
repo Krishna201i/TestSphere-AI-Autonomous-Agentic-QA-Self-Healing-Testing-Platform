@@ -15,8 +15,9 @@ test" prompt) through every stage without manual steps:
 
 Runs are documents in ``pipeline_runs``, updated after every stage and test,
 so the dashboard follows progress by polling.  Runs execute one at a time per
-server process (each needs a browser; small hosts have little memory) —
-others wait as "queued".
+process (each needs a browser; small hosts have little memory) — others wait
+as "queued".  With ``PIPELINE_EXECUTION=worker`` the API only queues runs and
+``backend.worker`` claims and executes them.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from typing import Any
 
 import httpx
 
+from backend.config import settings
 from backend.database.session import get_store
 from backend.database.store import Record, Store, StoreUnavailableError, now_iso
 from backend.models import (
@@ -104,18 +106,23 @@ def create_run(db: Store, project: Record, *, trigger: str, actor: str, detail: 
 
 def start_run(db: Store, project: Record, *, trigger: str, actor: str, detail: str | None = None,
               ingest: bool = False, executor: Callable[[int], Any] | None = None) -> Record:
-    """Create a run and execute it in the background on the running event loop."""
+    """Create a run; execute it in the background here, or leave it queued for a worker."""
     run = create_run(db, project, trigger=trigger, actor=actor, detail=detail, ingest=ingest)
-    task = asyncio.get_running_loop().create_task((executor or execute_run)(run["id"]))
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+    if settings.PIPELINE_EXECUTION != "worker" or executor is not None:
+        task = asyncio.get_running_loop().create_task((executor or execute_run)(run["id"]))
+        _tasks.add(task)
+        task.add_done_callback(_tasks.discard)
     record_audit(db, actor=actor, kind="pipeline", ref=str(run["id"]), owner_uid=project.get("owner_uid"),
                  message=f"Pipeline #{run['id']} queued for {project['name']} ({trigger}{f': {detail}' if detail else ''})")
     return run
 
 
 def recover_interrupted(db: Store) -> int:
-    """Runs left queued/running by a restart can never finish; mark them so."""
+    """Inline execution: runs left queued/running by a restart can never finish; mark them so.
+    (A worker's runs are its own business: queued ones wait for it, and it reaps
+    stale running ones itself.)"""
+    if settings.PIPELINE_EXECUTION == "worker":
+        return 0
     count = 0
     for status in ACTIVE:
         for row in db.find(PIPELINE_RUNS, status=status):
