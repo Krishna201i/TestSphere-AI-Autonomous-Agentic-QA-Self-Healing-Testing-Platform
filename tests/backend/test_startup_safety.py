@@ -69,6 +69,8 @@ def test_cors_defaults(env):
     assert fresh_settings(env).CORS_ORIGINS == []
     env.setenv("CORS_ORIGINS", "https://testsphere.vercel.app/, https://admin.example.org")
     assert fresh_settings(env).CORS_ORIGINS == ["https://testsphere.vercel.app", "https://admin.example.org"]
+    env.setenv("CORS_ORIGINS", '["https://testsphere.vercel.app/", "https://admin.example.org"]')  # older JSON form
+    assert fresh_settings(env).CORS_ORIGINS == ["https://testsphere.vercel.app", "https://admin.example.org"]
 
 
 def test_cors_does_not_echo_unknown_origins():
