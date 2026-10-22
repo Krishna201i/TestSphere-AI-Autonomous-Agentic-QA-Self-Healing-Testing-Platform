@@ -126,6 +126,10 @@ class Store(ABC):
         (a missing field counts as None).  False when someone changed it first."""
         return self._update_if(collection, doc_id, field, expected, {**_clean(changes), "updated_at": now_iso()})
 
+    def count(self, collection: str, **equals: Any) -> int:
+        """Number of documents matching *equals* (backends may count without reading them)."""
+        return len(self.find(collection, **equals))
+
     def find_one(self, collection: str, **equals: Any) -> Record | None:
         rows = self.find(collection, limit=1, **equals)
         return rows[0] if rows else None
@@ -418,15 +422,43 @@ class FirestoreStore(Store):
             query = self._db.collection(collection)
             for field, value in equals.items():
                 query = query.where(filter=FieldFilter(field, "==", value))
-            if not equals and order_by:
-                # single-field order + limit: served by Firestore's automatic index
+            if order_by and (not equals or limit):
+                # Ordering in Firestore: automatic single-field index without
+                # filters; with equality filters a composite index (see
+                # firestore.indexes.json), else fall back to sorting here.
                 direction = "DESCENDING" if descending else "ASCENDING"
-                query = query.order_by(order_by, direction=direction)
+                ordered = query.order_by(order_by, direction=direction)
                 if limit:
-                    query = query.limit(limit)
-                return [Record(s.to_dict()) for s in query.stream()]
+                    ordered = ordered.limit(limit)
+                try:
+                    return [Record(s.to_dict()) for s in ordered.stream()]
+                except Exception as exc:  # noqa: BLE001 - only a missing index is retried below
+                    if not equals or "index" not in str(exc).lower():
+                        raise
+                    self._warn_missing_index(collection, equals, order_by, exc)
             rows = [Record(s.to_dict()) for s in query.stream()]
             return _sort_and_limit(rows, order_by, descending, limit)
+        return self._call(run)
+
+    _warned_indexes: set = set()
+
+    def _warn_missing_index(self, collection: str, equals: dict, order_by: str, exc: Exception) -> None:
+        key = (collection, tuple(sorted(equals)), order_by)
+        if key not in self._warned_indexes:
+            self._warned_indexes.add(key)
+            link = next((w for w in str(exc).split() if w.startswith("https://console.firebase")), None)
+            logger.warning("Firestore index missing for %s filtered by %s ordered by %s: reading every matching "
+                           "document instead. Create it with `firebase deploy --only firestore:indexes`%s",
+                           collection, ", ".join(sorted(equals)), order_by, f" or open {link}" if link else "")
+
+    def count(self, collection, **equals):
+        def run():
+            from google.cloud.firestore_v1.base_query import FieldFilter
+
+            query = self._db.collection(collection)
+            for field, value in equals.items():
+                query = query.where(filter=FieldFilter(field, "==", value))
+            return int(query.count().get()[0][0].value)
         return self._call(run)
 
     def _update(self, collection, doc_id, changes):

@@ -22,8 +22,8 @@ export function HealthWaveformBox() {
 }
 
 export function ValidationRings() {
-  const { executions, retests } = useWorkspace();
-  const ex = executionStats(executions);
+  const { executions, executionTotals, retests } = useWorkspace();
+  const ex = executionStats(executions, executionTotals);
   const rt = retestStats(retests);
   return (
     <div className="rings">
@@ -47,8 +47,8 @@ export function ValidationRings() {
 }
 
 export default function ValidationCard() {
-  const { executions } = useWorkspace();
-  const ex = executionStats(executions);
+  const { executions, executionTotals } = useWorkspace();
+  const ex = executionStats(executions, executionTotals);
 
   return (
     <section className="card" aria-labelledby="validation-title">

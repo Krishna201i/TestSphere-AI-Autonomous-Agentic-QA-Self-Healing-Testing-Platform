@@ -57,11 +57,19 @@ def create_test_execution(
 @router.get("", response_model=list[TestExecutionResponse])
 def list_test_executions(
     test_case_id: int | None = Query(None, description="Filter by parent TestCase ID"),
+    limit: int | None = Query(None, ge=1, le=1000, description="Only the newest N (still returned oldest first)"),
     db: Store = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[Record]:
-    """Retrieve the caller's test executions, with optional test_case_id filtering."""
-    return TestExecutionService.list_executions(db=db, test_case_id=test_case_id, **scope(user))
+    """Retrieve the caller's test executions, oldest first, with optional test_case_id filtering."""
+    return TestExecutionService.list_executions(db=db, test_case_id=test_case_id, limit=limit, **scope(user))
+
+
+@router.get("/stats")
+def test_execution_stats(db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, int]:
+    """Totals over all of the caller's finished executions (counted, not downloaded)."""
+    counts = TestExecutionService.execution_counts(db, **scope(user))
+    return {"total": sum(counts.values()), **counts}
 
 
 @router.get("/{execution_id}", response_model=TestExecutionResponse)

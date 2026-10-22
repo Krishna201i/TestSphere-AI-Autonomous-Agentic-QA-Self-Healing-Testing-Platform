@@ -76,6 +76,22 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 
 ---
 
+## 2.4 Firestore rules and indexes
+
+`firestore.rules` denies all client access (only the backend's Admin SDK, which bypasses rules, uses the
+database). `firestore.indexes.json` lists the composite indexes for "newest N of my …" queries (test
+executions, pipeline runs, audit events, blueprints). Deploy both with the Firebase CLI:
+
+```bash
+npm install -g firebase-tools && firebase login
+firebase deploy --only firestore --project <your-project-id>
+```
+
+Without the indexes everything still works: the backend reads every matching document and sorts them
+itself, and logs a one-time warning with a link that creates the missing index.
+
+---
+
 ## 3. Docker Containerization
 
 The repository's [`Dockerfile`](../Dockerfile) builds one image with the API,

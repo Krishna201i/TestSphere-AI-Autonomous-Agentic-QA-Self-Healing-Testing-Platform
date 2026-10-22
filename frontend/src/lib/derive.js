@@ -38,18 +38,23 @@ export function pathOf(url) {
   }
 }
 
-/** Pass rate over executions: PASSED and HEALED count as passing. */
-export function executionStats(executions = []) {
+/**
+ * Pass rate over executions: PASSED and HEALED count as passing.  `totals`
+ * (server counts over all executions, from /api/test-executions/stats) wins
+ * over counting the loaded list, which holds only the most recent ones.
+ */
+export function executionStats(executions = [], totals = null) {
   const done = executions.filter((e) => ['PASSED', 'FAILED', 'HEALED'].includes(e.status));
-  const passed = done.filter((e) => e.status === 'PASSED').length;
-  const healed = done.filter((e) => e.status === 'HEALED').length;
-  const failed = done.filter((e) => e.status === 'FAILED').length;
+  const passed = totals ? totals.passed : done.filter((e) => e.status === 'PASSED').length;
+  const healed = totals ? totals.healed : done.filter((e) => e.status === 'HEALED').length;
+  const failed = totals ? totals.failed : done.filter((e) => e.status === 'FAILED').length;
+  const total = passed + healed + failed;
   return {
-    total: done.length,
+    total,
     passed,
     healed,
     failed,
-    passRate: done.length ? (passed + healed) / done.length : null,
+    passRate: total ? (passed + healed) / total : null,
     healRate: healed + failed ? healed / (healed + failed) : null,
   };
 }
