@@ -92,6 +92,17 @@ class TestRequestBuilding:
         assert "response_format" not in body
 
     @pytest.mark.asyncio
+    async def test_local_provider_posts_to_ollama_without_a_key(self):
+        from agents.llm.providers.api import DEFAULT_LOCAL_BASE_URL
+
+        captured: list[httpx.Request] = []
+        response = await _provider(_json_handler(captured=captured), provider="local", api_key="").generate(
+            LLMRequest(prompt="hi"))
+        assert str(captured[0].url) == f"{DEFAULT_LOCAL_BASE_URL}/chat/completions"
+        assert "Authorization" not in captured[0].headers
+        assert response.provider == "local"
+
+    @pytest.mark.asyncio
     async def test_omits_empty_system_message(self):
         captured: list[httpx.Request] = []
         await _provider(_json_handler(captured=captured)).generate(LLMRequest(prompt="hi"))

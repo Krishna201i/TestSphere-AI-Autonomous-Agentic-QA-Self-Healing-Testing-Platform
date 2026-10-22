@@ -1,6 +1,5 @@
 """Hosted-server safety defaults: CORS origins and refusing to run open by accident."""
 
-import importlib
 
 import pytest
 from fastapi.testclient import TestClient

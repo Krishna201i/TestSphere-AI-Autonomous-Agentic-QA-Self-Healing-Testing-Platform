@@ -105,7 +105,11 @@ def test_workflow_events_are_only_streamed_to_the_runs_owner(client, monkeypatch
     from backend.api import workflow
     from backend.database.session import get_store
     from backend.models import TEST_EXECUTIONS
-    from backend.orchestration.orchestrator import WorkflowEvent, WorkflowEventType, WorkflowStep
+    from backend.orchestration.orchestrator import (
+        WorkflowEvent,
+        WorkflowEventType,
+        WorkflowStep,
+    )
 
     run = get_store().insert(TEST_EXECUTIONS, test_case_id=1, status="PASSED", owner_uid="alice")
     event = WorkflowEvent(workflow_id=f"wf-exec-{run['id']}", step=WorkflowStep.COMPLETED,
@@ -132,3 +136,60 @@ def test_unknown_or_eventless_workflows_are_404_not_invented(client):
     resp = client.get(f"/api/workflow/stream/wf-exec-{idle['id']}", headers=as_user("token-alice"))
     assert resp.status_code == 404
     assert "No recorded events" in resp.json()["detail"]
+
+
+def test_system_info_shows_deployment_details_only_when_signed_in(client):
+    anonymous = client.get("/api/system").json()
+    assert set(anonymous) == {"service", "api_version", "auth"}  # enough to render sign-in
+    assert anonymous["auth"]["firebase"] is not None
+
+    expired = client.get("/api/system", headers=as_user("forged"))
+    assert expired.status_code == 200 and "llm" not in expired.json()  # no 401: the login page still needs it
+
+    full = client.get("/api/system", headers=as_user("token-alice")).json()
+    for key in ("commit", "llm", "scan_scope", "browser", "ingestion", "scheduler"):
+        assert key in full
+
+
+def test_deleting_an_account_erases_only_that_users_data(client, monkeypatch):
+    from backend.api import me
+    from backend.database.session import get_store
+
+    removed = []
+    monkeypatch.setattr(me, "_delete_sign_in_account", lambda uid: removed.append(uid) or True)
+    alice, bob = as_user("token-alice"), as_user("token-bob")
+    for headers in (alice, bob):
+        client.get("/api/me", headers=headers)  # creates the profile
+        client.post("/api/projects", json={"name": "p", "app_url": "https://shop.example"}, headers=headers)
+    db = get_store()
+    db.insert("audit_events", actor="Alice", kind="qa", message="x", owner_uid="alice")
+
+    assert client.request("DELETE", "/api/me", json={}, headers=alice).status_code == 422  # confirmation required
+    assert client.request("DELETE", "/api/me", json={"confirm": "yes"}, headers=alice).status_code == 422
+
+    resp = client.request("DELETE", "/api/me", json={"confirm": "DELETE MY ACCOUNT"}, headers=alice)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["deleted"]["projects"] == 1 and body["deleted"]["users"] == 1
+    assert body["sign_in_account_deleted"] is True and removed == ["alice"]
+
+    for name in me.OWNED_COLLECTIONS:
+        assert db.find(name, owner_uid="alice") == []
+    assert db.find("users", uid="alice") == []
+    assert len(db.find("projects", owner_uid="bob")) == 1
+    assert len(db.find("users", uid="bob")) == 1
+
+
+def test_a_failed_sign_in_deletion_is_reported(client, monkeypatch):
+    from backend.api import me
+
+    monkeypatch.setattr(me, "_delete_sign_in_account", lambda uid: False)
+    body = client.request("DELETE", "/api/me", json={"confirm": "DELETE MY ACCOUNT"},
+                          headers=as_user("token-alice")).json()
+    assert body["sign_in_account_deleted"] is False
+    assert "could not be removed" in body["detail"]
+
+
+def test_local_mode_has_no_account_to_delete():
+    resp = TestClient(app).request("DELETE", "/api/me", json={"confirm": "DELETE MY ACCOUNT"})
+    assert resp.status_code == 400

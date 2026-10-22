@@ -5,7 +5,6 @@ Tests for the business-rule validation layer that goes beyond
 Pydantic schema constraints.
 """
 
-import pytest
 
 from agents.planner.schemas import (
     ApplicationContext,
@@ -16,8 +15,6 @@ from agents.planner.schemas import (
 )
 from agents.planner.validation import (
     ACTION_REQUIREMENTS,
-    ASSERTIONS_REQUIRING_EXPECTED,
-    ASSERTIONS_REQUIRING_TARGET,
     TestPlanValidationError,
     validate_application_context,
     validate_assertion,
@@ -28,10 +25,7 @@ from agents.planner.validation import (
 from agents.schemas.enums import (
     AssertionType,
     TestAction,
-    TestCategory,
-    TestPriority,
 )
-
 
 # ── Action Requirements Tests ────────────────────────────────
 

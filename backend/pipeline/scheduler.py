@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
 from backend.config import settings
 from backend.database.session import get_store
@@ -24,14 +23,14 @@ from backend.services.project_service import next_run_after
 logger = logging.getLogger("testsphere.scheduler")
 
 
-def _parse(value: Optional[str]) -> Optional[datetime]:
+def _parse(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def due_projects(db: Store, now: datetime) -> list:
@@ -42,14 +41,21 @@ def due_projects(db: Store, now: datetime) -> list:
     ]
 
 
-async def tick(db: Optional[Store] = None, now: Optional[datetime] = None) -> List[int]:
+async def tick(db: Store | None = None, now: datetime | None = None) -> list[int]:
     """Start a run for every due project; returns the new run ids."""
     db = db or get_store()
-    now = now or datetime.now(timezone.utc)
-    started: List[int] = []
+    now = now or datetime.now(UTC)
+    started: list[int] = []
     for project in due_projects(db, now):
-        # Always move the schedule forward, so a busy or failing project cannot spin
-        db.update(PROJECTS, project["id"], next_run_at=next_run_after(project["schedule_minutes"], now))
+        # Claim the slot by moving the schedule forward from the value we read:
+        # only one scheduler (another instance, or the cron tick racing the
+        # in-process loop) wins; the others see it changed and skip.  Moving it
+        # forward also keeps a busy or failing project from spinning.
+        claimed = db.update_if(PROJECTS, project["id"], "next_run_at", project.get("next_run_at"),
+                               next_run_at=next_run_after(project["schedule_minutes"], now))
+        if not claimed:
+            logger.info("Project %s: slot already claimed by another scheduler", project["id"])
+            continue
         if active_run(db, project["id"]):
             logger.info("Project %s: previous run still active, skipping this slot", project["id"])
             continue

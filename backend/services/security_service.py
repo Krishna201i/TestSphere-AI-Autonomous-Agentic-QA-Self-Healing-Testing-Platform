@@ -3,21 +3,21 @@ TestSphere-AI — Security finding persistence and the audit trail.
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from backend.database.store import Record, Store, now_iso
 from backend.models import AUDIT_EVENTS, SECURITY_FINDINGS
 
 
 def record_audit(
-    db: Store, *, actor: str, kind: str, message: str, level: str = "info", ref: Optional[str] = None,
-    owner_uid: Optional[str] = None,
+    db: Store, *, actor: str, kind: str, message: str, level: str = "info", ref: str | None = None,
+    owner_uid: str | None = None,
 ) -> Record:
     return db.insert(AUDIT_EVENTS, at=now_iso(), actor=actor, kind=kind, message=message, level=level, ref=ref,
                      owner_uid=owner_uid)
 
 
-def list_audit(db: Store, limit: int = 200, **filters: Any) -> List[Dict[str, Any]]:
+def list_audit(db: Store, limit: int = 200, **filters: Any) -> list[dict[str, Any]]:
     rows = db.find(AUDIT_EVENTS, order_by="id", descending=True, limit=limit, **filters)
     return [
         {"id": r["id"], "at": r["at"], "actor": r["actor"], "kind": r["kind"], "level": r["level"],
@@ -26,7 +26,7 @@ def list_audit(db: Store, limit: int = 200, **filters: Any) -> List[Dict[str, An
     ]
 
 
-def serialize(row: Record) -> Dict[str, Any]:
+def serialize(row: Record) -> dict[str, Any]:
     """Stored finding JSON plus its tracked lifecycle fields."""
     return json.loads(row["data"]) | {
         "key": row["key"],
@@ -40,19 +40,19 @@ def serialize(row: Record) -> Dict[str, Any]:
     }
 
 
-def get_finding(db: Store, key: str, **filters: Any) -> Optional[Record]:
+def get_finding(db: Store, key: str, **filters: Any) -> Record | None:
     return db.find_one(SECURITY_FINDINGS, key=key, **filters)
 
 
-def list_findings(db: Store, target_url: Optional[str] = None, **filters: Any) -> List[Record]:
+def list_findings(db: Store, target_url: str | None = None, **filters: Any) -> list[Record]:
     if target_url:
         filters["target_url"] = target_url
     return db.find(SECURITY_FINDINGS, order_by="last_seen", descending=True, **filters)
 
 
 def save_scan(
-    db: Store, target_url: str, findings: List[Dict[str, Any]], owner_uid: Optional[str] = None,
-) -> Dict[str, List[Record]]:
+    db: Store, target_url: str, findings: list[dict[str, Any]], owner_uid: str | None = None,
+) -> dict[str, list[Record]]:
     """Upsert this scan's findings for *target_url*.
 
     - New findings are inserted as open.
@@ -80,7 +80,7 @@ def save_scan(
                 first_seen=now, last_seen=now, owner_uid=owner_uid,
             )
         else:
-            changes: Dict[str, Any] = {"severity": f["severity"], "title": f["title"], "data": data, "last_seen": now}
+            changes: dict[str, Any] = {"severity": f["severity"], "title": f["title"], "data": data, "last_seen": now}
             if row["status"] == "resolved":
                 changes.update(status="open", retest_result=None, retested_at=None, approved_by=None, approved_at=None)
             was_resolved = row["status"] == "resolved"

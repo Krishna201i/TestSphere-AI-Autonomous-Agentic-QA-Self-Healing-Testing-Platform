@@ -10,13 +10,12 @@ Day 8: Foundation for historical context tracking.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 from agents.schemas.enums import ChangeType, ExecutionStatus, FailureType
-
 
 # ── Failure Info (embedded in execution records) ──────────────
 
@@ -31,19 +30,19 @@ class FailureInfo(BaseModel):
     error_message: str = Field(
         ..., min_length=1, description="Error message from the execution engine"
     )
-    failure_type: Optional[FailureType] = Field(
+    failure_type: FailureType | None = Field(
         default=None, description="Classified failure type"
     )
-    failed_step: Optional[int] = Field(
+    failed_step: int | None = Field(
         default=None, description="1-based step number that failed", ge=1
     )
-    selector: Optional[str] = Field(
+    selector: str | None = Field(
         default=None, description="Selector that was being used when failure occurred"
     )
-    page_url: Optional[str] = Field(
+    page_url: str | None = Field(
         default=None, description="Page URL at time of failure"
     )
-    stack_trace: Optional[str] = Field(
+    stack_trace: str | None = Field(
         default=None, description="Stack trace if available"
     )
 
@@ -69,16 +68,16 @@ class TestExecutionRecord(BaseModel):
         ..., min_length=1, description="Human-readable test name"
     )
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 execution timestamp",
     )
     status: ExecutionStatus = Field(
         ..., description="Execution outcome"
     )
-    duration_ms: Optional[float] = Field(
+    duration_ms: float | None = Field(
         default=None, description="Execution duration in milliseconds", ge=0
     )
-    failure_info: Optional[FailureInfo] = Field(
+    failure_info: FailureInfo | None = Field(
         default=None,
         description="Failure details (present when status is FAILED or ERROR)",
     )
@@ -111,16 +110,16 @@ class ElementRecord(BaseModel):
     selector: str = Field(
         ..., min_length=1, description="CSS/XPath selector for the element"
     )
-    text: Optional[str] = Field(
+    text: str | None = Field(
         default=None, description="Visible text content"
     )
-    role: Optional[str] = Field(
+    role: str | None = Field(
         default=None, description="ARIA role or semantic role"
     )
-    page_url: Optional[str] = Field(
+    page_url: str | None = Field(
         default=None, description="Page URL where the element was found"
     )
-    page_name: Optional[str] = Field(
+    page_name: str | None = Field(
         default=None, description="Human-readable page name"
     )
     attributes: dict[str, str] = Field(
@@ -128,10 +127,10 @@ class ElementRecord(BaseModel):
         description="Relevant HTML attributes (data-testid, aria-label, etc.)",
     )
     last_seen_timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 timestamp when this element state was recorded",
     )
-    last_successful_execution_id: Optional[str] = Field(
+    last_successful_execution_id: str | None = Field(
         default=None,
         description="Execution ID of the last successful test involving this element",
     )
@@ -169,12 +168,12 @@ class HealingRecord(BaseModel):
         le=1.0,
         description="Confidence score for the healing (0.0 to 1.0)",
     )
-    validation_result: Optional[bool] = Field(
+    validation_result: bool | None = Field(
         default=None,
         description="Whether the healing was validated successfully (None if pending)",
     )
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 timestamp of the healing attempt",
     )
 
@@ -192,10 +191,10 @@ class FieldChange(BaseModel):
     field_name: str = Field(
         ..., description="Name of the field that changed"
     )
-    old_value: Optional[Any] = Field(
+    old_value: Any | None = Field(
         default=None, description="Previous value"
     )
-    new_value: Optional[Any] = Field(
+    new_value: Any | None = Field(
         default=None, description="Current value"
     )
     change_type: ChangeType = Field(
@@ -229,6 +228,6 @@ class ContextComparisonResult(BaseModel):
         description="True if no changes were detected between snapshots",
     )
     comparison_timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 timestamp of when comparison was performed",
     )

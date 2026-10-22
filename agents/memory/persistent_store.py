@@ -19,7 +19,11 @@ import logging
 from typing import Any
 
 from agents.memory.in_memory_store import InMemoryStore
-from agents.memory.memory_schemas import ElementRecord, HealingRecord, TestExecutionRecord
+from agents.memory.memory_schemas import (
+    ElementRecord,
+    HealingRecord,
+    TestExecutionRecord,
+)
 
 logger = logging.getLogger(__name__)
 

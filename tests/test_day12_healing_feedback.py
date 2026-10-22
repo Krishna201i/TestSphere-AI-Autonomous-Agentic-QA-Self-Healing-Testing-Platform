@@ -23,17 +23,14 @@ All tests are offline, no browser, no API keys, no real models.
 from __future__ import annotations
 
 import pytest
-import pytest_asyncio
 
 from agents.analyzer.schemas import (
     FailureAnalysis,
-    FailureContext,
     FailureEvidence,
     HistoricalContext,
 )
 from agents.healer.candidate_scorer import CandidateScorer, ScoringWeights
 from agents.healer.healing_decision import (
-    ConfidenceThresholds,
     HealingDecisionEngine,
 )
 from agents.healer.healing_feedback import (
@@ -43,7 +40,6 @@ from agents.healer.healing_feedback import (
 from agents.healer.healing_result_mapper import (
     healing_result_to_memory_update,
     prepare_healing_result,
-    recommendation_to_healing_candidate,
 )
 from agents.healer.healing_schemas import (
     HealingContext,
@@ -54,8 +50,6 @@ from agents.healer.llm_healing_evaluator import LLMHealingEvaluator
 from agents.healer.schemas import HealingCandidate, HealingResult
 from agents.memory.healing_evidence import (
     HealingEvidenceRetriever,
-    ReplacementStats,
-    SelectorHistory,
 )
 from agents.memory.in_memory_store import InMemoryStore
 from agents.memory.memory_schemas import (
@@ -63,7 +57,6 @@ from agents.memory.memory_schemas import (
     HealingRecord,
 )
 from agents.memory.pattern_detector import (
-    HealingPattern,
     HealingPatternDetector,
 )
 from agents.schemas.enums import (
@@ -77,7 +70,6 @@ from agents.schemas.enums import (
     RecommendedAction,
     ValidationStatus,
 )
-
 
 # ══════════════════════════════════════════════════════════════
 # Fixtures

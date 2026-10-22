@@ -20,8 +20,6 @@ from __future__ import annotations
 import json
 
 from agents.planner.schemas import ApplicationContext
-from agents.schemas.enums import AssertionType, TestAction, TestCategory, TestPriority
-
 
 # ── System Prompt ────────────────────────────────────────────
 

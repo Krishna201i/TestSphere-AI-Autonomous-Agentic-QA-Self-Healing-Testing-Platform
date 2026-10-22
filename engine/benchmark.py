@@ -1,4 +1,4 @@
-﻿"""
+"""
 engine/benchmark.py
 ===================
 Benchmark harness for the TestSphere-AI self-healing engine.
@@ -28,22 +28,20 @@ import asyncio
 import copy
 import csv
 import http.server
-import io
 import logging
 import re
 import socket
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 from playwright.async_api import async_playwright
 
 from engine.runner import run_test
 from engine.schemas import (
     ActionType,
-    EngineConfig,
     RunOptions,
     Step,
     StepStatus,

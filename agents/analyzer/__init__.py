@@ -10,6 +10,8 @@ Member 1 Enhancements:
 from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.analyzer.failure_analysis_agent import (
     FailureAnalysisAgent as FailureAnalysisAgentV2,
+)
+from agents.analyzer.failure_analysis_agent import (
     FailureAnalysisResult,
     Severity,
 )

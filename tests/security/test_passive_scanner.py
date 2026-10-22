@@ -16,7 +16,14 @@ import httpx
 import pytest
 
 from security.__main__ import main as cli_main
-from security.findings import Finding, FindingSource, FindingStatus, RetestResult, Severity, dedupe
+from security.findings import (
+    Finding,
+    FindingSource,
+    FindingStatus,
+    RetestResult,
+    Severity,
+    dedupe,
+)
 from security.passive_scanner import PROBE_ORIGIN, PassiveScanner, ScanError
 from security.scope import OutOfScopeError, ScopePolicy
 

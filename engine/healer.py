@@ -199,7 +199,7 @@ async def _resolve_unique(page: Page, locator: str) -> ElementFingerprint | None
         matches = page.locator(locator)
         if await matches.count() != 1 or not await matches.first.is_visible():
             return None
-    except Exception as exc:  # invalid selector syntax, detached frame, …
+    except Exception as exc:  # noqa: BLE001 - invalid selector syntax, detached frame, …
         log.debug("Candidate %r not resolvable: %s", locator, exc)
         return None
     return await build_fingerprint(page, locator)
@@ -282,7 +282,7 @@ def _structure_signal(stored: ElementFingerprint, live: ElementFingerprint) -> f
 
     if stored.parent_chain or live.parent_chain:
         depth = max(len(stored.parent_chain), len(live.parent_chain))
-        same = sum(1 for x, y in zip(stored.parent_chain, live.parent_chain) if x == y)
+        same = sum(1 for x, y in zip(stored.parent_chain, live.parent_chain, strict=False) if x == y)  # chains may differ in depth
         parts.append(same / depth)
 
     if stored.sibling_index is not None:

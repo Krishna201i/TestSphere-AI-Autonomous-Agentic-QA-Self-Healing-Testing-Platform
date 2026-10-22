@@ -1,6 +1,6 @@
 """Tests for agents/memory/persistent_store.py (healing memory that survives restarts)."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from agents.memory.memory_schemas import HealingRecord
@@ -15,7 +15,7 @@ def _record(i: int, old: str = "#old") -> HealingRecord:
         old_selector=old,
         new_selector=f"#new{i}",
         confidence=0.9,
-        timestamp=datetime(2026, 10, 21, 10, i, tzinfo=timezone.utc).isoformat(),
+        timestamp=datetime(2026, 10, 21, 10, i, tzinfo=UTC).isoformat(),
     )
 
 

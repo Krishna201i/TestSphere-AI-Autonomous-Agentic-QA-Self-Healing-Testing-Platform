@@ -7,7 +7,7 @@ Does not hardcode any sensitive information.
 
 import json
 import os
-from typing import Annotated, List
+from typing import Annotated
 
 from dotenv import load_dotenv
 from pydantic import Field, field_validator
@@ -39,14 +39,14 @@ def _hosted() -> bool:
     return os.getenv("APP_ENV", "development") != "development" or any(os.getenv(m) for m in _CLOUD_MARKERS)
 
 
-def _split_origins(raw: str) -> List[str]:
+def _split_origins(raw: str) -> list[str]:
     """Comma-separated origins, or a JSON list (the format older versions required)."""
     raw = raw.strip()
     items = json.loads(raw) if raw.startswith("[") else raw.split(",")
     return [str(origin).strip().rstrip("/") for origin in items if str(origin).strip()]
 
 
-def _default_cors_origins() -> List[str]:
+def _default_cors_origins() -> list[str]:
     """The Vite dev servers locally; none when hosted, where the dashboard is
     served from the API's own origin.  CORS_ORIGINS (comma-separated) overrides."""
     if _hosted():
@@ -110,7 +110,7 @@ class Settings(BaseSettings):
 
     # Other origins allowed to call the API from a browser (e.g. a dashboard on
     # Vercel). Auth is a bearer token, never a cookie, so credentials stay off.
-    CORS_ORIGINS: Annotated[List[str], NoDecode] = Field(default_factory=_default_cors_origins)
+    CORS_ORIGINS: Annotated[list[str], NoDecode] = Field(default_factory=_default_cors_origins)
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
@@ -168,6 +168,10 @@ class Settings(BaseSettings):
     # Whether tests and page analysis may target private/internal addresses
     # (localhost, 10.x, 169.254.x ...). Off on hosted servers (SSRF), on in local development.
     ALLOW_PRIVATE_TARGETS: bool = Field(default_factory=lambda: _default_allow_private_targets())
+
+    # Logging & error reporting (see backend/observability.py)
+    LOG_LEVEL: str = Field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+    SENTRY_DSN: str = Field(default_factory=lambda: os.getenv("SENTRY_DSN", ""))
 
     # Abuse limits: expensive actions (browser runs, scans, clones, LLM calls)
     # each signed-in user may start per minute; 0 disables the limit.

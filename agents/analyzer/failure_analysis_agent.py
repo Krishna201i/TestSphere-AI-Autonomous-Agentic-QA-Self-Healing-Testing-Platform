@@ -27,8 +27,8 @@ a genuine application defect or infrastructure problem.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -72,7 +72,7 @@ class FailureAnalysisResult(BaseModel):
     """
 
     test_id: str = Field(..., description="ID of the failed test case")
-    failed_step_id: Optional[int] = Field(
+    failed_step_id: int | None = Field(
         default=None, description="Step number that failed"
     )
     failure_classification: FailureType = Field(
@@ -110,7 +110,7 @@ class FailureAnalysisResult(BaseModel):
         description="Explanation of why this action is recommended",
     )
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 timestamp of the analysis",
     )
     metadata: dict[str, Any] = Field(
@@ -236,7 +236,7 @@ class FailureAnalysisAgent:
 
     def __init__(
         self,
-        classifier: Optional[FailureClassifier] = None,
+        classifier: FailureClassifier | None = None,
         llm_client: object | None = None,
     ) -> None:
         self._classifier = classifier or FailureClassifier()
@@ -249,7 +249,7 @@ class FailureAnalysisAgent:
     def analyze(
         self,
         failure: FailureContext,
-        dom_evidence: Optional[dict] = None,
+        dom_evidence: dict | None = None,
     ) -> FailureAnalysisResult:
         """Analyze a test failure and produce a comprehensive result.
 
@@ -349,7 +349,7 @@ class FailureAnalysisAgent:
     def _assess_healability(
         classification: ClassificationResult,
         failure: FailureContext,
-        dom_evidence: Optional[dict],
+        dom_evidence: dict | None,
     ) -> bool:
         """Determine if the failure is potentially healable."""
         ft = classification.failure_type
@@ -398,7 +398,7 @@ class FailureAnalysisAgent:
     def _build_evidence(
         classification: ClassificationResult,
         failure: FailureContext,
-        dom_evidence: Optional[dict],
+        dom_evidence: dict | None,
     ) -> list[FailureEvidence]:
         """Build the supporting evidence list."""
         evidence: list[FailureEvidence] = []

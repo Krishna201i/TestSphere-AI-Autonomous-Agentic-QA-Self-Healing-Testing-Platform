@@ -7,7 +7,6 @@ frequent dashboard polling does not hammer the database.
 """
 
 import time
-from typing import Dict, Optional
 
 from fastapi import APIRouter
 
@@ -17,10 +16,10 @@ from backend.database.store import StoreUnavailableError
 router = APIRouter(tags=["Health"])
 
 _DB_CACHE_SECONDS = 10.0
-_db_state: Dict[str, object] = {"checked_at": 0.0, "ok": True, "error": None}
+_db_state: dict[str, object] = {"checked_at": 0.0, "ok": True, "error": None}
 
 
-def _database_status() -> tuple[bool, Optional[str]]:
+def _database_status() -> tuple[bool, str | None]:
     now = time.monotonic()
     if now - float(_db_state["checked_at"]) > _DB_CACHE_SECONDS:
         try:
@@ -33,7 +32,7 @@ def _database_status() -> tuple[bool, Optional[str]]:
 
 
 @router.get("/health")
-def health_check() -> Dict[str, Optional[str]]:
+def health_check() -> dict[str, str | None]:
     """API status plus database reachability ("degraded" when the database is down)."""
     db_ok, db_error = _database_status()
     return {

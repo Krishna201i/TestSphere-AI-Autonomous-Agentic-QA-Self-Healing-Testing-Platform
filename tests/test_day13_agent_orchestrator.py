@@ -26,13 +26,10 @@ No internet, browser, or real LLM required.
 from __future__ import annotations
 
 import pytest
-import uuid
-from datetime import datetime, timezone
 
 from agents.analyzer.analyzer import FailureAnalyzerAgent
-from agents.analyzer.schemas import FailureAnalysis, FailureContext
+from agents.analyzer.schemas import FailureContext
 from agents.healer.healing_decision import (
-    ConfidenceThresholds,
     HealingDecisionEngine,
 )
 from agents.healer.healing_feedback import (
@@ -40,11 +37,9 @@ from agents.healer.healing_feedback import (
     HealingResultFeedbackProcessor,
 )
 from agents.healer.healing_schemas import (
-    HealingContext,
     HealingRecommendation,
     ScoredCandidate,
 )
-from agents.healer.schemas import HealingCandidate, HealingResult
 from agents.llm import LLMClientSession, MockLLMProvider
 from agents.llm.config import LLMConfig
 from agents.memory.in_memory_store import InMemoryStore
@@ -60,30 +55,21 @@ from agents.orchestration.workflow_schemas import (
     WorkflowEventType,
     WorkflowStep,
 )
+from agents.planner.mock_scenarios import register_planner_scenarios
 from agents.planner.planner import LLMTestPlanner
 from agents.planner.schemas import (
     ApplicationContext,
     ElementContext,
     PageContext,
-    TestCase,
-    TestPlan,
-    TestStep,
 )
-from agents.planner.mock_scenarios import register_planner_scenarios
 from agents.schemas.enums import (
     CandidateSource,
     ConfidenceLevel,
     FailureType,
     HealingAction,
-    HealingDecision,
     HealingStatus,
-    RecommendedAction,
-    TestAction,
-    TestCategory,
-    TestPriority,
     ValidationStatus,
 )
-
 
 # ══════════════════════════════════════════════════════════════
 #  Fixtures
@@ -856,7 +842,6 @@ class TestHealingFeedback:
         if state.current_step != WorkflowStep.HEALING_PENDING_VALIDATION:
             pytest.skip("No healing recommendation was generated")
 
-        initial_attempt_count = state.healing_attempt_count
         recommended_selector = state.healing_recommendation.selected_candidate.selector
 
         # Member 2 reports failure
@@ -1546,10 +1531,6 @@ class TestContractImports:
         from agents.schemas.contracts import (
             AgentState,
             ExecutionResult,
-            ExecutionResultStatus,
-            OrchestratorConfig,
-            WorkflowEvent,
-            WorkflowEventType,
             WorkflowStep,
         )
         assert AgentState is not None
@@ -1559,15 +1540,8 @@ class TestContractImports:
     def test_import_from_orchestration(self):
         """Day 13 classes should be importable from orchestration package."""
         from agents.orchestration import (
-            AgentOrchestrator,
-            AgentState,
-            WorkflowStep,
-            ExecutionResult,
-            ExecutionResultStatus,
-            OrchestratorConfig,
-            WorkflowEvent,
-            WorkflowEventType,
             VALID_TRANSITIONS,
+            AgentOrchestrator,
         )
         assert AgentOrchestrator is not None
         assert VALID_TRANSITIONS is not None

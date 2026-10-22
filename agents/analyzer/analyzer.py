@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
 
 from agents.analyzer.schemas import (
     FailureAnalysis,
@@ -57,7 +56,6 @@ from agents.memory.memory_schemas import (
     ElementRecord,
 )
 from agents.schemas.enums import (
-    ChangeType,
     ConfidenceLevel,
     FailureType,
     RecommendedAction,
@@ -218,7 +216,7 @@ class FailureAnalyzerAgent:
         test_context = self._memory.get_test_context(failure.test_id)
 
         # Retrieve element history for the failed target
-        previous_element: Optional[ElementRecord] = None
+        previous_element: ElementRecord | None = None
         if failure.target_selector:
             previous_element = self._memory.get_element_by_selector(
                 failure.target_selector
@@ -240,7 +238,7 @@ class FailureAnalyzerAgent:
         self,
         failure: FailureContext,
         historical: HistoricalContext,
-    ) -> Optional[ContextComparisonResult]:
+    ) -> ContextComparisonResult | None:
         """Compare previous and current element contexts.
 
         Returns ``None`` if either context is unavailable.
@@ -323,7 +321,7 @@ class FailureAnalyzerAgent:
         failure: FailureContext,
         historical: HistoricalContext,
         evidence: list[FailureEvidence],
-    ) -> Optional[tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str]]:
+    ) -> tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str] | None:
         """Check if the failure is due to a selector change.
 
         Conditions:
@@ -440,7 +438,7 @@ class FailureAnalyzerAgent:
         failure: FailureContext,
         historical: HistoricalContext,
         evidence: list[FailureEvidence],
-    ) -> Optional[tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str]]:
+    ) -> tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str] | None:
         """Check if the element simply cannot be found."""
         error_lower = failure.error_message.lower()
         not_found = (
@@ -480,7 +478,7 @@ class FailureAnalyzerAgent:
         self,
         failure: FailureContext,
         evidence: list[FailureEvidence],
-    ) -> Optional[tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str]]:
+    ) -> tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str] | None:
         """Check if the element exists but is not interactable."""
         error_lower = failure.error_message.lower()
         not_interactable = (
@@ -521,7 +519,7 @@ class FailureAnalyzerAgent:
         self,
         failure: FailureContext,
         evidence: list[FailureEvidence],
-    ) -> Optional[tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str]]:
+    ) -> tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str] | None:
         """Check if this is an assertion failure."""
         error_lower = failure.error_message.lower()
 
@@ -570,7 +568,7 @@ class FailureAnalyzerAgent:
         self,
         failure: FailureContext,
         evidence: list[FailureEvidence],
-    ) -> Optional[tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str]]:
+    ) -> tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str] | None:
         """Check if this is a timeout failure."""
         error_lower = failure.error_message.lower()
         is_timeout = (
@@ -594,7 +592,7 @@ class FailureAnalyzerAgent:
                 FailureType.TIMEOUT,
                 ConfidenceLevel.HIGH,
                 evidence,
-                f"An expected operation did not complete within the allowed time",
+                "An expected operation did not complete within the allowed time",
             )
 
         return None
@@ -603,7 +601,7 @@ class FailureAnalyzerAgent:
         self,
         failure: FailureContext,
         evidence: list[FailureEvidence],
-    ) -> Optional[tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str]]:
+    ) -> tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str] | None:
         """Check if this is a navigation failure."""
         error_lower = failure.error_message.lower()
         is_nav = (
@@ -629,7 +627,7 @@ class FailureAnalyzerAgent:
                 FailureType.NAVIGATION_FAILURE,
                 ConfidenceLevel.HIGH,
                 evidence,
-                f"The expected navigation did not occur successfully",
+                "The expected navigation did not occur successfully",
             )
 
         return None
@@ -641,7 +639,7 @@ class FailureAnalyzerAgent:
         failure: FailureContext,
         historical: HistoricalContext,
         evidence: list[FailureEvidence],
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Use the LLM to analyze an ambiguous failure.
 
         The LLM receives concise structured evidence and must return
@@ -731,7 +729,7 @@ class FailureAnalyzerAgent:
                 "root_cause": root_cause,
             }
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - LLM/agent step: any failure degrades to the non-LLM path
             logger.warning(
                 "LLM analysis failed: %s: %s", type(exc).__name__, exc
             )

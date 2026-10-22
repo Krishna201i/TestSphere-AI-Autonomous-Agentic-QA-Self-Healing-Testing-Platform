@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 
 import pytest
-import pytest_asyncio
 
 from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.analyzer.schemas import (
@@ -37,22 +36,18 @@ from agents.analyzer.schemas import (
 from agents.llm.client import LLMClientSession
 from agents.llm.config import LLMConfig
 from agents.llm.providers.mock import MockLLMProvider
-from agents.memory.context_comparator import ContextComparator
 from agents.memory.in_memory_store import InMemoryStore
 from agents.memory.memory_schemas import (
-    ContextComparisonResult,
     ElementRecord,
     FailureInfo,
     TestExecutionRecord,
 )
 from agents.schemas.enums import (
-    ChangeType,
     ConfidenceLevel,
     ExecutionStatus,
     FailureType,
     RecommendedAction,
 )
-
 
 # ═══════════════════════════════════════════════════════════════
 # Fixtures

@@ -49,7 +49,7 @@ async def write_screenshot(
         await page.screenshot(path=str(dest), full_page=True)
         log.debug("Screenshot written: %s", dest)
         return str(dest.resolve())
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:  # noqa: BLE001 - pragma: no cover
         log.warning("Screenshot capture failed for %s/%s: %s", test_id, step_id, exc)
         return None
 
@@ -71,6 +71,6 @@ async def write_dom_snapshot(
         dest.write_text(html, encoding="utf-8")
         log.debug("DOM snapshot written: %s", dest)
         return str(dest.resolve())
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:  # noqa: BLE001 - pragma: no cover
         log.warning("DOM snapshot failed for %s/%s: %s", test_id, step_id, exc)
         return None

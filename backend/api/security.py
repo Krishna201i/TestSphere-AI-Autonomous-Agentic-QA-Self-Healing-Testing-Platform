@@ -14,16 +14,16 @@ verified identity; with sign-in off, ``actor`` is whatever the client sends.
 
 import json
 from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from backend.auth import User, actor_for, get_current_user, scope
-from backend.ratelimit import limit_runs
 from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Store
+from backend.ratelimit import limit_runs
 from backend.services import security_service as store
 from security import Finding, OutOfScopeError, PassiveScanner, ScanError, ScopePolicy
 from security.remediation import propose, redact_headers
@@ -68,7 +68,7 @@ async def scan(
     scanner: PassiveScanner = Depends(get_scanner),
     db: Store = Depends(get_db),
     user: User = Depends(limit_runs),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Passively scan one authorized URL; findings are sorted most severe first.
 
     Each finding carries a ``remediation`` proposal built from the headers the
@@ -85,7 +85,7 @@ async def scan(
     return scan_result(db, scanner, snap, req.url, actor=actor, owner_uid=None if user.local else user.uid)
 
 
-def scan_result(db: Store, scanner: PassiveScanner, snap, url: str, *, actor: str, owner_uid: Optional[str]) -> Dict[str, Any]:
+def scan_result(db: Store, scanner: PassiveScanner, snap, url: str, *, actor: str, owner_uid: str | None) -> dict[str, Any]:
     """Analyze a fetched page, persist the findings and audit the scan (also used by the pipeline)."""
     findings = scanner.analyze(snap)
     headers = [(k.decode("latin-1"), v.decode("latin-1")) for k, v in snap.headers.raw]
@@ -120,8 +120,8 @@ def scan_result(db: Store, scanner: PassiveScanner, snap, url: str, *, actor: st
 
 @router.get("/findings", status_code=status.HTTP_200_OK)
 def list_findings(
-    target_url: Optional[str] = None, db: Store = Depends(get_db), user: User = Depends(get_current_user),
-) -> List[Dict[str, Any]]:
+    target_url: str | None = None, db: Store = Depends(get_db), user: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
     """The caller's tracked findings (optionally for one target), most recently seen first."""
     return [store.serialize(row) for row in store.list_findings(db, target_url, **scope(user))]
 
@@ -129,7 +129,7 @@ def list_findings(
 @router.post("/findings/{key}/approve", status_code=status.HTTP_200_OK)
 def approve_finding(
     key: str, req: ActorRequest, db: Store = Depends(get_db), user: User = Depends(get_current_user),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Record a human approval of the finding's fix proposal."""
     actor = actor_for(user, req.actor)
     row = store.approve(db, _finding_or_404(db, key, user), actor)
@@ -138,7 +138,7 @@ def approve_finding(
     return store.serialize(row)
 
 
-async def _retest(row, scanner: PassiveScanner, db: Store, actor: str, owner_uid: Optional[str]) -> Dict[str, Any]:
+async def _retest(row, scanner: PassiveScanner, db: Store, actor: str, owner_uid: str | None) -> dict[str, Any]:
     finding = Finding.model_validate(json.loads(row.data))
     store.record_audit(db, actor=actor, kind="retest", ref=row.key, message=f"Retest started for {row.check_id} on {row.target_url}",
                        owner_uid=owner_uid)
@@ -165,7 +165,7 @@ async def retest_finding(
     scanner: PassiveScanner = Depends(get_scanner),
     db: Store = Depends(get_db),
     user: User = Depends(limit_runs),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Re-run the check behind a tracked finding and store the result."""
     return await _retest(_finding_or_404(db, key, user), scanner, db, actor_for(user, req.actor), user.uid)
 
@@ -173,7 +173,7 @@ async def retest_finding(
 @router.post("/retest", status_code=status.HTTP_200_OK)
 async def retest(
     finding: Finding, scanner: PassiveScanner = Depends(get_scanner), _user: User = Depends(limit_runs),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Stateless retest of a finding passed in the body (not stored)."""
     try:
         result = await scanner.retest(finding)

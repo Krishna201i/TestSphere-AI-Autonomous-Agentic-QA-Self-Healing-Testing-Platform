@@ -9,19 +9,26 @@ The automated pipeline reuses ``ingest_source`` and ``save_blueprint``.
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
-from backend.ratelimit import limit_runs
 from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Record, Store
 from backend.models import BLUEPRINTS
+from backend.ratelimit import limit_runs
 from backend.services.security_service import record_audit
-from ingestion import SourceError, analyze_repo, clone, is_git_url, repo_name, resolve_local
+from ingestion import (
+    SourceError,
+    analyze_repo,
+    clone,
+    is_git_url,
+    repo_name,
+    resolve_local,
+)
 
 router = APIRouter(prefix="/ingest", tags=["Codebase Ingestion"])
 
@@ -35,7 +42,7 @@ def _git_hosts() -> frozenset:
     return frozenset(h.strip().lower() for h in settings.INGEST_GIT_HOSTS.split(",") if h.strip())
 
 
-def _summary(row: Record) -> Dict[str, Any]:
+def _summary(row: Record) -> dict[str, Any]:
     data = json.loads(row.data)
     langs = data.get("languages", {})
     return {
@@ -51,7 +58,7 @@ def _summary(row: Record) -> Dict[str, Any]:
     }
 
 
-def ingest_source(source: str) -> Dict[str, Any]:
+def ingest_source(source: str) -> dict[str, Any]:
     """Clone (or resolve) and analyze *source*; raises ``SourceError`` with a readable cause."""
     if is_git_url(source):
         root = clone(source, Path(settings.INGEST_WORKSPACE), _git_hosts())
@@ -63,8 +70,8 @@ def ingest_source(source: str) -> Dict[str, Any]:
 
 
 def save_blueprint(
-    db: Store, source: str, blueprint: Dict[str, Any], *, actor: str, owner_uid: Optional[str],
-    project_id: Optional[int] = None,
+    db: Store, source: str, blueprint: dict[str, Any], *, actor: str, owner_uid: str | None,
+    project_id: int | None = None,
 ) -> Record:
     """Store a blueprint and audit it."""
     row = db.insert(BLUEPRINTS, source=source, name=blueprint["name"], data=json.dumps(blueprint),
@@ -80,7 +87,7 @@ def save_blueprint(
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def ingest(req: IngestRequest, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> Dict[str, Any]:
+def ingest(req: IngestRequest, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> dict[str, Any]:
     """Fetch and analyze a codebase. Runs in a worker thread (cloning can take a while)."""
     source = req.source.strip()
     actor = actor_for(user, req.actor)
@@ -98,12 +105,12 @@ def ingest(req: IngestRequest, db: Store = Depends(get_db), user: User = Depends
 
 
 @router.get("")
-def list_blueprints(db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> List[Dict[str, Any]]:
+def list_blueprints(db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict[str, Any]]:
     rows = db.find(BLUEPRINTS, order_by="id", descending=True, limit=50, **scope(user))
     return [_summary(r) for r in rows]
 
 
 @router.get("/{blueprint_id}")
-def get_blueprint(blueprint_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+def get_blueprint(blueprint_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
     row = ensure_owned(user, db.get(BLUEPRINTS, blueprint_id), "Blueprint")
     return {"id": row.id, **json.loads(row.data)}

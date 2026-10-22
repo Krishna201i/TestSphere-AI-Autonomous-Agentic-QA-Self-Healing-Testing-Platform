@@ -30,7 +30,7 @@ import json
 
 import pytest
 
-from agents.llm.client import LLMClient, LLMClientSession
+from agents.llm.client import LLMClientSession
 from agents.llm.config import LLMConfig
 from agents.llm.exceptions import (
     LLMAuthenticationError,
@@ -46,8 +46,7 @@ from agents.llm.exceptions import (
 from agents.llm.factory import create_llm_client, get_llm_provider
 from agents.llm.parser import ResponseParser
 from agents.llm.providers.mock import MockLLMProvider
-from agents.llm.schemas import LLMRequest, LLMResponse, LLMUsage
-
+from agents.llm.schemas import LLMRequest, LLMResponse
 
 # ═══════════════════════════════════════════════════════════════
 #  Helpers
@@ -657,11 +656,11 @@ class TestProviderSwitching:
         with pytest.raises(LLMConfigurationError):
             get_llm_provider(config)
 
-    def test_local_not_yet_implemented(self):
-        """LLM_PROVIDER=local should raise LLMConfigurationError."""
-        config = _default_config(provider="local")
-        with pytest.raises(LLMConfigurationError, match="not yet implemented"):
-            get_llm_provider(config)
+    def test_local_returns_api_provider(self):
+        """LLM_PROVIDER=local talks to a local OpenAI-compatible server."""
+        from agents.llm.providers.api import APIProvider
+
+        assert isinstance(get_llm_provider(_default_config(provider="local")), APIProvider)
 
     def test_api_returns_api_provider(self):
         """LLM_PROVIDER=api should return an APIProvider."""

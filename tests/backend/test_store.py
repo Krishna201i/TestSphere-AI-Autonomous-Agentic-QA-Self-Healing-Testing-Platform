@@ -9,7 +9,7 @@ FirestoreStore.  Firestore runs only when the official emulator is available
 import json
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -21,8 +21,8 @@ from backend.database.store import (
     MemoryStore,
     Record,
     StoreUnavailableError,
-    create_store,
     _service_account_source,
+    create_store,
     describe_firestore_error,
 )
 
@@ -85,7 +85,7 @@ def test_find_handles_none_values(store) -> None:
 def test_update_merges_and_bumps_updated_at(store) -> None:
     rec = store.insert("test_executions", test_case_id=1, status="PENDING", duration_ms=None)
     updated = store.update("test_executions", rec.id, status="PASSED", duration_ms=12,
-                           completed_at=datetime(2026, 10, 21, 7, 0, tzinfo=timezone.utc))
+                           completed_at=datetime(2026, 10, 21, 7, 0, tzinfo=UTC))
     assert (updated.status, updated.duration_ms, updated.test_case_id) == ("PASSED", 12, 1)
     assert updated.completed_at == "2026-10-21T07:00:00+00:00"   # datetimes stored as ISO UTC
     assert updated.updated_at >= rec.updated_at
@@ -201,3 +201,34 @@ def test_missing_key_file_names_the_file(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(store_module, "SECRET_FILES_DIR", tmp_path)
     with pytest.raises(StoreUnavailableError, match=r"\(key\.json\)"):
         _service_account_source("serviceAccount/key.json")
+
+
+def test_update_if_applies_only_while_the_field_is_unchanged(store) -> None:
+    row = store.insert("projects", name="p", next_run_at="t1")
+    assert store.update_if("projects", row["id"], "next_run_at", "t1", next_run_at="t2") is True
+    assert store.update_if("projects", row["id"], "next_run_at", "t1", next_run_at="t3") is False
+    assert store.get("projects", row["id"])["next_run_at"] == "t2"
+    assert store.update_if("projects", 999, "next_run_at", "t2", next_run_at="t4") is False
+
+
+def test_update_if_treats_a_missing_field_as_none(store) -> None:
+    row = store.insert("projects", name="p")
+    assert store.update_if("projects", row["id"], "next_run_at", None, next_run_at="t1") is True
+    assert store.get("projects", row["id"])["next_run_at"] == "t1"
+
+
+def test_concurrent_update_if_has_exactly_one_winner(store) -> None:
+    row = store.insert("projects", name="p", next_run_at="t0")
+    wins = []
+
+    def claim(n):
+        if store.update_if("projects", row["id"], "next_run_at", "t0", next_run_at=f"claimed-{n}"):
+            wins.append(n)
+
+    threads = [threading.Thread(target=claim, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(wins) == 1
+    assert store.get("projects", row["id"])["next_run_at"] == f"claimed-{wins[0]}"

@@ -16,7 +16,7 @@ Validates:
 """
 
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from backend.database.session import get_store
 from backend.models.test_execution import TestExecutionStatus
@@ -108,7 +108,7 @@ class TestTestExecutionService(unittest.TestCase):
     def test_update_execution(self) -> None:
         """Verify updating execution status and duration."""
         created = TestExecutionService.create_execution(self.session, self.test_case.id)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         updated = TestExecutionService.update_execution(
             db=self.session,
             execution_id=created.id,

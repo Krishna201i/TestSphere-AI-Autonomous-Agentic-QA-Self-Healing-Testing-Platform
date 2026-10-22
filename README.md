@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | AI QA Agent | Live | Plans tests from a live page, runs them in Playwright, records results |
 | Locator self-healing | Live | `engine/healer.py`: stored fallbacks, then fingerprint scoring; refuses tag changes and ambiguous matches |
-| LLM | Live (opt-in) | `LLM_PROVIDER=api` for any OpenAI-compatible API (OpenAI, Gemini, Groq, OpenRouter, Ollama Cloud); `mock` stays the offline default; `LLM_PROVIDER=local` is not built |
+| LLM | Live (opt-in) | `LLM_PROVIDER=api` for any OpenAI-compatible API (OpenAI, Gemini, Groq, OpenRouter, Ollama Cloud); `LLM_PROVIDER=local` for a model on your own machine (Ollama, vLLM, LM Studio); `mock` stays the offline default |
 | Attacker Agent | Live (passive) | `security/`: scope-checked passive scan (headers, cookies, CORS, TLS, forms); no attack payloads |
 | Remediation | Partial | Fix proposals for header/cookie findings, human approval, retest; source-code patches not built |
 | Validation | Live | Security retests and test re-execution; findings auto-resolve or reopen as regressions |
@@ -42,7 +42,7 @@ For in-depth architectural and developer documentation, explore our detailed gui
 - 🎭 **[Browser Execution Engine Guide](docs/engine-architecture.md)**: Playwright lifecycle, `BrowserSession`, multi-tier `LocatorResolver`, and forensic screenshot/DOM artifact extraction.
 - 🔄 **[Self-Healing & Autonomous Orchestration](docs/self-healing-orchestration.md)**: Closed-loop self-healing lifecycle, failure categorization, candidate generation, and dynamic schema bridging.
 - 🔌 **[End-to-End Integration Guide](docs/integration-guide.md)**: Multi-agent coordination, offline mock vs cloud LLM providers, and real-time frontend streaming.
-- 🚢 **[Deployment & Operations Guide](docs/deployment-operations.md)**: Environment variables, Render/Vercel deployment, and an example Docker configuration (not included in the repo). CI runs from [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+- 🚢 **[Deployment & Operations Guide](docs/deployment-operations.md)**: Environment variables, Render/Vercel deployment, the [`Dockerfile`](Dockerfile), and CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 - 🧠 **[Member 1 AI Agent Architecture](docs/member1-architecture.md)**: Deep dive into LLM prompt engineering, schema validation, and planner contracts.
 
 ---
@@ -1315,7 +1315,7 @@ for event in orchestrator.get_state().events:
 - Modernized [`.gitignore`](.gitignore) with artifact and database exclusions to keep Git history clean.
 
 #### 🐳 Day 14: Containerization & DevOps Infrastructure (planned)
-- Drafted a `Dockerfile`, a `docker-compose.yml` and a GitHub Actions matrix. **None of these were committed**; the example Docker configuration lives in [`docs/deployment-operations.md`](docs/deployment-operations.md).
+- Drafted a `Dockerfile`, a `docker-compose.yml` and a GitHub Actions matrix; none were committed at the time. A [`Dockerfile`](Dockerfile) (API + dashboard + Chromium, non-root, health check) was added later; there is still no `docker-compose.yml`.
 - CI now runs from [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on Python 3.11 (locked dependencies, full test suite, lint, `pip-audit`, frontend build and `npm audit`).
 
 #### 📚 Day 15: Technical Documentation & Platform Governance Suite

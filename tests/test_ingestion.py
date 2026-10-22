@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
 from backend.config import settings
 from backend.main import app
 from ingestion import SourceError, analyze_repo, clone, repo_name, validate_git_url

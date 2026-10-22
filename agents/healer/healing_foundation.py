@@ -23,8 +23,8 @@ IMPORTANT:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -35,7 +35,6 @@ from agents.schemas.enums import (
     HealingDecision,
     HealingStatus,
 )
-
 
 # ── Locator Strategy ─────────────────────────────────────────
 
@@ -90,22 +89,22 @@ class HealingCandidateDetail(BaseModel):
         default="",
         description="HTML tag name of the candidate element (e.g. 'button')",
     )
-    element_type: Optional[str] = Field(
+    element_type: str | None = Field(
         default=None,
         description="Element type attribute (e.g. 'submit', 'text')",
     )
-    element_role: Optional[str] = Field(
+    element_role: str | None = Field(
         default=None,
         description="ARIA role of the element",
     )
 
     # ── Attributes ───────────────────────────────────────────
 
-    element_id: Optional[str] = Field(
+    element_id: str | None = Field(
         default=None,
         description="Element 'id' attribute",
     )
-    element_name: Optional[str] = Field(
+    element_name: str | None = Field(
         default=None,
         description="Element 'name' attribute",
     )
@@ -123,11 +122,11 @@ class HealingCandidateDetail(BaseModel):
 
     # ── Text / Accessible Name ───────────────────────────────
 
-    text_content: Optional[str] = Field(
+    text_content: str | None = Field(
         default=None,
         description="Visible text content of the element",
     )
-    accessible_name: Optional[str] = Field(
+    accessible_name: str | None = Field(
         default=None,
         description=(
             "Computed accessible name (from aria-label, "
@@ -137,19 +136,19 @@ class HealingCandidateDetail(BaseModel):
 
     # ── DOM Context ──────────────────────────────────────────
 
-    parent_selector: Optional[str] = Field(
+    parent_selector: str | None = Field(
         default=None,
         description="Selector of the parent element (for context)",
     )
-    siblings_count: Optional[int] = Field(
+    siblings_count: int | None = Field(
         default=None, ge=0,
         description="Number of sibling elements in the same parent",
     )
-    dom_depth: Optional[int] = Field(
+    dom_depth: int | None = Field(
         default=None, ge=0,
         description="Depth of the element in the DOM tree",
     )
-    page_url: Optional[str] = Field(
+    page_url: str | None = Field(
         default=None,
         description="Page URL where this candidate was found",
     )
@@ -245,11 +244,11 @@ class HealingInput(BaseModel):
 
     # ── DOM Evidence (from Member 2) ─────────────────────────
 
-    current_page_url: Optional[str] = Field(
+    current_page_url: str | None = Field(
         default=None,
         description="Current page URL at time of failure",
     )
-    current_page_title: Optional[str] = Field(
+    current_page_title: str | None = Field(
         default=None,
         description="Current page title at time of failure",
     )
@@ -264,7 +263,7 @@ class HealingInput(BaseModel):
 
     # ── Historical Context ───────────────────────────────────
 
-    previous_element: Optional[dict[str, Any]] = Field(
+    previous_element: dict[str, Any] | None = Field(
         default=None,
         description=(
             "Historical element record from memory. Contains the "
@@ -278,11 +277,11 @@ class HealingInput(BaseModel):
 
     # ── Screenshot / Trace References ────────────────────────
 
-    screenshot_path: Optional[str] = Field(
+    screenshot_path: str | None = Field(
         default=None,
         description="Path to a screenshot at time of failure (if available)",
     )
-    trace_path: Optional[str] = Field(
+    trace_path: str | None = Field(
         default=None,
         description="Path to a trace file (if available)",
     )
@@ -325,7 +324,7 @@ class HealingOutput(BaseModel):
             "(highest first)"
         ),
     )
-    selected_candidate: Optional[HealingCandidateDetail] = Field(
+    selected_candidate: HealingCandidateDetail | None = Field(
         default=None,
         description=(
             "Top candidate if it meets the confidence threshold. "
@@ -362,7 +361,7 @@ class HealingOutput(BaseModel):
         ),
     )
     generated_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 timestamp of generation",
     )
 

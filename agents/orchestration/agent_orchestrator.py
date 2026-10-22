@@ -41,17 +41,16 @@ IMPORTANT:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from agents.analyzer.analyzer import FailureAnalyzerAgent
-from agents.analyzer.schemas import FailureContext
 from agents.healer.healing_decision import HealingDecisionEngine
 from agents.healer.healing_feedback import (
     HealingResultFeedback,
     HealingResultFeedbackProcessor,
 )
-from agents.healer.healing_schemas import HealingContext, HealingRecommendation
+from agents.healer.healing_schemas import HealingContext
 from agents.memory.memory_interface import MemoryStore
 from agents.memory.memory_schemas import ElementRecord
 from agents.orchestration.recovery_policy import (
@@ -71,13 +70,10 @@ from agents.orchestration.workflow_schemas import (
     WorkflowStep,
 )
 from agents.planner.planner import TestPlannerAgent
-from agents.planner.schemas import ApplicationContext, TestPlan
+from agents.planner.schemas import ApplicationContext
 from agents.schemas.enums import (
     ConfidenceLevel,
     FailureType,
-    HealingAction,
-    HealingDecision,
-    HealingStatus,
     ValidationStatus,
 )
 
@@ -127,9 +123,9 @@ class AgentOrchestrator:
         failure_analyzer: FailureAnalyzerAgent,
         healing_engine: HealingDecisionEngine,
         feedback_processor: HealingResultFeedbackProcessor,
-        test_planner: Optional[TestPlannerAgent] = None,
-        config: Optional[OrchestratorConfig] = None,
-        recovery_policy: Optional[RecoveryPolicy] = None,
+        test_planner: TestPlannerAgent | None = None,
+        config: OrchestratorConfig | None = None,
+        recovery_policy: RecoveryPolicy | None = None,
     ) -> None:
         self._memory = memory_store
         self._analyzer = failure_analyzer
@@ -227,7 +223,7 @@ class AgentOrchestrator:
 
             state = self._transition(state, WorkflowStep.EXECUTION_PENDING)
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - LLM/agent step: any failure degrades to the non-LLM path
             logger.error(
                 "Planning failed: %s: %s", type(exc).__name__, exc,
             )
@@ -449,7 +445,7 @@ class AgentOrchestrator:
         self._workflows[state.workflow_id] = state
         return state
 
-    def get_state(self, workflow_id: str) -> Optional[AgentState]:
+    def get_state(self, workflow_id: str) -> AgentState | None:
         """Retrieve the current state for a workflow.
 
         Parameters
@@ -1000,7 +996,7 @@ class AgentOrchestrator:
     # ══════════════════════════════════════════════════════════
 
     def _should_attempt_healing(
-        self, analysis: "FailureAnalysis",
+        self, analysis: FailureAnalysis,
     ) -> bool:
         """Determine if healing should be attempted for this analysis.
 
@@ -1094,7 +1090,7 @@ class AgentOrchestrator:
         state: AgentState,
         event_type: WorkflowEventType,
         message: str = "",
-        metadata: Optional[dict] = None,
+        metadata: dict | None = None,
     ) -> AgentState:
         """Append a structured event to the workflow history.
 
@@ -1133,12 +1129,12 @@ class AgentOrchestrator:
 
 def _now() -> str:
     """Return the current UTC time as an ISO 8601 string."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _feedback_to_healing_result(
     feedback: HealingResultFeedback,
-) -> "HealingResult":
+) -> HealingResult:
     """Convert a HealingResultFeedback to a HealingResult."""
     from agents.healer.schemas import HealingResult
 

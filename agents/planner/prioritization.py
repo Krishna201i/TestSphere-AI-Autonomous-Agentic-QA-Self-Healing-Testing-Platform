@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 from agents.planner.schemas import TestCase
 from agents.schemas.enums import TestCategory, TestPriority
@@ -208,7 +207,7 @@ class TestPrioritizer:
         )
 
     @staticmethod
-    def _page_importance(page_url: Optional[str]) -> int:
+    def _page_importance(page_url: str | None) -> int:
         """Compute page importance bonus from URL patterns."""
         if not page_url:
             return 0

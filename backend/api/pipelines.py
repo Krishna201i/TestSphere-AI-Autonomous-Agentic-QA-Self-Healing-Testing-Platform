@@ -7,7 +7,7 @@ progress, and list past runs.  Runs execute in the background; poll
 """
 
 import hmac
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -16,13 +16,13 @@ from pydantic import BaseModel, Field
 from backend.api.projects import owned_project
 from backend.api.schemas import _check_http_url
 from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
-from backend.ratelimit import limit_runs
 from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Record, Store
 from backend.models import PIPELINE_RUNS, PROJECTS
 from backend.pipeline import scheduler
 from backend.pipeline.runner import active_run, start_run
+from backend.ratelimit import limit_runs
 from backend.services.project_service import ProjectService
 
 router = APIRouter(prefix="/pipelines", tags=["Automated Pipeline"])
@@ -35,8 +35,8 @@ class RunRequest(BaseModel):
 
 class QuickRunRequest(BaseModel):
     url: str = Field(..., min_length=1, max_length=1024)
-    prompt: Optional[str] = Field(None, max_length=500)
-    repo_url: Optional[str] = Field(None, max_length=1024)
+    prompt: str | None = Field(None, max_length=500)
+    repo_url: str | None = Field(None, max_length=1024)
 
 
 def _start(db: Store, user: User, project: Record, ingest: bool = False) -> Record:
@@ -51,13 +51,13 @@ def _start(db: Store, user: User, project: Record, ingest: bool = False) -> Reco
 
 
 @router.post("/run", status_code=status.HTTP_202_ACCEPTED)
-async def run_project(req: RunRequest, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> Dict[str, Any]:
+async def run_project(req: RunRequest, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> dict[str, Any]:
     """Run the whole pipeline for one of the caller's projects."""
     return _start(db, user, owned_project(db, user, req.project_id), req.ingest)
 
 
 @router.post("/quick", status_code=status.HTTP_202_ACCEPTED)
-async def quick_run(req: QuickRunRequest, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> Dict[str, Any]:
+async def quick_run(req: QuickRunRequest, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> dict[str, Any]:
     """One click from a URL: reuse the caller's project for that URL (or create one) and run it."""
     try:
         url = _check_http_url(req.url, "URL")
@@ -78,25 +78,25 @@ async def quick_run(req: QuickRunRequest, db: Store = Depends(get_db), user: Use
 
 @router.get("/runs")
 def list_runs(
-    project_id: Optional[int] = Query(None),
+    project_id: int | None = Query(None),
     limit: int = Query(30, ge=1, le=200),
     db: Store = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """The caller's pipeline runs, newest first."""
-    filters: Dict[str, Any] = scope(user)
+    filters: dict[str, Any] = scope(user)
     if project_id is not None:
         filters["project_id"] = project_id
     return db.find(PIPELINE_RUNS, order_by="id", descending=True, limit=limit, **filters)
 
 
 @router.get("/runs/{run_id}")
-def get_run(run_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+def get_run(run_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
     return ensure_owned(user, db.get(PIPELINE_RUNS, run_id), "Pipeline run")
 
 
 @router.post("/scheduler/tick")
-async def scheduler_tick(x_cron_secret: Optional[str] = Header(None), db: Store = Depends(get_db)) -> Dict[str, Any]:
+async def scheduler_tick(x_cron_secret: str | None = Header(None), db: Store = Depends(get_db)) -> dict[str, Any]:
     """Start every due scheduled run now.  For an external cron that keeps a
     sleeping host's schedules on time; requires ``X-Cron-Secret: $CRON_SECRET``."""
     if not settings.CRON_SECRET:

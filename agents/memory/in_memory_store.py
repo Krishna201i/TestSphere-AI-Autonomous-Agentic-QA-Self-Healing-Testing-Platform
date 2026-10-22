@@ -10,7 +10,7 @@ Day 8: Initial storage backend.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from agents.memory.memory_interface import MemoryStore
 from agents.memory.memory_schemas import (
@@ -68,7 +68,7 @@ class InMemoryStore(MemoryStore):
     def get_latest_successful_execution(
         self,
         test_id: str,
-    ) -> Optional[TestExecutionRecord]:
+    ) -> TestExecutionRecord | None:
         """Retrieve the most recent PASSED execution for a test."""
         records = self._executions.get(test_id, [])
         passed = [r for r in records if r.status == ExecutionStatus.PASSED]
@@ -97,8 +97,8 @@ class InMemoryStore(MemoryStore):
     def get_element_by_selector(
         self,
         selector: str,
-        page_url: Optional[str] = None,
-    ) -> Optional[ElementRecord]:
+        page_url: str | None = None,
+    ) -> ElementRecord | None:
         """Find the latest element record matching a selector."""
         candidates: list[ElementRecord] = []
         for records in self._elements.values():

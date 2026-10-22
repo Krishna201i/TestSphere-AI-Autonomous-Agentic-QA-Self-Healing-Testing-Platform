@@ -30,7 +30,7 @@ class LLMConfig:
 
     The ``provider`` field controls which LLM backend is used:
       - ``"mock"``  — deterministic mock for development/testing (default)
-      - ``"local"`` — local model (e.g. Ollama) — future
+      - ``"local"`` — OpenAI-compatible server on your machine (Ollama, vLLM, ...)
       - ``"api"``   — OpenAI-compatible cloud API (OpenAI, Gemini, Groq, …)
     """
 
@@ -87,7 +87,7 @@ class LLMConfig:
         For the mock provider, no API key is needed.
         For API providers, an API key is required.
         """
-        if self.provider == "mock":
+        if self.provider in ("mock", "local"):
             return True
         return bool(self.api_key)
 
