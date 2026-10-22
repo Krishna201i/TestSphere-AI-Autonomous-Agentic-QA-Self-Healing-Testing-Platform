@@ -78,98 +78,46 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 
 ## 3. Docker Containerization
 
-> Example configuration. No `Dockerfile` or `docker-compose.yml` is committed yet; the live deployment uses Render (backend) and Vercel (frontend).
+The repository's [`Dockerfile`](../Dockerfile) builds one image with the API,
+the dashboard and headless Chromium:
 
-### 3.1 Dockerfile
-```dockerfile
-FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
+- **Stage 1** (`node:24-slim`): `npm ci` and `npm run build` for the dashboard.
+- **Stage 2** (`python:3.11-slim`): the hash-checked lock (`pip install --require-hashes -r requirements.txt`),
+  Chromium with its system libraries (`playwright install --with-deps chromium`), the backend packages and
+  the built dashboard. Runs as an unprivileged user (uid 10001) with a `HEALTHCHECK` on `/api/health`.
 
-WORKDIR /app
+```bash
+docker build -t testsphere .
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Production-like: Firebase sign-in and Firestore
+docker run -p 8000:8000 --env-file .env testsphere
 
-# Install Python requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Install Playwright browser engines
-RUN playwright install chromium firefox webkit --with-deps
-
-# Copy application source
-COPY . .
-
-EXPOSE 8000
-
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Offline try-out without sign-in (the image sets APP_ENV=production, so
+# running open has to be chosen explicitly)
+docker run -p 8000:8000 -e AUTH_REQUIRED=false -e DATABASE_BACKEND=local testsphere
 ```
 
-### 3.2 Docker Compose (`docker-compose.yml`)
-```yaml
-version: '3.8'
-
-services:
-  testsphere-api:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - FIREBASE_CREDENTIALS=${FIREBASE_CREDENTIALS}
-      - LLM_PROVIDER=mock
-      - HEADLESS=True
-    volumes:
-      - ./artifacts:/app/artifacts
-
-```
+`PORT` (default 8000) sets the listening port. The image does not include `tests/` or `docs/`.
 
 ---
 
-## 4. Continuous Integration (CI/CD) Workflow
+## 4. Continuous Integration
 
-Example GitHub Actions workflow (not yet committed under `.github/workflows/`) running the full offline test suite (1,246 tests) across Python 3.11 and 3.12:
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every pull request and on pushes to `main`:
 
-```yaml
-name: TestSphere-AI CI
+| Job | Steps |
+|---|---|
+| Backend | Install the lock with `--require-hashes`, install Chromium, `ruff check` (rules in `pyproject.toml`), the full pytest suite, `pip-audit` |
+| Frontend | `npm ci`, `npm run build`, `npm audit --omit=dev --audit-level=high` |
 
-on:
-  push:
-    branches: [ main, develop, prashansha-branch ]
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
-        playwright install chromium --with-deps
-
-    - name: Run Test Suite
-      env:
-        LLM_PROVIDER: mock
-      run: |
-        python -m pytest tests/engine/ tests/backend/ tests/test_*.py -v
-```
+Make both jobs required checks on `main` (GitHub → Settings → Branches → branch protection rule) so
+nothing reaches Render without passing them.
 
 ---
 
 ## 5. Production Observability & Logging
 
-- **Structured JSON Logging**: Set `LOG_FORMAT=json` for compatibility with Datadog, CloudWatch, or Grafana Loki.
-- **Health Checks**: Endpoint `GET /api/health` returns readiness probe status including database connectivity and browser binary availability.
+- **Structured JSON Logging**: one JSON object per line by default when hosted (`LOG_FORMAT=json|text` overrides), with a `request_id` on every line written while handling a request; works with Render's log search, Datadog, CloudWatch or Grafana Loki.
+- **Request ids**: every response carries `X-Request-ID`; send one in to correlate with your own logs.
+- **Error tracking**: set `SENTRY_DSN` to report unhandled errors to Sentry.
+- **Health Checks**: `GET /api/health` (public) reports database connectivity; signed-in users see browser availability in `GET /api/system`.
