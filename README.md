@@ -42,7 +42,7 @@ For in-depth architectural and developer documentation, explore our detailed gui
 - 🎭 **[Browser Execution Engine Guide](docs/engine-architecture.md)**: Playwright lifecycle, `BrowserSession`, multi-tier `LocatorResolver`, and forensic screenshot/DOM artifact extraction.
 - 🔄 **[Self-Healing & Autonomous Orchestration](docs/self-healing-orchestration.md)**: Closed-loop self-healing lifecycle, failure categorization, candidate generation, and dynamic schema bridging.
 - 🔌 **[End-to-End Integration Guide](docs/integration-guide.md)**: Multi-agent coordination, offline mock vs cloud LLM providers, and real-time frontend streaming.
-- 🚢 **[Deployment & Operations Guide](docs/deployment-operations.md)**: Environment variables, Render/Vercel deployment, and an example Docker configuration (not included in the repo). CI runs from [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+- 🚢 **[Deployment & Operations Guide](docs/deployment-operations.md)**: Environment variables, Render/Vercel deployment, the [`Dockerfile`](Dockerfile), and CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 - 🧠 **[Member 1 AI Agent Architecture](docs/member1-architecture.md)**: Deep dive into LLM prompt engineering, schema validation, and planner contracts.
 
 ---
@@ -1315,7 +1315,7 @@ for event in orchestrator.get_state().events:
 - Modernized [`.gitignore`](.gitignore) with artifact and database exclusions to keep Git history clean.
 
 #### 🐳 Day 14: Containerization & DevOps Infrastructure (planned)
-- Drafted a `Dockerfile`, a `docker-compose.yml` and a GitHub Actions matrix. **None of these were committed**; the example Docker configuration lives in [`docs/deployment-operations.md`](docs/deployment-operations.md).
+- Drafted a `Dockerfile`, a `docker-compose.yml` and a GitHub Actions matrix; none were committed at the time. A [`Dockerfile`](Dockerfile) (API + dashboard + Chromium, non-root, health check) was added later; there is still no `docker-compose.yml`.
 - CI now runs from [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on Python 3.11 (locked dependencies, full test suite, lint, `pip-audit`, frontend build and `npm audit`).
 
 #### 📚 Day 15: Technical Documentation & Platform Governance Suite
