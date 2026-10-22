@@ -13,8 +13,13 @@ echo "=== Installing Playwright Chromium browser ==="
 # location is missing when the service starts.  engine/__init__.py points
 # Playwright at this directory at runtime.
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$PWD/.playwright-browsers}"
-# --with-deps needs root (apt); fall back to the browser alone when it is unavailable.
-python -m playwright install --with-deps chromium || python -m playwright install chromium
+# --with-deps installs system libraries via apt and needs root; Render's native
+# build runs unprivileged (and already ships those libraries), so skip it there.
+if [ "$(id -u)" = "0" ]; then
+  python -m playwright install --with-deps chromium
+else
+  python -m playwright install chromium
+fi
 python -c "import asyncio
 from playwright.async_api import async_playwright
 async def main():
