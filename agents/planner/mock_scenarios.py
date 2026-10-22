@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 
-
 # ── Sample Application Context ───────────────────────────────
 
 SAMPLE_APPLICATION_CONTEXT: dict = {

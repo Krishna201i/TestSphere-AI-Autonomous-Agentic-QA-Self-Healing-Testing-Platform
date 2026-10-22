@@ -9,25 +9,27 @@ Verifies:
 """
 
 import unittest
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
-from datetime import datetime, timezone
 
 from agents.planner.schemas import (
     Assertion,
+)
+from agents.planner.schemas import (
     TestCase as Member1TestCase,
+)
+from agents.planner.schemas import (
     TestStep as Member1TestStep,
 )
 from agents.schemas.enums import AssertionType, TestAction
 from backend.database.session import get_store
 from backend.models.test_execution import TestExecutionStatus
-from backend.services.application_service import ApplicationService
-from backend.services.project_service import ProjectService
-from backend.services.test_case_service import TestCaseService
-from backend.services.test_execution_service import TestExecutionService
 from backend.orchestration.converters import (
     engine_result_to_execution_result,
     map_action_to_engine,
     map_assertion_to_engine,
+)
+from backend.orchestration.converters import (
     test_case_to_engine_plan as convert_test_case_to_engine_plan,
 )
 from backend.orchestration.orchestrator import (
@@ -35,16 +37,24 @@ from backend.orchestration.orchestrator import (
     apply_healed_selector,
     create_default_orchestrator,
 )
-from engine.schemas import HealingReport
+from backend.services.application_service import ApplicationService
+from backend.services.project_service import ProjectService
+from backend.services.test_case_service import TestCaseService
+from backend.services.test_execution_service import TestExecutionService
 from engine.schemas import (
     ActionType,
+    HealingReport,
     Step,
     StepResult,
     StepStatus,
     Target,
-    TestPlan as EngineTestPlan,
-    TestResult as EngineTestResult,
     TestStatus,
+)
+from engine.schemas import (
+    TestPlan as EngineTestPlan,
+)
+from engine.schemas import (
+    TestResult as EngineTestResult,
 )
 
 
@@ -124,7 +134,7 @@ class TestWorkflowConverters(unittest.TestCase):
         engine_res = EngineTestResult(
             test_id="TC-001",
             status=TestStatus.PASSED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=120,
             steps=[
                 StepResult(
@@ -148,7 +158,7 @@ class TestWorkflowConverters(unittest.TestCase):
         engine_res = EngineTestResult(
             test_id="TC-001",
             status=TestStatus.FAILED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=250,
             steps=[
                 StepResult(
@@ -213,7 +223,7 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-LOGIN-001",
             status=TestStatus.PASSED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=150,
             steps=[
                 StepResult(
@@ -242,7 +252,7 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-LOGIN-001",
             status=TestStatus.HEALED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=200,
             steps=[
                 StepResult(
@@ -279,7 +289,7 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-LOGIN-001",
             status=TestStatus.FAILED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=5,
             steps=[
                 StepResult(
@@ -327,7 +337,7 @@ class TestStoredSteps(unittest.IsolatedAsyncioTestCase):
     @patch("backend.orchestration.orchestrator.run_test")
     async def test_a_plain_text_description_still_runs_the_page_check(self, mock_run_test) -> None:
         mock_run_test.return_value = EngineTestResult(
-            test_id="t", status=TestStatus.PASSED, started_at=datetime.now(timezone.utc), duration_ms=1,
+            test_id="t", status=TestStatus.PASSED, started_at=datetime.now(UTC), duration_ms=1,
             steps=[StepResult(step_id="step-1", status=StepStatus.PASSED, duration_ms=1)], artifacts_dir="artifacts",
         )
         _, run = self._run_for("Checks that the home page opens")

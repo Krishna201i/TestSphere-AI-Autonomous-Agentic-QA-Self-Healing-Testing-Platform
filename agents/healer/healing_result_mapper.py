@@ -49,7 +49,7 @@ Member 1 NEVER:
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from agents.healer.healing_schemas import HealingRecommendation
 from agents.healer.schemas import HealingCandidate, HealingResult
@@ -172,7 +172,7 @@ def prepare_healing_result(
     validation_success: bool,
     confidence: float = 0.0,
     failed_step: int = 1,
-    validation_error: Optional[str] = None,
+    validation_error: str | None = None,
 ) -> HealingResult:
     """Prepare a HealingResult from Member 2's validation feedback.
 

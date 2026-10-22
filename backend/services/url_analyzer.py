@@ -12,7 +12,7 @@ import logging
 import re
 import ssl
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -33,7 +33,7 @@ def is_certificate_error(exc: BaseException) -> bool:
     return False
 
 
-async def get_verifying_first(url: str, *, timeout: float, headers: Dict[str, str]) -> tuple[httpx.Response, bool]:
+async def get_verifying_first(url: str, *, timeout: float, headers: dict[str, str]) -> tuple[httpx.Response, bool]:
     """GET *url* with certificate verification; returns ``(response, certificate_valid)``.
 
     A site whose certificate fails verification (expired, self-signed staging)
@@ -74,9 +74,9 @@ class URLAnalyzerService:
     async def analyze_live_website(
         cls,
         url: str,
-        prompt: Optional[str] = None,
-        test_case_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        prompt: str | None = None,
+        test_case_name: str | None = None,
+    ) -> dict[str, Any]:
         """Fetch real website HTML, inspect DOM elements, and synthesize live test plan."""
         normalized_url = cls.normalize_url(url)
         parsed = urlparse(normalized_url)
@@ -86,9 +86,9 @@ class URLAnalyzerService:
         status_code = 0
         latency_ms = 0
         html = ""
-        headers: Dict[str, str] = {}
-        error_encountered: Optional[str] = None
-        certificate_valid: Optional[bool] = None
+        headers: dict[str, str] = {}
+        error_encountered: str | None = None
+        certificate_valid: bool | None = None
 
         try:
             res, certificate_valid = await get_verifying_first(
@@ -101,7 +101,7 @@ class URLAnalyzerService:
             headers = dict(res.headers)
             if not certificate_valid:
                 logger.info("Analyzed %s despite an invalid TLS certificate", normalized_url)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - reported in the analysis result
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             error_encountered = str(exc)
             logger.warning(f"Error fetching URL {normalized_url}: {exc}")
@@ -203,7 +203,7 @@ class URLAnalyzerService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _extract_inputs(cls, html: str) -> List[Dict[str, Any]]:
+    def _extract_inputs(cls, html: str) -> list[dict[str, Any]]:
         results = []
         raw_inputs = re.findall(r"<input\s+([^>]+)>", html, re.IGNORECASE)
         for idx, tag in enumerate(raw_inputs, start=1):
@@ -238,7 +238,7 @@ class URLAnalyzerService:
         return results
 
     @classmethod
-    def _extract_buttons(cls, html: str) -> List[Dict[str, Any]]:
+    def _extract_buttons(cls, html: str) -> list[dict[str, Any]]:
         results = []
         # <button> tags
         for match in re.finditer(r"<button\s*([^>]*)>(.*?)</button>", html, re.IGNORECASE | re.DOTALL):
@@ -283,7 +283,7 @@ class URLAnalyzerService:
         return results
 
     @classmethod
-    def _extract_forms(cls, html: str) -> List[Dict[str, Any]]:
+    def _extract_forms(cls, html: str) -> list[dict[str, Any]]:
         results = []
         for match in re.finditer(r"<form\s*([^>]*)>", html, re.IGNORECASE):
             attrs = cls._parse_tag_attrs(match.group(1))
@@ -299,12 +299,12 @@ class URLAnalyzerService:
         return results
 
     @classmethod
-    def _extract_links(cls, html: str, domain: str) -> List[str]:
+    def _extract_links(cls, html: str, domain: str) -> list[str]:
         links = re.findall(r"""<a\s+[^>]*href=["']([^"'#]+)["']""", html, re.IGNORECASE)
         return list(dict.fromkeys(links))[:50]
 
     @classmethod
-    def _extract_headings(cls, html: str) -> List[str]:
+    def _extract_headings(cls, html: str) -> list[str]:
         headings = []
         for match in re.finditer(r"<h[1-3][^>]*>(.*?)</h[1-3]>", html, re.IGNORECASE | re.DOTALL):
             text = re.sub(r"<[^>]+>", "", match.group(1)).strip()
@@ -314,7 +314,7 @@ class URLAnalyzerService:
         return headings
 
     @classmethod
-    def _extract_images(cls, html: str) -> List[Dict[str, Any]]:
+    def _extract_images(cls, html: str) -> list[dict[str, Any]]:
         results = []
         for match in re.finditer(r"<img\s+([^>]+)>", html, re.IGNORECASE):
             attrs = cls._parse_tag_attrs(match.group(1))
@@ -325,7 +325,7 @@ class URLAnalyzerService:
         return results
 
     @classmethod
-    def _parse_tag_attrs(cls, tag_str: str) -> Dict[str, str]:
+    def _parse_tag_attrs(cls, tag_str: str) -> dict[str, str]:
         attrs = {}
         for match in re.finditer(r"""([a-zA-Z0-9_\-]+)=(?:["']([^"']*)["']|([^\s>]+))""", tag_str):
             key = match.group(1).lower()
@@ -338,8 +338,8 @@ class URLAnalyzerService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _audit_security(cls, url: str, headers: Dict[str, str],
-                        certificate_valid: Optional[bool] = None) -> Dict[str, Any]:
+    def _audit_security(cls, url: str, headers: dict[str, str],
+                        certificate_valid: bool | None = None) -> dict[str, Any]:
         is_https = url.startswith("https://")
         bad_certificate = is_https and certificate_valid is False
         h_lower = {k.lower(): v for k, v in headers.items()}
@@ -370,10 +370,10 @@ class URLAnalyzerService:
     @classmethod
     def _audit_accessibility(
         cls,
-        inputs: List[Dict[str, Any]],
-        buttons: List[Dict[str, Any]],
-        images: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        inputs: list[dict[str, Any]],
+        buttons: list[dict[str, Any]],
+        images: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         missing_alts = sum(1 for img in images if not img.get("has_alt"))
         unlabeled_inputs = sum(1 for i in inputs if not i.get("placeholder") and not i.get("aria_label"))
         unlabeled_buttons = sum(1 for b in buttons if b.get("text") == "Button")
@@ -390,7 +390,7 @@ class URLAnalyzerService:
         }
 
     @classmethod
-    def _audit_performance(cls, latency_ms: int, content_bytes: int) -> Dict[str, Any]:
+    def _audit_performance(cls, latency_ms: int, content_bytes: int) -> dict[str, Any]:
         if latency_ms < 350:
             score = 98
             rating = "Lightning Fast"
@@ -420,10 +420,10 @@ class URLAnalyzerService:
         cls,
         url: str,
         page_title: str,
-        inputs: List[Dict[str, Any]],
-        buttons: List[Dict[str, Any]],
-        prompt: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        inputs: list[dict[str, Any]],
+        buttons: list[dict[str, Any]],
+        prompt: str | None = None,
+    ) -> list[dict[str, Any]]:
         steps = []
         step_num = 1
 
@@ -519,8 +519,8 @@ class URLAnalyzerService:
         forms_count: int,
         overall_score: int,
         steps_count: int,
-        error: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        error: str | None = None,
+    ) -> list[dict[str, Any]]:
         events = [
             {
                 "event_type": "WORKFLOW_STARTED",

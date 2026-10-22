@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
 
 from agents.healer.healing_schemas import (
     LLMEvaluationResult,
@@ -66,7 +65,7 @@ class LLMHealingEvaluator:
         candidates: list[ScoredCandidate],
         original_selector: str,
         failure_type: str,
-    ) -> Optional[LLMEvaluationResult]:
+    ) -> LLMEvaluationResult | None:
         """Evaluate ambiguous candidates using the LLM.
 
         Parameters
@@ -140,7 +139,7 @@ class LLMHealingEvaluator:
             )
             return result
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - LLM/agent step: any failure degrades to the non-LLM path
             logger.warning(
                 "LLM evaluation failed: %s: %s",
                 type(exc).__name__,
@@ -204,7 +203,7 @@ class LLMHealingEvaluator:
     @staticmethod
     def _validate_schema(
         response_data: dict,
-    ) -> Optional[LLMEvaluationResult]:
+    ) -> LLMEvaluationResult | None:
         """Validate the LLM response matches the expected schema.
 
         Checks that required fields exist and have correct types.
@@ -241,7 +240,7 @@ class LLMHealingEvaluator:
                 confidence=confidence,
                 reason=reason,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - LLM/agent step: any failure degrades to the non-LLM path
             logger.warning(
                 "LLM evaluation result validation failed: %s", exc,
             )

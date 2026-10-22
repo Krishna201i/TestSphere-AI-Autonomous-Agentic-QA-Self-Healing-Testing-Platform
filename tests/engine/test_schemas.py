@@ -14,7 +14,7 @@ Covers:
 
 import json
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -37,7 +37,6 @@ from engine.schemas import (
     TestStatus,
     export_schemas,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -113,7 +112,7 @@ def full_test_result(
     return TestResult(
         test_id="t1",
         status=TestStatus.FAILED,
-        started_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        started_at=datetime(2024, 1, 1, tzinfo=UTC),
         duration_ms=6000,
         steps=[passed_step_result, healed_step_result, failed_step_result],
         artifacts_dir="artifacts/t1",

@@ -8,15 +8,15 @@ DPDP Act 2023 s.12 / GDPR art.17).
 """
 
 import logging
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from backend.auth import User, get_current_user, scope
+from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Record, Store, now_iso
-from backend.config import settings
 from backend.models import (
     APPLICATIONS,
     AUDIT_EVENTS,
@@ -39,9 +39,9 @@ OWNED_COLLECTIONS = (PROJECTS, APPLICATIONS, TEST_CASES, TEST_EXECUTIONS, SECURI
 
 
 class ProfileUpdate(BaseModel):
-    display_name: Optional[str] = Field(None, max_length=80)
-    organization: Optional[str] = Field(None, max_length=120)
-    job_title: Optional[str] = Field(None, max_length=80)
+    display_name: str | None = Field(None, max_length=80)
+    organization: str | None = Field(None, max_length=120)
+    job_title: str | None = Field(None, max_length=80)
 
 
 class AccountDeletion(BaseModel):
@@ -54,7 +54,7 @@ def _profile(db: Store, user: User) -> Record:
         return db.insert(USERS, uid=user.uid, email=user.email, display_name=user.name or (user.email or "").split("@")[0] or None,
                          organization=None, job_title=None, photo_url=user.picture, provider=user.provider,
                          last_login_at=now_iso())
-    changes: Dict[str, Any] = {}
+    changes: dict[str, Any] = {}
     if user.email and user.email != row.get("email"):
         changes["email"] = user.email
     if user.picture and user.picture != row.get("photo_url"):
@@ -62,7 +62,7 @@ def _profile(db: Store, user: User) -> Record:
     return db.update(USERS, row["id"], **changes) if changes else row
 
 
-def _view(db: Store, user: User, row: Record) -> Dict[str, Any]:
+def _view(db: Store, user: User, row: Record) -> dict[str, Any]:
     owned = scope(user)
     runs = db.find(PIPELINE_RUNS, order_by="id", descending=True, **owned)
     return {
@@ -87,13 +87,13 @@ def _view(db: Store, user: User, row: Record) -> Dict[str, Any]:
 
 
 @router.get("")
-def get_me(db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+def get_me(db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
     row = _profile(db, user)
     return _view(db, user, row)
 
 
 @router.post("/login")
-def record_login(db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+def record_login(db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
     """Called by the dashboard right after sign-in: stamps last_login_at."""
     row = _profile(db, user)
     row = db.update(USERS, row["id"], last_login_at=now_iso())
@@ -101,7 +101,7 @@ def record_login(db: Store = Depends(get_db), user: User = Depends(get_current_u
 
 
 @router.put("")
-def update_me(payload: ProfileUpdate, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+def update_me(payload: ProfileUpdate, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
     row = _profile(db, user)
     changes = {k: (v.strip() or None) for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
     if changes:
@@ -128,7 +128,7 @@ def _delete_sign_in_account(uid: str) -> bool:
 
 @router.delete("")
 def delete_me(payload: AccountDeletion, db: Store = Depends(get_db),
-              user: User = Depends(get_current_user)) -> Dict[str, Any]:
+              user: User = Depends(get_current_user)) -> dict[str, Any]:
     """Erase the signed-in user's data and sign-in account. Cannot be undone."""
     if user.local:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,

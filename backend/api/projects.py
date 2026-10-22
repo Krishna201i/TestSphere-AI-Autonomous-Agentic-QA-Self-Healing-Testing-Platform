@@ -5,7 +5,7 @@ Provides CRUD endpoints for testing projects (only the caller's own).
 Delegates persistence and business logic to ProjectService.
 """
 
-from typing import List
+
 from fastapi import APIRouter, Depends, status
 
 from backend.api.schemas import ProjectCreate, ProjectResponse, ProjectUpdate
@@ -36,8 +36,8 @@ def create_project(
     )
 
 
-@router.get("", response_model=List[ProjectResponse])
-def list_projects(db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> List[Record]:
+@router.get("", response_model=list[ProjectResponse])
+def list_projects(db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> list[Record]:
     """Retrieve the caller's testing projects."""
     return ProjectService.list_projects(db, **scope(user))
 

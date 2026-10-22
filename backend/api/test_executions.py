@@ -6,7 +6,7 @@ Delegates persistence and business logic to TestExecutionService.
 Does not launch Playwright, execute browser tests, or invoke AI agents.
 """
 
-from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.api.schemas import (
@@ -51,15 +51,15 @@ def create_test_execution(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
-        )
+        ) from exc
 
 
-@router.get("", response_model=List[TestExecutionResponse])
+@router.get("", response_model=list[TestExecutionResponse])
 def list_test_executions(
-    test_case_id: Optional[int] = Query(None, description="Filter by parent TestCase ID"),
+    test_case_id: int | None = Query(None, description="Filter by parent TestCase ID"),
     db: Store = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> List[Record]:
+) -> list[Record]:
     """Retrieve the caller's test executions, with optional test_case_id filtering."""
     return TestExecutionService.list_executions(db=db, test_case_id=test_case_id, **scope(user))
 
@@ -97,7 +97,7 @@ def update_test_execution(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
-        )
+        ) from exc
 
 
 @router.delete("/{execution_id}", status_code=status.HTTP_204_NO_CONTENT)

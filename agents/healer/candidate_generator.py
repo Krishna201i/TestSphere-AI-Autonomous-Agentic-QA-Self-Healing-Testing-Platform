@@ -17,7 +17,7 @@ selectors.  It only produces candidate data structures.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from agents.healer.healing_schemas import HealingContext, ScoredCandidate
 from agents.memory.context_comparator import ContextComparator
@@ -62,7 +62,7 @@ class CandidateGenerator:
     def __init__(
         self,
         memory_store: MemoryStore,
-        comparator: Optional[ContextComparator] = None,
+        comparator: ContextComparator | None = None,
     ) -> None:
         self._memory = memory_store
         self._comparator = comparator or ContextComparator()
@@ -129,7 +129,7 @@ class CandidateGenerator:
         self,
         previous_element: ElementRecord,
         current_elements: list[ElementRecord],
-        page_url: Optional[str] = None,
+        page_url: str | None = None,
     ) -> list[ScoredCandidate]:
         """Generate candidates by comparing current elements to the previous."""
         candidates: list[ScoredCandidate] = []
@@ -172,7 +172,7 @@ class CandidateGenerator:
     def _generate_from_historical_memory(
         self,
         original_selector: str,
-        previous_element: Optional[ElementRecord],
+        previous_element: ElementRecord | None,
     ) -> list[ScoredCandidate]:
         """Generate candidates from historical healing records."""
         candidates: list[ScoredCandidate] = []
@@ -247,7 +247,7 @@ class CandidateGenerator:
         self,
         previous: ElementRecord,
         current: ElementRecord,
-        page_url: Optional[str] = None,
+        page_url: str | None = None,
     ) -> dict[str, float]:
         """Compute individual similarity scores between two elements.
 
@@ -334,7 +334,7 @@ class CandidateGenerator:
 
     def _get_previous_element(
         self, analysis: FailureAnalysis,
-    ) -> Optional[ElementRecord]:
+    ) -> ElementRecord | None:
         """Retrieve the previous element from memory or analysis context."""
         # First try from the analysis's historical context
         if (
@@ -353,7 +353,7 @@ class CandidateGenerator:
 
     @staticmethod
     def _text_match(
-        text_a: Optional[str], text_b: Optional[str],
+        text_a: str | None, text_b: str | None,
     ) -> float:
         """Compare two text values, case-insensitive."""
         if text_a is None or text_b is None:
@@ -364,7 +364,7 @@ class CandidateGenerator:
 
     @staticmethod
     def _exact_match(
-        val_a: Optional[str], val_b: Optional[str],
+        val_a: str | None, val_b: str | None,
     ) -> float:
         """Compare two string values for exact equality."""
         if val_a is None or val_b is None:

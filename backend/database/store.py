@@ -26,9 +26,10 @@ import logging
 import os
 import threading
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any
 
 logger = logging.getLogger("testsphere.store")
 
@@ -54,15 +55,15 @@ class Record(dict):
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def to_iso(value: Any) -> Any:
     """Normalize datetimes to ISO UTC strings (naive datetimes are taken as UTC)."""
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc).isoformat()
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat()
     return value
 
 
@@ -70,7 +71,7 @@ def _clean(data: dict) -> dict:
     return {k: to_iso(v) for k, v in data.items()}
 
 
-def _sort_and_limit(rows: list[Record], order_by: Optional[str], descending: bool, limit: Optional[int]) -> list[Record]:
+def _sort_and_limit(rows: list[Record], order_by: str | None, descending: bool, limit: int | None) -> list[Record]:
     key = order_by or "id"
     rows.sort(key=lambda r: (r.get(key) is None, r.get(key) if r.get(key) is not None else 0), reverse=descending)
     return rows[:limit] if limit else rows
@@ -87,14 +88,14 @@ class Store(ABC):
     def _create(self, collection: str, data: dict) -> Record: ...
 
     @abstractmethod
-    def get(self, collection: str, doc_id: int) -> Optional[Record]: ...
+    def get(self, collection: str, doc_id: int) -> Record | None: ...
 
     @abstractmethod
-    def find(self, collection: str, *, order_by: Optional[str] = None, descending: bool = False,
-             limit: Optional[int] = None, **equals: Any) -> list[Record]: ...
+    def find(self, collection: str, *, order_by: str | None = None, descending: bool = False,
+             limit: int | None = None, **equals: Any) -> list[Record]: ...
 
     @abstractmethod
-    def _update(self, collection: str, doc_id: int, changes: dict) -> Optional[Record]: ...
+    def _update(self, collection: str, doc_id: int, changes: dict) -> Record | None: ...
 
     @abstractmethod
     def _update_if(self, collection: str, doc_id: int, field: str, expected: Any, changes: dict) -> bool: ...
@@ -117,7 +118,7 @@ class Store(ABC):
         data = {"created_at": stamp, "updated_at": stamp, **_clean(fields)}
         return self._create(collection, data)
 
-    def update(self, collection: str, doc_id: int, **changes: Any) -> Optional[Record]:
+    def update(self, collection: str, doc_id: int, **changes: Any) -> Record | None:
         return self._update(collection, doc_id, {**_clean(changes), "updated_at": now_iso()})
 
     def update_if(self, collection: str, doc_id: int, field: str, expected: Any, **changes: Any) -> bool:
@@ -125,7 +126,7 @@ class Store(ABC):
         (a missing field counts as None).  False when someone changed it first."""
         return self._update_if(collection, doc_id, field, expected, {**_clean(changes), "updated_at": now_iso()})
 
-    def find_one(self, collection: str, **equals: Any) -> Optional[Record]:
+    def find_one(self, collection: str, **equals: Any) -> Record | None:
         rows = self.find(collection, limit=1, **equals)
         return rows[0] if rows else None
 
@@ -169,7 +170,7 @@ class MemoryStore(Store):
             self._persist()
             return Record(copy.deepcopy(table[doc_id]))
 
-    def get(self, collection: str, doc_id: int) -> Optional[Record]:
+    def get(self, collection: str, doc_id: int) -> Record | None:
         with self._lock:
             doc = self._table(collection).get(_as_int(doc_id))
             return Record(copy.deepcopy(doc)) if doc else None
@@ -360,7 +361,7 @@ class FirestoreStore(Store):
         self._db = client
 
     @classmethod
-    def from_settings(cls, credentials: str | None, project_id: str | None) -> "FirestoreStore":
+    def from_settings(cls, credentials: str | None, project_id: str | None) -> FirestoreStore:
         try:
             from firebase_admin import firestore
         except ImportError as exc:  # pragma: no cover - dependency is in requirements

@@ -99,7 +99,7 @@ class ScoringWeights(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _weights_must_sum_positive(self) -> "ScoringWeights":
+    def _weights_must_sum_positive(self) -> ScoringWeights:
         """Ensure at least one weight is positive."""
         total = (
             self.text_weight

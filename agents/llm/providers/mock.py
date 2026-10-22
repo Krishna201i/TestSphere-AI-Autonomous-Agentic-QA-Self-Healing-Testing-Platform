@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Sequence
+from collections.abc import Sequence
 
 from agents.llm.client import LLMClient
 from agents.llm.config import LLMConfig

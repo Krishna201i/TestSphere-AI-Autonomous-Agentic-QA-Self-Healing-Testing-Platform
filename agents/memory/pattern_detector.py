@@ -20,7 +20,6 @@ decision engine or presented to human operators.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -126,7 +125,7 @@ class HealingPatternDetector:
     def detect_selector_chain(
         self,
         selector: str,
-    ) -> Optional[HealingPattern]:
+    ) -> HealingPattern | None:
         """Detect if a selector has been replaced in a chain.
 
         A chain exists when: A was replaced by B, and B was later

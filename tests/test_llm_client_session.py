@@ -30,7 +30,7 @@ import json
 
 import pytest
 
-from agents.llm.client import LLMClient, LLMClientSession
+from agents.llm.client import LLMClientSession
 from agents.llm.config import LLMConfig
 from agents.llm.exceptions import (
     LLMAuthenticationError,
@@ -46,8 +46,7 @@ from agents.llm.exceptions import (
 from agents.llm.factory import create_llm_client, get_llm_provider
 from agents.llm.parser import ResponseParser
 from agents.llm.providers.mock import MockLLMProvider
-from agents.llm.schemas import LLMRequest, LLMResponse, LLMUsage
-
+from agents.llm.schemas import LLMRequest, LLMResponse
 
 # ═══════════════════════════════════════════════════════════════
 #  Helpers

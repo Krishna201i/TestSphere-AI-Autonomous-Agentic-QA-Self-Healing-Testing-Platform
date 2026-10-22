@@ -15,7 +15,7 @@ repository's default branch re-ingest the codebase and run the pipeline.
 import hashlib
 import hmac
 import json
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
@@ -27,7 +27,7 @@ from backend.pipeline.runner import active_run, start_run
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
 
-def _normalize_repo(url: Optional[str]) -> str:
+def _normalize_repo(url: str | None) -> str:
     url = (url or "").strip().lower().rstrip("/")
     return url[:-4] if url.endswith(".git") else url
 
@@ -40,10 +40,10 @@ def signature_for(secret: str, body: bytes) -> str:
 async def github_webhook(
     project_id: int,
     request: Request,
-    x_github_event: Optional[str] = Header(None),
-    x_hub_signature_256: Optional[str] = Header(None),
+    x_github_event: str | None = Header(None),
+    x_hub_signature_256: str | None = Header(None),
     db: Store = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     project = db.get(PROJECTS, project_id)
     body = await request.body()
     # Same answer for "no such project" and "bad signature": ids are not confirmed

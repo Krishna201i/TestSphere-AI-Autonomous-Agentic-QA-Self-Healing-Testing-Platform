@@ -7,8 +7,9 @@ Tests:
 """
 
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
+
 from fastapi.testclient import TestClient
 
 from backend.database.session import get_store
@@ -19,11 +20,12 @@ from backend.services.project_service import ProjectService
 from backend.services.test_case_service import TestCaseService
 from backend.services.test_execution_service import TestExecutionService
 from engine.schemas import (
-    ActionType,
     StepResult,
     StepStatus,
-    TestResult as EngineTestResult,
     TestStatus,
+)
+from engine.schemas import (
+    TestResult as EngineTestResult,
 )
 
 
@@ -50,7 +52,7 @@ class TestWorkflowAPI(unittest.TestCase):
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-FLOW-1",
             status=TestStatus.PASSED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=100,
             steps=[
                 StepResult(
@@ -77,7 +79,7 @@ class TestWorkflowAPI(unittest.TestCase):
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-AUTO-1",
             status=TestStatus.PASSED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=80,
             steps=[
                 StepResult(step_id="step-1", status=StepStatus.PASSED, duration_ms=80)
@@ -107,7 +109,7 @@ class TestWorkflowAPI(unittest.TestCase):
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-FLOW-1",
             status=TestStatus.PASSED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=100,
             steps=[
                 StepResult(step_id="step-1", status=StepStatus.PASSED, duration_ms=100)

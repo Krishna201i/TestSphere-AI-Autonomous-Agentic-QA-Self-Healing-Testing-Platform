@@ -6,7 +6,7 @@ scheduler loop and the GitHub push webhook.
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -91,7 +91,7 @@ def scanner_for(headers):
 
 class OutOfScope:
     async def fetch(self, url):
-        raise OutOfScopeError(f"app.test:80 is not in the authorized scope (127.0.0.1)")
+        raise OutOfScopeError("app.test:80 is not in the authorized scope (127.0.0.1)")
 
 
 @pytest.fixture
@@ -237,7 +237,7 @@ def test_project_schedule_validation_and_clearing():
 
 def test_scheduler_starts_due_projects_once(fresh_store, no_background):
     due = make_project(fresh_store, schedule_minutes=60)
-    fresh_store.update(PROJECTS, due["id"], next_run_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())
+    fresh_store.update(PROJECTS, due["id"], next_run_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat())
     make_project(fresh_store, schedule_minutes=60)  # next run an hour away
     make_project(fresh_store)  # no schedule
 
@@ -250,15 +250,15 @@ def test_scheduler_starts_due_projects_once(fresh_store, no_background):
     first, second = asyncio.run(go())
     assert len(first) == 1 and second == []
     assert fresh_store.get(PIPELINE_RUNS, first[0])["trigger"] == "schedule"
-    assert datetime.fromisoformat(fresh_store.get(PROJECTS, due["id"])["next_run_at"]) > datetime.now(timezone.utc)
+    assert datetime.fromisoformat(fresh_store.get(PROJECTS, due["id"])["next_run_at"]) > datetime.now(UTC)
 
 
 def test_two_schedulers_racing_start_one_run(fresh_store, no_background, monkeypatch):
     """Both read the project as due before either moved its schedule (two
     instances, or the cron tick racing the in-process loop): one run, not two."""
     due = make_project(fresh_store, schedule_minutes=60)
-    fresh_store.update(PROJECTS, due["id"], next_run_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())
-    stale = scheduler.due_projects(fresh_store, datetime.now(timezone.utc))
+    fresh_store.update(PROJECTS, due["id"], next_run_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat())
+    stale = scheduler.due_projects(fresh_store, datetime.now(UTC))
     monkeypatch.setattr(scheduler, "due_projects", lambda db, now: stale)
     monkeypatch.setattr(scheduler, "active_run", lambda db, pid: None)  # neither has seen the other's run yet
 

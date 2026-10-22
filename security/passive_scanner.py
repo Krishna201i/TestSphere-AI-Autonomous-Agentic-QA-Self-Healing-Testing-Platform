@@ -33,14 +33,21 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Callable
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 import httpx
 
-from .findings import Finding, FindingSource, FindingStatus, RetestResult, Severity, dedupe
+from .findings import (
+    Finding,
+    FindingSource,
+    FindingStatus,
+    RetestResult,
+    Severity,
+    dedupe,
+)
 from .scope import ScopePolicy, is_loopback
 
 log = logging.getLogger(__name__)

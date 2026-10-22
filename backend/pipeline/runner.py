@@ -25,13 +25,21 @@ import asyncio
 import json
 import logging
 from collections import Counter
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 
 from backend.database.session import get_store
 from backend.database.store import Record, Store, StoreUnavailableError, now_iso
-from backend.models import APPLICATIONS, BLUEPRINTS, PIPELINE_RUNS, PROJECTS, TEST_CASES, TEST_EXECUTIONS
+from backend.models import (
+    APPLICATIONS,
+    BLUEPRINTS,
+    PIPELINE_RUNS,
+    PROJECTS,
+    TEST_CASES,
+    TEST_EXECUTIONS,
+)
 from backend.models.test_execution import TestExecutionStatus
 from backend.pipeline import suite
 from backend.services.security_service import record_audit
@@ -55,7 +63,7 @@ TRIGGERS = ("manual", "schedule", "webhook")
 GENERATED_PREFIX = "pipe-"
 
 _tasks: set = set()
-_lock_state: Dict[str, Any] = {"loop": None, "lock": None}
+_lock_state: dict[str, Any] = {"loop": None, "lock": None}
 
 
 def _run_lock() -> asyncio.Lock:
@@ -71,7 +79,7 @@ def _run_lock() -> asyncio.Lock:
 # ---------------------------------------------------------------------------
 
 
-def active_run(db: Store, project_id: int) -> Optional[Record]:
+def active_run(db: Store, project_id: int) -> Record | None:
     for status in ACTIVE:
         row = db.find_one(PIPELINE_RUNS, project_id=project_id, status=status)
         if row:
@@ -79,7 +87,7 @@ def active_run(db: Store, project_id: int) -> Optional[Record]:
     return None
 
 
-def create_run(db: Store, project: Record, *, trigger: str, actor: str, detail: Optional[str] = None,
+def create_run(db: Store, project: Record, *, trigger: str, actor: str, detail: str | None = None,
                ingest: bool = False) -> Record:
     if trigger not in TRIGGERS:
         raise ValueError(f"Unknown trigger {trigger!r}")
@@ -94,8 +102,8 @@ def create_run(db: Store, project: Record, *, trigger: str, actor: str, detail: 
     )
 
 
-def start_run(db: Store, project: Record, *, trigger: str, actor: str, detail: Optional[str] = None,
-              ingest: bool = False, executor: Optional[Callable[[int], Any]] = None) -> Record:
+def start_run(db: Store, project: Record, *, trigger: str, actor: str, detail: str | None = None,
+              ingest: bool = False, executor: Callable[[int], Any] | None = None) -> Record:
     """Create a run and execute it in the background on the running event loop."""
     run = create_run(db, project, trigger=trigger, actor=actor, detail=detail, ingest=ingest)
     task = asyncio.get_running_loop().create_task((executor or execute_run)(run["id"]))
@@ -137,7 +145,7 @@ class _RunState:
         self.doc.update(changes)
         self.db.update(PIPELINE_RUNS, self.id, **changes)
 
-    def stage(self, key: str, status: str, detail: Optional[str] = None) -> None:
+    def stage(self, key: str, status: str, detail: str | None = None) -> None:
         stages = [dict(s) for s in self.doc["stages"]]
         for s in stages:
             if s["key"] == key:
@@ -157,7 +165,7 @@ class _RunState:
                 self.stage(s["key"], "skipped", reason)
 
 
-async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None) -> Optional[Record]:
+async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None) -> Record | None:
     """Run every stage of pipeline run *run_id*; never raises (failures end up on the run)."""
     db = get_store()
     run = db.get(PIPELINE_RUNS, run_id)
@@ -242,7 +250,7 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
     _report(state, project, results, security)
 
 
-async def _stage_codebase(state: _RunState, project: Record) -> Optional[Dict[str, Any]]:
+async def _stage_codebase(state: _RunState, project: Record) -> dict[str, Any] | None:
     from backend.api.ingest import ingest_source, save_blueprint
     from ingestion import SourceError
 
@@ -272,11 +280,11 @@ async def _stage_codebase(state: _RunState, project: Record) -> Optional[Dict[st
     return blueprint
 
 
-async def _reachable(urls: List[str]) -> Dict[str, Optional[int]]:
+async def _reachable(urls: list[str]) -> dict[str, int | None]:
     """HTTP status per URL (None when unreachable), checked concurrently."""
     from backend.netguard import BlockedTargetError
 
-    async def one(url: str) -> Optional[int]:
+    async def one(url: str) -> int | None:
         try:
             response, _ = await get_verifying_first(url, timeout=8.0,
                                                     headers={"User-Agent": URLAnalyzerService.USER_AGENT})
@@ -285,11 +293,11 @@ async def _reachable(urls: List[str]) -> Dict[str, Optional[int]]:
             return None
 
     codes = await asyncio.gather(*(one(u) for u in urls))
-    return dict(zip(urls, codes))
+    return dict(zip(urls, codes, strict=True))
 
 
-async def _plan(db: Store, project: Record, analysis: Dict[str, Any],
-                blueprint: Optional[Dict[str, Any]]) -> tuple[Record, List[Record], str]:
+async def _plan(db: Store, project: Record, analysis: dict[str, Any],
+                blueprint: dict[str, Any] | None) -> tuple[Record, list[Record], str]:
     owner = project.get("owner_uid")
     app_url = project["app_url"]
     application = db.find_one(APPLICATIONS, project_id=project["id"], base_url=app_url)
@@ -330,14 +338,14 @@ async def _plan(db: Store, project: Record, analysis: Dict[str, Any],
     return application, generated + saved, detail
 
 
-async def _stage_execute(state: _RunState, test_cases: List[Record], orchestrator: Any,
-                         owner: Optional[str]) -> List[Dict[str, Any]]:
+async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrator: Any,
+                         owner: str | None) -> list[dict[str, Any]]:
     from backend.orchestration.orchestrator import get_platform_orchestrator
     from engine.schemas import RunOptions
 
     orch = orchestrator or get_platform_orchestrator()
     db = state.db
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     state.stage("execute", "running", f"0 of {len(test_cases)} run")
     for idx, tc in enumerate(test_cases, start=1):
         state.stage("execute", "running", f"Running {idx} of {len(test_cases)}: {tc['name']}")
@@ -362,7 +370,7 @@ async def _stage_execute(state: _RunState, test_cases: List[Record], orchestrato
     return results
 
 
-async def _stage_security(state: _RunState, app_url: str, owner: Optional[str], scanner: Any) -> Optional[Dict[str, Any]]:
+async def _stage_security(state: _RunState, app_url: str, owner: str | None, scanner: Any) -> dict[str, Any] | None:
     from backend.api.security import get_scanner, scan_result
     from security import OutOfScopeError, ScanError
 
@@ -385,7 +393,7 @@ async def _stage_security(state: _RunState, app_url: str, owner: Optional[str], 
     return result
 
 
-def _report(state: _RunState, project: Record, results: List[Dict[str, Any]], security: Optional[Dict[str, Any]]) -> None:
+def _report(state: _RunState, project: Record, results: list[dict[str, Any]], security: dict[str, Any] | None) -> None:
     db = state.db
     state.stage("report", "running")
     previous = next((r for r in db.find(PIPELINE_RUNS, project_id=project["id"], order_by="id", descending=True)

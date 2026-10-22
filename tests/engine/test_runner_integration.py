@@ -27,7 +27,6 @@ import pytest
 from engine.runner import run_test
 from engine.schemas import (
     ActionType,
-    EngineConfig,
     RunOptions,
     Step,
     StepStatus,

@@ -37,10 +37,9 @@ jobs:
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
 
-      # Correctness rules only (syntax errors, undefined names); the style
-      # backlog is cleaned up separately before widening this.
+      # Rule set in pyproject.toml [tool.ruff.lint]
       - name: Lint
-        run: ruff check --select E9,F63,F7,F82 agents backend engine security ingestion tests
+        run: ruff check
 
       - name: Tests
         run: python -m pytest -q

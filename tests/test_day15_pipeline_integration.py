@@ -27,9 +27,7 @@ from __future__ import annotations
 
 import json
 import time
-import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import pytest
 
@@ -37,14 +35,10 @@ from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.analyzer.schemas import (
     FailureAnalysis,
     FailureContext,
-    FailureEvidence,
-    HistoricalContext,
-    TestFailure,
 )
 from agents.healer.candidate_generator import CandidateGenerator
 from agents.healer.candidate_scorer import CandidateScorer
 from agents.healer.healing_decision import (
-    ConfidenceThresholds,
     HealingDecisionEngine,
 )
 from agents.healer.healing_feedback import (
@@ -56,7 +50,7 @@ from agents.healer.healing_schemas import (
     HealingRecommendation,
     ScoredCandidate,
 )
-from agents.healer.schemas import HealingCandidate, HealingResult
+from agents.healer.schemas import HealingResult
 from agents.llm import LLMClientSession, MockLLMProvider
 from agents.llm.config import LLMConfig
 from agents.memory.healing_evidence import HealingEvidenceRetriever
@@ -64,17 +58,14 @@ from agents.memory.in_memory_store import InMemoryStore
 from agents.memory.memory_schemas import (
     ElementRecord,
     HealingRecord,
-    TestExecutionRecord,
 )
 from agents.orchestration.agent_orchestrator import AgentOrchestrator
 from agents.orchestration.recovery_policy import (
     RecoveryAction,
-    RecoveryDecision,
     RecoveryPolicy,
     RecoveryPolicyConfig,
 )
 from agents.orchestration.workflow_schemas import (
-    VALID_TRANSITIONS,
     AgentState,
     ExecutionResult,
     ExecutionResultStatus,
@@ -87,47 +78,31 @@ from agents.planner.mock_scenarios import register_planner_scenarios
 from agents.planner.planner import LLMTestPlanner
 from agents.planner.schemas import (
     ApplicationContext,
-    Assertion,
     ElementContext,
     PageContext,
-    PageInfo,
-    TestCase,
-    TestPlan,
-    TestStep,
 )
 from agents.schemas.contracts import (
-    AssertionType,
     CandidateSource,
     ConfidenceLevel,
-    ExecutionStatus,
     FailureType,
     HealingAction,
     HealingDecision,
     HealingStatus,
     RecommendedAction,
-    TestAction,
-    TestCategory,
-    TestPriority,
     ValidationStatus,
 )
 from agents.schemas.member2_contract import (
     MEMBER2_SAMPLE_EXECUTION_RESULT_JSON,
     MEMBER2_SAMPLE_FEEDBACK_JSON,
-    MEMBER2_SAMPLE_HEALING_RECOMMENDATION_JSON,
     parse_member2_execution_result,
     parse_member2_feedback,
     serialize_for_member2,
 )
 from agents.schemas.member3_contract import (
-    MEMBER3_SAMPLE_SSE_EVENT,
-    MEMBER3_SAMPLE_WORKFLOW_SUMMARY_JSON,
-    DashboardEventMessage,
-    DashboardWorkflowSummary,
     build_dashboard_summary,
     format_sse_event,
     format_websocket_message,
 )
-
 
 # ══════════════════════════════════════════════════════════════
 #  Fixtures & Helper Functions
@@ -567,7 +542,7 @@ class TestMultiCandidateRanking:
                 healing_reason="attribute match",
                 confidence=0.92,
                 validation_result=True,
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
             )
         )
 
@@ -1548,7 +1523,7 @@ class TestDay15FinalMatrix:
                     healing_reason="historical match",
                     confidence=0.90,
                     validation_result=True,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    timestamp=datetime.now(UTC).isoformat(),
                 )
             )
 
@@ -1596,7 +1571,7 @@ class TestDay15FinalMatrix:
                     healing_reason="failed attempt",
                     confidence=0.85,
                     validation_result=False,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    timestamp=datetime.now(UTC).isoformat(),
                 )
             )
 

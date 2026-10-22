@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.healer.healing_decision import HealingDecisionEngine
@@ -35,7 +35,11 @@ from agents.planner.mock_scenarios import register_planner_scenarios
 from agents.planner.planner import LLMTestPlanner
 from agents.planner.schemas import (
     Assertion,
+)
+from agents.planner.schemas import (
     TestCase as Member1TestCase,
+)
+from agents.planner.schemas import (
     TestStep as Member1TestStep,
 )
 from agents.schemas.enums import (
@@ -47,7 +51,6 @@ from agents.schemas.member3_contract import (
     DashboardWorkflowSummary,
     build_dashboard_summary,
 )
-
 from backend.database.store import Store, StoreUnavailableError
 from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
 from backend.models.test_execution import TestExecutionStatus
@@ -58,11 +61,17 @@ from backend.orchestration.converters import (
 from engine.runner import run_test
 from engine.schemas import (
     RunOptions,
-    Step as EngineStep,
     StepStatus,
-    TestPlan as EngineTestPlan,
-    TestResult as EngineTestResult,
     TestStatus,
+)
+from engine.schemas import (
+    Step as EngineStep,
+)
+from engine.schemas import (
+    TestPlan as EngineTestPlan,
+)
+from engine.schemas import (
+    TestResult as EngineTestResult,
 )
 
 logger = logging.getLogger("testsphere.orchestration")
@@ -87,8 +96,8 @@ def apply_healed_selector(
     if not any(matches):
         matches = [idx == failed_step - 1 and st.target is not None for idx, st in enumerate(plan.steps)]
 
-    steps: List[EngineStep] = []
-    for step, hit in zip(plan.steps, matches):
+    steps: list[EngineStep] = []
+    for step, hit in zip(plan.steps, matches, strict=True):
         step_copy = step.model_copy(deep=True)
         if hit:
             step_copy.target.primary_locator = healed_selector
@@ -113,7 +122,7 @@ def create_memory_store() -> MemoryStore:
         return InMemoryStore()
 
 
-def create_default_orchestrator(memory_store: Optional[MemoryStore] = None) -> AgentOrchestrator:
+def create_default_orchestrator(memory_store: MemoryStore | None = None) -> AgentOrchestrator:
     """Create a fully configured AgentOrchestrator.
 
     Uses the LLM provider from the environment (``LLM_PROVIDER``); the default
@@ -160,10 +169,10 @@ def create_default_orchestrator(memory_store: Optional[MemoryStore] = None) -> A
     )
 
 
-_platform_orchestrator: Optional["PlatformWorkflowOrchestrator"] = None
+_platform_orchestrator: PlatformWorkflowOrchestrator | None = None
 
 
-def get_platform_orchestrator() -> "PlatformWorkflowOrchestrator":
+def get_platform_orchestrator() -> PlatformWorkflowOrchestrator:
     """The process-wide orchestrator shared by single runs and the automated pipeline
     (one healing memory, one set of workflow states)."""
     global _platform_orchestrator
@@ -175,15 +184,15 @@ def get_platform_orchestrator() -> "PlatformWorkflowOrchestrator":
 class PlatformWorkflowOrchestrator:
     """Coordinates test execution runs with AI failure diagnosis and self-healing."""
 
-    def __init__(self, orchestrator: Optional[AgentOrchestrator] = None) -> None:
+    def __init__(self, orchestrator: AgentOrchestrator | None = None) -> None:
         self.ai_orchestrator = orchestrator or create_default_orchestrator()
 
     async def execute_test_run(
         self,
         db: Store,
         execution_id: int,
-        options: Optional[RunOptions] = None,
-    ) -> Dict[str, Any]:
+        options: RunOptions | None = None,
+    ) -> dict[str, Any]:
         """Execute a single test execution run end-to-end.
 
         1. Fetches TestCase and Application from DB.
@@ -208,13 +217,13 @@ class PlatformWorkflowOrchestrator:
             raise ValueError(f"Application #{test_case.application_id} not found")
 
         # Mark as RUNNING
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         execution = db.update(TEST_EXECUTIONS, execution.id, status=TestExecutionStatus.RUNNING.value, started_at=start_time)
 
         # Build Member 1 TestCase model from DB record or structured description
-        m1_steps: List[Member1TestStep] = []
-        m1_assertions: List[Assertion] = []
-        analysis_data: Optional[Dict[str, Any]] = None
+        m1_steps: list[Member1TestStep] = []
+        m1_assertions: list[Assertion] = []
+        analysis_data: dict[str, Any] | None = None
         if test_case.description:
             try:
                 desc_obj = json.loads(test_case.description)
@@ -422,7 +431,7 @@ class PlatformWorkflowOrchestrator:
             )
 
         # Update database execution record
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.now(UTC)
         execution = db.update(
             TEST_EXECUTIONS, execution.id,
             status=final_status, completed_at=end_time, duration_ms=duration_ms, error_message=error_msg,
@@ -453,13 +462,13 @@ class PlatformWorkflowOrchestrator:
             "analysis": analysis_data,
         }
 
-    def _fail_unreadable_steps(self, db: Store, execution: Any, test_case: Any, exc: Exception) -> Dict[str, Any]:
+    def _fail_unreadable_steps(self, db: Store, execution: Any, test_case: Any, exc: Exception) -> dict[str, Any]:
         """Record a run that could not start because its stored steps are malformed."""
         error_msg = (f"Not executed: the stored steps of test case #{test_case.id} could not be read "
                      f"({type(exc).__name__}: {str(exc).splitlines()[0][:200] if str(exc) else ''}). "
                      "Edit or regenerate the test case.")
         db.update(TEST_EXECUTIONS, execution.id, status=TestExecutionStatus.FAILED.value,
-                  completed_at=datetime.now(timezone.utc), duration_ms=0, error_message=error_msg)
+                  completed_at=datetime.now(UTC), duration_ms=0, error_message=error_msg)
         summary = DashboardWorkflowSummary(workflow_id=f"wf-exec-{execution.id}", current_step=WorkflowStep.ABORTED,
                                            is_terminal=True, failed_tests=1)
         return {
@@ -473,7 +482,7 @@ class PlatformWorkflowOrchestrator:
             "analysis": None,
         }
 
-    def execution_events(self, execution_id: int) -> List[WorkflowEvent]:
+    def execution_events(self, execution_id: int) -> list[WorkflowEvent]:
         """Recorded events of the workflow run for *execution_id* (empty when
         none are held, e.g. after a restart)."""
         state = (self.ai_orchestrator.get_state(f"wf-exec-{execution_id}")

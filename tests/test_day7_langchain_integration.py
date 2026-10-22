@@ -23,16 +23,14 @@ import pytest
 
 from agents.llm.client import LLMClientSession
 from agents.llm.config import LLMConfig
-from agents.llm.exceptions import LLMResponseError
-from agents.llm.providers.mock import MockLLMProvider
 from agents.llm.factory import create_llm_client
+from agents.llm.providers.mock import MockLLMProvider
 from agents.planner.langchain_adapter import LangChainPlanningAdapter
 from agents.planner.langchain_prompts import TestPlannerPromptTemplate
 from agents.planner.mock_scenarios import (
-    VALID_TEST_PLAN_RESPONSE,
     SAMPLE_APPLICATION_CONTEXT,
+    VALID_TEST_PLAN_RESPONSE,
     register_default_planner_scenario,
-    register_planner_scenarios,
 )
 from agents.planner.planner import (
     LangChainTestPlanner,
@@ -41,11 +39,6 @@ from agents.planner.planner import (
 )
 from agents.planner.prompts import (
     SYSTEM_PROMPT,
-    ACTION_VOCABULARY,
-    ASSERTION_VOCABULARY,
-    CATEGORY_DEFINITIONS,
-    PRIORITY_DEFINITIONS,
-    OUTPUT_SCHEMA_INSTRUCTION,
     build_test_generation_prompt,
 )
 from agents.planner.schemas import (
@@ -54,7 +47,6 @@ from agents.planner.schemas import (
     PageContext,
     TestCase,
     TestPlan,
-    TestStep,
 )
 from agents.planner.structured_output import (
     StructuredOutputError,
@@ -67,7 +59,6 @@ from agents.schemas.enums import (
     TestCategory,
     TestPriority,
 )
-
 
 # ── Shared Fixtures ──────────────────────────────────────────
 
@@ -980,20 +971,19 @@ class TestBackwardCompatibility:
 
     def test_existing_imports_work(self):
         """Existing import patterns should still work."""
-        from agents.planner import LLMTestPlanner
-        from agents.planner import TestPlannerAgent
-        from agents.planner import validate_test_case
-        from agents.planner import TestPlanValidationError
+        from agents.planner import (
+            LLMTestPlanner,
+            TestPlannerAgent,
+        )
         assert LLMTestPlanner is not None
         assert TestPlannerAgent is not None
 
     def test_new_imports_work(self):
         """New Day 7 imports should work."""
-        from agents.planner import LangChainTestPlanner
-        from agents.planner import LangChainPlanningAdapter
-        from agents.planner import TestPlannerPromptTemplate
-        from agents.planner import StructuredOutputProcessor
-        from agents.planner import StructuredOutputError
+        from agents.planner import (
+            LangChainTestPlanner,
+            StructuredOutputProcessor,
+        )
         assert LangChainTestPlanner is not None
         assert StructuredOutputProcessor is not None
 

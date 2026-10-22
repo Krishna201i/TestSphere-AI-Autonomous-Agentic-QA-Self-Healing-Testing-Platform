@@ -14,10 +14,8 @@ import pytest
 from agents.memory.context_comparator import ContextComparator
 from agents.memory.in_memory_store import InMemoryStore
 from agents.memory.memory_schemas import (
-    ContextComparisonResult,
     ElementRecord,
     FailureInfo,
-    FieldChange,
     HealingRecord,
     TestExecutionRecord,
 )
@@ -26,7 +24,6 @@ from agents.schemas.enums import (
     ExecutionStatus,
     FailureType,
 )
-
 
 # ═══════════════════════════════════════════════════════════════
 # Fixtures

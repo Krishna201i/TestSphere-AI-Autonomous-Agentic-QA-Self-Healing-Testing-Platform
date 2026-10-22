@@ -13,17 +13,13 @@ Tests:
 
 from __future__ import annotations
 
-import pytest
-
 from agents.planner.prioritization import (
     PrioritizationResult,
     TestPrioritizer,
     add_test_reasoning,
 )
 from agents.planner.schemas import (
-    ApplicationContext,
     Assertion,
-    PageContext,
     TestCase,
     TestStep,
 )

@@ -17,7 +17,7 @@ Schemas
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -31,7 +31,7 @@ from agents.schemas.enums import (
 )
 
 if TYPE_CHECKING:
-    from agents.analyzer.schemas import FailureAnalysis
+    pass
 
 
 # ── Scored Candidate ─────────────────────────────────────────
@@ -150,7 +150,7 @@ class HealingRecommendation(BaseModel):
         default_factory=list,
         description="Candidate selectors, ranked by confidence (highest first)",
     )
-    selected_candidate: Optional[ScoredCandidate] = Field(
+    selected_candidate: ScoredCandidate | None = Field(
         default=None,
         description=(
             "Top candidate if it meets the confidence threshold. "
@@ -246,11 +246,11 @@ class HealingContext(BaseModel):
             "Provided by the execution engine or test context."
         ),
     )
-    page_url: Optional[str] = Field(
+    page_url: str | None = Field(
         default=None,
         description="Current page URL at time of failure",
     )
-    page_title: Optional[str] = Field(
+    page_title: str | None = Field(
         default=None,
         description="Current page title at time of failure",
     )

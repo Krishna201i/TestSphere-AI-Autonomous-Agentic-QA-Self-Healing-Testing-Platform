@@ -19,7 +19,8 @@ network checks (which candidate pages actually load).
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Iterable
+from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
 
 MAX_LINK_PAGES = 3
@@ -31,7 +32,7 @@ _UNSAFE_LINK = re.compile(r"log-?out|sign-?out|delete|remove|unsubscribe|destroy
 _PARAM_PATH = re.compile(r"[{}<>:*()\[\]$^|?\\]")
 
 
-def _step(n: int, action: str, *, target: Optional[str] = None, value: Optional[str] = None, description: str) -> Dict[str, Any]:
+def _step(n: int, action: str, *, target: str | None = None, value: str | None = None, description: str) -> dict[str, Any]:
     return {"step_number": n, "action": action, "target": target, "value": value, "description": description}
 
 
@@ -49,12 +50,12 @@ def _clean_title(title: str) -> str:
     return (title.split(" - ")[0].split("|")[0].strip() or title)[:30]
 
 
-def page_tests(analysis: Dict[str, Any], prompt: Optional[str] = None) -> List[Dict[str, Any]]:
+def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict[str, Any]]:
     """Tests for the analyzed page itself."""
     url = analysis["url"]
     title = analysis.get("page_title") or ""
     inventory = analysis.get("elements_inventory") or {}
-    tests: List[Dict[str, Any]] = []
+    tests: list[dict[str, Any]] = []
 
     smoke = [_step(1, "NAVIGATE", value=url, description=f"Open {url}")]
     if title and not title.endswith(" Webpage"):  # analyzer's fallback when there is no <title>
@@ -83,7 +84,7 @@ def page_tests(analysis: Dict[str, Any], prompt: Optional[str] = None) -> List[D
     return tests
 
 
-def candidate_pages(analysis: Dict[str, Any], blueprint: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+def candidate_pages(analysis: dict[str, Any], blueprint: dict[str, Any] | None = None) -> list[dict[str, str]]:
     """Other same-site pages worth a render check: linked pages, then codebase GET routes.
 
     Returns ``{"kind": "link"|"route", "url", "label"}`` items, de-duplicated,
@@ -92,7 +93,7 @@ def candidate_pages(analysis: Dict[str, Any], blueprint: Optional[Dict[str, Any]
     base = analysis["url"]
     origin = urlparse(base)
     seen = {_normalize(base)}
-    out: List[Dict[str, str]] = []
+    out: list[dict[str, str]] = []
 
     def add(kind: str, url: str, label: str, limit: int) -> None:
         if sum(1 for c in out if c["kind"] == kind) >= limit:
@@ -119,7 +120,7 @@ def candidate_pages(analysis: Dict[str, Any], blueprint: Optional[Dict[str, Any]
     return out
 
 
-def _get_routes(blueprint: Optional[Dict[str, Any]]) -> Iterable[str]:
+def _get_routes(blueprint: dict[str, Any] | None) -> Iterable[str]:
     for route in (blueprint or {}).get("routes") or []:
         method = str(route.get("method", "")).upper()
         path = str(route.get("path", ""))
@@ -128,7 +129,7 @@ def _get_routes(blueprint: Optional[Dict[str, Any]]) -> Iterable[str]:
         yield path
 
 
-def render_test(candidate: Dict[str, str]) -> Dict[str, Any]:
+def render_test(candidate: dict[str, str]) -> dict[str, Any]:
     kind, url, label = candidate["kind"], candidate["url"], candidate["label"]
     return {
         "slug": f"{kind}-{_slug(urlparse(url).path)}",

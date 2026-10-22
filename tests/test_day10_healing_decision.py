@@ -20,10 +20,8 @@ All tests are offline, no browser, no API keys, no real models.
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 import pytest
-import pytest_asyncio
 
 from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.analyzer.schemas import (
@@ -68,7 +66,6 @@ from agents.schemas.enums import (
     HealingStatus,
 )
 
-
 # ═══════════════════════════════════════════════════════════════
 # FIXTURES
 # ═══════════════════════════════════════════════════════════════
@@ -107,7 +104,7 @@ def _make_element(
     role: str = "button",
     page_url: str = "https://app.example.com/login",
     page_name: str = "Login Page",
-    attributes: Optional[dict] = None,
+    attributes: dict | None = None,
 ) -> ElementRecord:
     """Helper to create an ElementRecord."""
     return ElementRecord(
@@ -128,7 +125,7 @@ def _make_failure_analysis(
     failed_target: str = "#login-btn",
     failed_step: int = 3,
     confidence: ConfidenceLevel = ConfidenceLevel.HIGH,
-    previous_element: Optional[ElementRecord] = None,
+    previous_element: ElementRecord | None = None,
 ) -> FailureAnalysis:
     """Helper to create a FailureAnalysis."""
     historical = None
@@ -164,8 +161,8 @@ def _make_failure_analysis(
 
 
 def _make_healing_context(
-    failure_analysis: Optional[FailureAnalysis] = None,
-    current_elements: Optional[list[ElementRecord]] = None,
+    failure_analysis: FailureAnalysis | None = None,
+    current_elements: list[ElementRecord] | None = None,
     page_url: str = "https://app.example.com/login",
 ) -> HealingContext:
     """Helper to create a HealingContext."""

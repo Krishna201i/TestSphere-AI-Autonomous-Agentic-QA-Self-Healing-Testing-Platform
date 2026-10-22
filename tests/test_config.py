@@ -79,6 +79,6 @@ class TestLLMConfig:
         config = LLMConfig(api_key="test")
         try:
             config.api_key = "changed"  # type: ignore
-            assert False, "Should have raised FrozenInstanceError"
+            raise AssertionError("Should have raised FrozenInstanceError")
         except AttributeError:
             pass  # Expected: frozen dataclass

@@ -10,6 +10,15 @@ import json
 
 import pytest
 
+from agents.analyzer.schemas import FailureAnalysis, TestFailure
+from agents.healer.schemas import HealingCandidate, HealingResult
+from agents.planner.schemas import (
+    ApplicationContext,
+    Assertion,
+    PageInfo,
+    TestCase,
+    TestStep,
+)
 from agents.schemas.enums import (
     AssertionType,
     FailureType,
@@ -18,19 +27,6 @@ from agents.schemas.enums import (
     TestCategory,
     TestPriority,
 )
-from agents.planner.schemas import (
-    ApplicationContext,
-    Assertion,
-    ElementContext,
-    PageContext,
-    PageInfo,
-    TestCase,
-    TestPlan,
-    TestStep,
-)
-from agents.analyzer.schemas import FailureAnalysis, TestFailure
-from agents.healer.schemas import HealingCandidate, HealingResult
-
 
 # ── Enum Tests ──────────────────────────────────────────────
 
@@ -270,7 +266,7 @@ class TestAnalyzerSchemas:
 
     def test_confidence_is_enum(self):
         """Confidence must be a valid ConfidenceLevel."""
-        from agents.schemas.enums import ConfidenceLevel, RecommendedAction
+        from agents.schemas.enums import RecommendedAction
 
         with pytest.raises(Exception):
             FailureAnalysis(
