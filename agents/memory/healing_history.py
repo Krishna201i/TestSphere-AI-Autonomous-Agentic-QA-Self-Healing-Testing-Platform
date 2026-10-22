@@ -13,7 +13,6 @@ successes and failures, and avoid repeating failed strategies.
 
 from __future__ import annotations
 
-import warnings
 from abc import ABC, abstractmethod
 
 from agents.healer.schemas import HealingResult

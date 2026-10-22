@@ -16,46 +16,42 @@ import pytest
 
 from agents.llm.client import LLMClientSession
 from agents.llm.config import LLMConfig
-from agents.llm.providers.mock import MockLLMProvider
 from agents.llm.factory import create_llm_client
-from agents.planner.planner import LLMTestPlanner, TestPlannerAgent
-from agents.planner.schemas import (
-    ApplicationContext,
-    Assertion,
-    PageContext,
-    ElementContext,
-    TestCase,
-    TestPlan,
-    TestStep,
+from agents.llm.providers.mock import MockLLMProvider
+from agents.planner.mock_scenarios import (
+    EMPTY_TEST_PLAN_RESPONSE,
+    INVALID_CATEGORY_RESPONSE,
+    INVALID_MALFORMED_RESPONSE,
+    INVALID_PRIORITY_RESPONSE,
+    SAMPLE_APPLICATION_CONTEXT,
+    UNSUPPORTED_ACTION_RESPONSE,
+    VALID_TEST_PLAN_RESPONSE,
+    register_planner_scenarios,
 )
-from agents.planner.validation import TestPlanValidationError
+from agents.planner.planner import LLMTestPlanner, TestPlannerAgent
 from agents.planner.prompts import (
-    SYSTEM_PROMPT,
     ACTION_VOCABULARY,
     ASSERTION_VOCABULARY,
     CATEGORY_DEFINITIONS,
-    PRIORITY_DEFINITIONS,
     OUTPUT_SCHEMA_INSTRUCTION,
+    PRIORITY_DEFINITIONS,
+    SYSTEM_PROMPT,
     build_test_generation_prompt,
 )
-from agents.planner.mock_scenarios import (
-    VALID_TEST_PLAN_RESPONSE,
-    INVALID_MALFORMED_RESPONSE,
-    EMPTY_TEST_PLAN_RESPONSE,
-    UNSUPPORTED_ACTION_RESPONSE,
-    MISSING_REQUIRED_FIELD_RESPONSE,
-    INVALID_CATEGORY_RESPONSE,
-    INVALID_PRIORITY_RESPONSE,
-    SAMPLE_APPLICATION_CONTEXT,
-    register_planner_scenarios,
+from agents.planner.schemas import (
+    ApplicationContext,
+    ElementContext,
+    PageContext,
+    TestCase,
+    TestStep,
 )
+from agents.planner.validation import TestPlanValidationError
 from agents.schemas.enums import (
     AssertionType,
     TestAction,
     TestCategory,
     TestPriority,
 )
-
 
 # ── Fixtures ─────────────────────────────────────────────────
 

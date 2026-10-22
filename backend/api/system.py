@@ -13,7 +13,7 @@ path...) maps out the deployment and is shown to signed-in users only.
 import subprocess
 import time
 from functools import lru_cache
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
 
@@ -36,10 +36,10 @@ def _git_commit() -> str | None:
         return None
 
 
-_browser_cache: Dict[str, Any] = {"at": 0.0, "value": None}
+_browser_cache: dict[str, Any] = {"at": 0.0, "value": None}
 
 
-def _browser_status() -> Dict[str, Any]:
+def _browser_status() -> dict[str, Any]:
     """Chromium availability, cached for a minute (probing starts the Playwright driver)."""
     if time.monotonic() - _browser_cache["at"] > 60 or _browser_cache["value"] is None:
         from engine.browser import chromium_status
@@ -48,7 +48,7 @@ def _browser_status() -> Dict[str, Any]:
     return _browser_cache["value"]
 
 
-def _signed_in(authorization: Optional[str]) -> bool:
+def _signed_in(authorization: str | None) -> bool:
     """Whether the caller may see deployment details (no 401: an anonymous or
     expired session still needs the sign-in configuration)."""
     try:
@@ -58,7 +58,7 @@ def _signed_in(authorization: Optional[str]) -> bool:
         return False
 
 
-def _auth_config() -> Dict[str, Any]:
+def _auth_config() -> dict[str, Any]:
     # Public Firebase web config (not secret) so the dashboard can render sign-in
     return {
         "required": settings.AUTH_REQUIRED,
@@ -73,7 +73,7 @@ def _auth_config() -> Dict[str, Any]:
 
 
 @router.get("")
-def system_info(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+def system_info(authorization: str | None = Header(None)) -> dict[str, Any]:
     public = {"service": settings.APP_NAME, "api_version": API_VERSION, "auth": _auth_config()}
     if not _signed_in(authorization):
         return public

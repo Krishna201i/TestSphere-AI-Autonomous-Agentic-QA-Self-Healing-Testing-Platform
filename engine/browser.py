@@ -25,8 +25,10 @@ import subprocess
 import sys
 import threading
 import weakref
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING
+
 try:
     from playwright.async_api import (
         Browser,
@@ -55,10 +57,10 @@ log = logging.getLogger(__name__)
 # Process-wide outbound guard: called with the URL of every destination the
 # browser connects to; raising refuses it.  The backend installs its SSRF check
 # here so a test step cannot point the server's browser at internal addresses.
-_request_guard: Optional[Callable[[str], None]] = None
+_request_guard: Callable[[str], None] | None = None
 
 
-def set_request_guard(guard: Optional[Callable[[str], None]]) -> None:
+def set_request_guard(guard: Callable[[str], None] | None) -> None:
     """Install (or clear, with ``None``) the outbound guard for new sessions."""
     global _request_guard
     _request_guard = guard
@@ -67,7 +69,7 @@ def set_request_guard(guard: Optional[Callable[[str], None]]) -> None:
 # At most this many Chromium instances at once per process (each takes
 # ~150-300 MB); further sessions wait for a free slot.
 MAX_BROWSERS = max(1, int(os.getenv("ENGINE_MAX_BROWSERS", "2")))
-_slots: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+_slots: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
 
 
 def _browser_slots() -> asyncio.Semaphore:
@@ -86,7 +88,7 @@ def _is_missing_browser(exc: BaseException) -> bool:
     return "Executable doesn't exist" in str(exc)
 
 
-def install_chromium() -> Optional[str]:
+def install_chromium() -> str | None:
     """Download Chromium for this Playwright version, once per process.
 
     Hosts whose build step did not install the browser (or dropped it before
@@ -119,7 +121,7 @@ def chromium_status() -> dict:
         with sync_playwright() as pw:
             path = pw.chromium.executable_path
         return {"installed": Path(path).exists(), "path": path, "error": _install_state["error"]}
-    except Exception as exc:  # e.g. called inside a running event loop
+    except Exception as exc:  # noqa: BLE001 - e.g. called inside a running event loop
         return {"installed": None, "path": None, "error": str(exc)[:200]}
 
 
@@ -160,7 +162,7 @@ class BrowserSession:
     # Async context-manager protocol
     # ------------------------------------------------------------------
 
-    async def __aenter__(self) -> "BrowserSession":
+    async def __aenter__(self) -> BrowserSession:
         if not PLAYWRIGHT_INSTALLED or async_playwright is None:
             raise RuntimeError(
                 "Playwright is not installed in the environment. Please run 'pip install playwright && playwright install chromium' to enable browser automation."
@@ -204,7 +206,7 @@ class BrowserSession:
             await self._context.tracing.start(screenshots=True, snapshots=True)
             log.debug("Tracing started")
 
-    async def _launch(self) -> "Browser":
+    async def _launch(self) -> Browser:
         # "<-loopback>" stops Chromium sending localhost straight past the proxy
         proxy = {"server": self._proxy_url, "bypass": "<-loopback>"} if self._egress else None
         return await self._pw.chromium.launch(

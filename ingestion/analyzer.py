@@ -17,7 +17,7 @@ import re
 import subprocess
 import tomllib
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -103,7 +103,7 @@ class Risk(BaseModel):
 class Blueprint(BaseModel):
     name: str
     source: str
-    analyzed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    analyzed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     files_total: int = 0
     truncated: bool = False
     languages: dict[str, LanguageStat] = Field(default_factory=dict)

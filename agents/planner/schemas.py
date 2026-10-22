@@ -16,8 +16,8 @@ Day 4 enhancements:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -27,7 +27,6 @@ from agents.schemas.enums import (
     TestCategory,
     TestPriority,
 )
-
 
 # ── Element Context ────────────────────────────────────────────
 
@@ -42,18 +41,18 @@ class ElementContext(BaseModel):
     """
 
     tag: str = Field(..., description="HTML tag name (e.g. 'input', 'button', 'a')")
-    id: Optional[str] = Field(default=None, description="Element 'id' attribute")
-    name: Optional[str] = Field(default=None, description="Element 'name' attribute")
-    type: Optional[str] = Field(
+    id: str | None = Field(default=None, description="Element 'id' attribute")
+    name: str | None = Field(default=None, description="Element 'name' attribute")
+    type: str | None = Field(
         default=None, description="Element 'type' attribute (e.g. 'email', 'password')"
     )
-    role: Optional[str] = Field(
+    role: str | None = Field(
         default=None, description="ARIA role attribute"
     )
-    text: Optional[str] = Field(
+    text: str | None = Field(
         default=None, description="Visible text content of the element"
     )
-    placeholder: Optional[str] = Field(
+    placeholder: str | None = Field(
         default=None, description="Placeholder text for inputs"
     )
     classes: list[str] = Field(
@@ -63,14 +62,14 @@ class ElementContext(BaseModel):
         default_factory=dict,
         description="Additional HTML attributes (data-testid, aria-label, etc.)",
     )
-    selector: Optional[str] = Field(
+    selector: str | None = Field(
         default=None,
         description="CSS selector that uniquely identifies this element (when available)",
     )
-    visible: Optional[bool] = Field(
+    visible: bool | None = Field(
         default=None, description="Whether the element is visible (when available)"
     )
-    interactable: Optional[bool] = Field(
+    interactable: bool | None = Field(
         default=None,
         description="Whether the element can be interacted with (when available)",
     )
@@ -174,10 +173,10 @@ class TestStep(BaseModel):
         ...,
         description="Action to perform from the controlled vocabulary",
     )
-    target: Optional[str] = Field(
+    target: str | None = Field(
         default=None, description="CSS/XPath selector for the target element"
     )
-    value: Optional[str] = Field(
+    value: str | None = Field(
         default=None, description="Value for input actions (e.g. text to type, URL)"
     )
     description: str = Field(
@@ -187,7 +186,7 @@ class TestStep(BaseModel):
         default_factory=list,
         description="Assertions to verify after this step completes",
     )
-    timeout: Optional[int] = Field(
+    timeout: int | None = Field(
         default=None,
         description="Step-level timeout override in milliseconds",
         ge=0,
@@ -199,7 +198,7 @@ class TestStep(BaseModel):
 
     # Backward-compatible property — Day 1 tests use ``selector``
     @property
-    def selector(self) -> Optional[str]:
+    def selector(self) -> str | None:
         """Alias for ``target`` (backward compatibility)."""
         return self.target
 
@@ -234,7 +233,7 @@ class TestCase(BaseModel):
         default_factory=list,
         description="Top-level assertions for the entire test case",
     )
-    page_url: Optional[str] = Field(
+    page_url: str | None = Field(
         default=None, description="Primary page URL for this test"
     )
     preconditions: list[str] = Field(
@@ -245,7 +244,7 @@ class TestCase(BaseModel):
         default_factory=list,
         description="Tags for filtering and grouping (e.g. 'login', 'critical')",
     )
-    generated_reasoning: Optional[str] = Field(
+    generated_reasoning: str | None = Field(
         default=None,
         description="Brief reasoning for why this test was generated (metadata only)",
     )
@@ -268,7 +267,7 @@ class TestPlan(BaseModel):
         default="", description="Base URL of the application"
     )
     generated_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 timestamp of when the plan was generated",
     )
     test_cases: list[TestCase] = Field(

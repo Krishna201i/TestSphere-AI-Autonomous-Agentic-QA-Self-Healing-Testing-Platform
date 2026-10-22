@@ -6,6 +6,7 @@ isolated in-memory store).
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+
 from backend.api.security import get_scanner
 from backend.config import settings
 from backend.main import app

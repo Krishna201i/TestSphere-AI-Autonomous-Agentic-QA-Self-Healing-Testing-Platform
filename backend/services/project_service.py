@@ -9,8 +9,8 @@ often it re-runs, and ``webhook_secret`` signs GitHub push webhooks.
 """
 
 import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Any, List, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from backend.database.store import Record, Store
 from backend.models import APPLICATIONS, PIPELINE_RUNS, PROJECTS
@@ -24,10 +24,10 @@ def new_webhook_secret() -> str:
     return secrets.token_hex(20)
 
 
-def next_run_after(minutes: Optional[int], now: Optional[datetime] = None) -> Optional[str]:
+def next_run_after(minutes: int | None, now: datetime | None = None) -> str | None:
     if not minutes:
         return None
-    return ((now or datetime.now(timezone.utc)) + timedelta(minutes=minutes)).isoformat()
+    return ((now or datetime.now(UTC)) + timedelta(minutes=minutes)).isoformat()
 
 
 class ProjectService:
@@ -35,7 +35,7 @@ class ProjectService:
 
     @staticmethod
     def create_project(
-        db: Store, name: str, description: Optional[str] = None, owner_uid: Optional[str] = None, **pipeline: Any,
+        db: Store, name: str, description: str | None = None, owner_uid: str | None = None, **pipeline: Any,
     ) -> Record:
         fields = {k: pipeline.get(k) for k in PIPELINE_FIELDS}
         return db.insert(
@@ -44,7 +44,7 @@ class ProjectService:
         )
 
     @staticmethod
-    def list_projects(db: Store, **filters: Any) -> List[Record]:
+    def list_projects(db: Store, **filters: Any) -> list[Record]:
         return db.find(PROJECTS, **filters)
 
     @staticmethod
@@ -56,7 +56,7 @@ class ProjectService:
 
     @staticmethod
     def update_project(
-        db: Store, project_id: int, name: Optional[str] = None, description: Optional[str] = None,
+        db: Store, project_id: int, name: str | None = None, description: str | None = None,
         **pipeline: Any,
     ) -> Record:
         """Update a project.  For pipeline fields, an explicit ``None`` or empty

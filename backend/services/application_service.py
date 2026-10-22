@@ -4,7 +4,7 @@ TestSphere-AI — Application Service.
 Encapsulates storage and business operations for web applications under test.
 """
 
-from typing import Any, List, Optional
+from typing import Any
 
 from backend.database.store import Record, Store
 from backend.models import APPLICATIONS, PROJECTS, TEST_CASES
@@ -13,7 +13,7 @@ from backend.services.exceptions import ApplicationNotFoundError, ProjectNotFoun
 DEFAULT_PROJECT = {"name": "TestSphere Auto QA", "description": "Autonomous agentic QA testing workspace"}
 
 
-def default_project(db: Store, owner_uid: Optional[str] = None) -> Record:
+def default_project(db: Store, owner_uid: str | None = None) -> Record:
     """The user's first project (any user's when *owner_uid* is None), created on demand."""
     filters = {"owner_uid": owner_uid} if owner_uid else {}
     existing = db.find(PROJECTS, limit=1, **filters)
@@ -29,8 +29,8 @@ class ApplicationService:
 
     @staticmethod
     def create_application(
-        db: Store, project_id: Optional[int], name: str, base_url: str, description: Optional[str] = None,
-        owner_uid: Optional[str] = None,
+        db: Store, project_id: int | None, name: str, base_url: str, description: str | None = None,
+        owner_uid: str | None = None,
     ) -> Record:
         if project_id is not None:
             if not db.get(PROJECTS, project_id):
@@ -41,7 +41,7 @@ class ApplicationService:
                          owner_uid=owner_uid)
 
     @staticmethod
-    def list_applications(db: Store, project_id: Optional[int] = None, **filters: Any) -> List[Record]:
+    def list_applications(db: Store, project_id: int | None = None, **filters: Any) -> list[Record]:
         if project_id is not None:
             filters["project_id"] = project_id
         return db.find(APPLICATIONS, **filters)
@@ -55,8 +55,8 @@ class ApplicationService:
 
     @staticmethod
     def update_application(
-        db: Store, application_id: int, name: Optional[str] = None,
-        base_url: Optional[str] = None, description: Optional[str] = None,
+        db: Store, application_id: int, name: str | None = None,
+        base_url: str | None = None, description: str | None = None,
     ) -> Record:
         ApplicationService.get_application(db, application_id)
         fields = {"name": name, "base_url": base_url, "description": description}

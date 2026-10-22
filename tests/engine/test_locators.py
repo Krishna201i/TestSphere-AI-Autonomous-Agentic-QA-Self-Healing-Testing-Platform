@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from engine.locators import generate_locators, rank_locators, _locator_priority
-from engine.schemas import BoundingBox, ElementFingerprint
-
+from engine.locators import _locator_priority, generate_locators, rank_locators
+from engine.schemas import ElementFingerprint
 
 # ---------------------------------------------------------------------------
 # generate_locators — priority ordering

@@ -5,7 +5,7 @@ Converts data models between Member 1 (AI Agent Layer) and Member 2 (Execution E
 Maintains bidirectional fidelity without modifying shared models or third-party contracts.
 """
 
-from typing import List, Optional
+
 from agents.analyzer.schemas import FailureContext
 from agents.orchestration.workflow_schemas import (
     ExecutionResult,
@@ -13,25 +13,34 @@ from agents.orchestration.workflow_schemas import (
 )
 from agents.planner.schemas import (
     Assertion,
+)
+from agents.planner.schemas import (
     TestCase as Member1TestCase,
-    TestStep as Member1TestStep,
 )
 from agents.schemas.enums import AssertionType, TestAction
 from engine.schemas import (
     ActionType,
-    Step as EngineStep,
     StepStatus,
-    Target as EngineTarget,
-    TestPlan as EngineTestPlan,
-    TestResult as EngineTestResult,
     TestStatus,
+)
+from engine.schemas import (
+    Step as EngineStep,
+)
+from engine.schemas import (
+    Target as EngineTarget,
+)
+from engine.schemas import (
+    TestPlan as EngineTestPlan,
+)
+from engine.schemas import (
+    TestResult as EngineTestResult,
 )
 
 
 def create_engine_target(
-    selector: Optional[str],
+    selector: str | None,
     description: str = "Target element",
-) -> Optional[EngineTarget]:
+) -> EngineTarget | None:
     """Create an EngineTarget conforming to Member 2 schema."""
     if not selector:
         return None
@@ -89,7 +98,7 @@ def test_case_to_engine_plan(
 
     Transforms planned atomic actions and assertions into sequential Playwright steps.
     """
-    engine_steps: List[EngineStep] = []
+    engine_steps: list[EngineStep] = []
 
     # If test has steps, convert each
     for step in test_case.steps:
@@ -142,7 +151,7 @@ def engine_result_to_execution_result(
     engine_result: EngineTestResult,
     workflow_id: str,
     test_case_id: str,
-    engine_plan: Optional[EngineTestPlan] = None,
+    engine_plan: EngineTestPlan | None = None,
 ) -> ExecutionResult:
     """Convert Member 2 EngineTestResult into Member 1 ExecutionResult.
 

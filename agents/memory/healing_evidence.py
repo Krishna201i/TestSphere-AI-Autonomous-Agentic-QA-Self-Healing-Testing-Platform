@@ -15,7 +15,6 @@ candidate scorer and decision engine.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -59,7 +58,7 @@ class ReplacementStats(BaseModel):
         default=0.0, ge=0.0, le=1.0,
         description="Average confidence score across attempts",
     )
-    last_used: Optional[str] = Field(
+    last_used: str | None = Field(
         default=None,
         description="ISO 8601 timestamp of the most recent attempt",
     )
@@ -255,7 +254,7 @@ class HealingEvidenceRetriever:
         total_successes = 0
         total_failures = 0
 
-        for new_sel, records in by_replacement.items():
+        for new_sel in by_replacement:
             stats = self.get_replacement_stats(selector, new_sel)
             replacement_stats.append(stats)
             total_successes += stats.successes
@@ -277,7 +276,7 @@ class HealingEvidenceRetriever:
 
     def get_last_successful_replacement(
         self, selector: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Get the most recent successful replacement for a selector.
 
         Parameters

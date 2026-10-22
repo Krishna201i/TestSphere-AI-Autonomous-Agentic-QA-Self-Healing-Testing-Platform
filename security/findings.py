@@ -11,7 +11,7 @@ and track a finding through the remediate → retest loop.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -60,7 +60,7 @@ class Finding(BaseModel):
     confidence: float = Field(1.0, ge=0.0, le=1.0)
     status: FindingStatus = FindingStatus.OPEN
     retest_result: RetestResult | None = None
-    detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def key(self) -> str:

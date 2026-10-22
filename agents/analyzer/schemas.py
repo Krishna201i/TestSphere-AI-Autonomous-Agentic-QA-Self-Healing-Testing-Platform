@@ -16,7 +16,7 @@ These schemas define:
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -30,7 +30,6 @@ from agents.schemas.enums import (
     FailureType,
     RecommendedAction,
 )
-
 
 # ── Failure Context (input) ──────────────────────────────────
 
@@ -54,7 +53,7 @@ class FailureContext(BaseModel):
     failed_step: int = Field(
         default=1, ge=1, description="1-based step number that failed"
     )
-    failed_step_id: Optional[int] = Field(
+    failed_step_id: int | None = Field(
         default=None, description="Step number/identifier that failed"
     )
     action: str = Field(
@@ -65,44 +64,44 @@ class FailureContext(BaseModel):
         default="",
         description="Selector that was being used when failure occurred",
     )
-    expected_result: Optional[str] = Field(
+    expected_result: str | None = Field(
         default=None, description="Expected outcome of the step"
     )
-    actual_result: Optional[str] = Field(
+    actual_result: str | None = Field(
         default=None, description="Actual observed outcome"
     )
     error_message: str = Field(
         default="", description="Error message from the execution engine"
     )
-    failure_category: Optional[FailureType] = Field(
+    failure_category: FailureType | None = Field(
         default=None, description="Pre-classified failure category, if known"
     )
-    current_page_url: Optional[str] = Field(
+    current_page_url: str | None = Field(
         default=None, description="Page URL at time of failure"
     )
-    current_page_title: Optional[str] = Field(
+    current_page_title: str | None = Field(
         default=None, description="Page title at time of failure"
     )
-    current_element: Optional[ElementRecord] = Field(
+    current_element: ElementRecord | None = Field(
         default=None,
         description=(
             "Current element information if an alternative element "
             "was found in the UI"
         ),
     )
-    dom_evidence: Optional[dict[str, Any]] = Field(
+    dom_evidence: dict[str, Any] | None = Field(
         default=None,
         description="DOM evidence at time of failure, if available",
     )
-    screenshot_path: Optional[str] = Field(
+    screenshot_path: str | None = Field(
         default=None,
         description="Screenshot path or reference, if available",
     )
-    trace_path: Optional[str] = Field(
+    trace_path: str | None = Field(
         default=None,
         description="Trace file path or reference, if available",
     )
-    timestamp: Optional[str] = Field(
+    timestamp: str | None = Field(
         default=None,
         description="Timestamp of the failure occurrence",
     )
@@ -127,7 +126,7 @@ class FailureContext(BaseModel):
         return self.target_selector
 
     @property
-    def current_url(self) -> Optional[str]:
+    def current_url(self) -> str | None:
         """Alias for current_page_url."""
         return self.current_page_url
 
@@ -181,15 +180,15 @@ class HistoricalContext(BaseModel):
         default=0, ge=0,
         description="Number of previous failed executions",
     )
-    latest_successful_execution: Optional[TestExecutionRecord] = Field(
+    latest_successful_execution: TestExecutionRecord | None = Field(
         default=None,
         description="Most recent successful execution record, if any",
     )
-    previous_element: Optional[ElementRecord] = Field(
+    previous_element: ElementRecord | None = Field(
         default=None,
         description="Historical element record for the failed target, if any",
     )
-    context_comparison: Optional[ContextComparisonResult] = Field(
+    context_comparison: ContextComparisonResult | None = Field(
         default=None,
         description="Comparison between previous and current element, if both exist",
     )
@@ -235,17 +234,17 @@ class FailureAnalysis(BaseModel):
         default="",
         description="Selector or target that failed",
     )
-    expected_state: Optional[str] = Field(
+    expected_state: str | None = Field(
         default=None, description="Expected application/element state"
     )
-    actual_state: Optional[str] = Field(
+    actual_state: str | None = Field(
         default=None, description="Actual observed application/element state"
     )
     evidence: list[FailureEvidence] = Field(
         default_factory=list,
         description="Observable evidence supporting the analysis",
     )
-    historical_context: Optional[HistoricalContext] = Field(
+    historical_context: HistoricalContext | None = Field(
         default=None,
         description="Historical context used during analysis",
     )

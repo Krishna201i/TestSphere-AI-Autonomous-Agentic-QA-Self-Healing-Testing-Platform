@@ -6,17 +6,17 @@ Exposes REST API endpoints and coordinates the TestSphere-AI platform services.
 
 import asyncio
 import contextlib
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 import logging
 import os
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
+
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.config import settings, startup_safety_problem
 from backend.api import (
     applications_router,
     audit_router,
@@ -32,6 +32,7 @@ from backend.api import (
     webhooks_router,
     workflow_router,
 )
+from backend.config import settings, startup_safety_problem
 from backend.database.session import get_store, init_db
 from backend.database.store import StoreUnavailableError
 from backend.netguard import check_target
@@ -65,14 +66,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         init_db()
         logger.info("Database connection verified successfully.")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - startup check: log and keep serving
         logger.warning(f"Database connection initialization check encountered: {exc}")
     try:
         from backend.pipeline.runner import recover_interrupted
 
         if interrupted := recover_interrupted(get_store()):
             logger.warning("Marked %d pipeline run(s) interrupted by the restart.", interrupted)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - startup check: log and keep serving
         logger.warning("Could not check for interrupted pipeline runs: %s", exc)
     scheduler_task = None
     if settings.SCHEDULER_ENABLED:

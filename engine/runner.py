@@ -26,12 +26,13 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 try:
     from playwright.async_api import Error as PlaywrightError
-    from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
+    from playwright.async_api import Page
+    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
     PLAYWRIGHT_INSTALLED = True
 except ImportError:
     class PlaywrightError(Exception):  # type: ignore
@@ -91,7 +92,7 @@ async def run_test(
         captured inside ``StepResult.error``.
     """
     config = options.merged(EngineConfig()) if options else EngineConfig()
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     wall_start = time.monotonic()
 
     step_results: list[StepResult] = []
@@ -113,7 +114,7 @@ async def run_test(
                         result.error,
                     )
                     break
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - the engine reports failures in its result and never raises
         log.error("[%s] Browser session error: %s", plan.test_id, exc)
         step_results.append(
             StepResult(
@@ -218,7 +219,7 @@ async def _execute_step(
                     console_logs=console_logs,
                     network_errors=network_errors,
                 )
-            except Exception as retry_exc:
+            except Exception as retry_exc:  # noqa: BLE001 - the engine reports failures in its result and never raises
                 error_msg = f"Healing failed on retry: {retry_exc}"
 
         # Capture failure artifacts
@@ -272,7 +273,7 @@ async def _perform_action(page: Page, step: Step, config: EngineConfig) -> str |
         nav_timeout = max(timeout or 15000, 15000)
         try:
             await page.goto(url, timeout=nav_timeout, wait_until="domcontentloaded")
-        except Exception:
+        except Exception:  # noqa: BLE001 - any failure: retry with the looser "commit" wait
             await page.goto(url, timeout=nav_timeout, wait_until="commit")
         return None
 
@@ -379,7 +380,7 @@ async def _fingerprint_if_present(page: Page, step: Step) -> ElementFingerprint 
     try:
         if await page.locator(step.target.primary_locator).count() == 0:
             return None
-    except Exception:  # invalid selector — let the action itself report it
+    except Exception:  # noqa: BLE001 - invalid selector — let the action itself report it
         return None
     return await build_fingerprint(page, step.target.primary_locator)
 

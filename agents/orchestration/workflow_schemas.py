@@ -23,9 +23,9 @@ Schemas
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -33,8 +33,7 @@ from agents.analyzer.schemas import FailureAnalysis, FailureContext
 from agents.healer.healing_schemas import HealingRecommendation, ScoredCandidate
 from agents.healer.schemas import HealingResult
 from agents.planner.schemas import TestCase, TestPlan
-from agents.schemas.enums import HealingAction, HealingDecision
-
+from agents.schemas.enums import HealingDecision
 
 # ── Workflow Step (State Machine States) ──────────────────────
 
@@ -209,7 +208,7 @@ class ExecutionResult(BaseModel):
         ...,
         description="Execution outcome: SUCCESS or FAILED",
     )
-    failure_context: Optional[FailureContext] = Field(
+    failure_context: FailureContext | None = Field(
         default=None,
         description=(
             "Structured failure context (required when status is FAILED)"
@@ -219,8 +218,8 @@ class ExecutionResult(BaseModel):
     @field_validator("failure_context")
     @classmethod
     def _validate_failure_context(
-        cls, v: Optional[FailureContext], info: Any,
-    ) -> Optional[FailureContext]:
+        cls, v: FailureContext | None, info: Any,
+    ) -> FailureContext | None:
         """Ensure failure_context is provided when status is FAILED."""
         # Access the status value from the data being validated
         status = info.data.get("status")
@@ -246,7 +245,7 @@ class WorkflowEvent(BaseModel):
         description="Workflow this event belongs to",
     )
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 timestamp of the event",
     )
     event_type: WorkflowEventType = Field(
@@ -291,27 +290,27 @@ class AgentState(BaseModel):
     )
 
     # ── Test Planning ─────────────────────────────────────
-    test_plan: Optional[TestPlan] = Field(
+    test_plan: TestPlan | None = Field(
         default=None,
         description="Generated test plan (set after PLANNING)",
     )
-    current_test_case: Optional[TestCase] = Field(
+    current_test_case: TestCase | None = Field(
         default=None,
         description="Current test case being processed",
     )
 
     # ── Execution ─────────────────────────────────────────
-    execution_result: Optional[ExecutionResult] = Field(
+    execution_result: ExecutionResult | None = Field(
         default=None,
         description="Execution result from Member 2",
     )
-    failure_context: Optional[FailureContext] = Field(
+    failure_context: FailureContext | None = Field(
         default=None,
         description="Failure context extracted from execution result",
     )
 
     # ── Analysis ──────────────────────────────────────────
-    failure_analysis: Optional[FailureAnalysis] = Field(
+    failure_analysis: FailureAnalysis | None = Field(
         default=None,
         description="Failure analysis from the Failure Analyzer",
     )
@@ -325,15 +324,15 @@ class AgentState(BaseModel):
         default_factory=list,
         description="Candidates after scoring and ranking",
     )
-    healing_decision: Optional[HealingDecision] = Field(
+    healing_decision: HealingDecision | None = Field(
         default=None,
         description="Final healing decision enum value",
     )
-    healing_recommendation: Optional[HealingRecommendation] = Field(
+    healing_recommendation: HealingRecommendation | None = Field(
         default=None,
         description="Structured healing recommendation for Member 2",
     )
-    healing_result: Optional[HealingResult] = Field(
+    healing_result: HealingResult | None = Field(
         default=None,
         description="Most recent healing result from Member 2",
     )
@@ -373,7 +372,7 @@ class AgentState(BaseModel):
     )
 
     # ── Recovery Decision (Day 14) ────────────────────────
-    recovery_decision: Optional[Any] = Field(
+    recovery_decision: Any | None = Field(
         default=None,
         description=(
             "Most recent RecoveryDecision from the RecoveryPolicy. "
@@ -388,18 +387,18 @@ class AgentState(BaseModel):
     )
 
     # ── Error Info ────────────────────────────────────────
-    error_info: Optional[str] = Field(
+    error_info: str | None = Field(
         default=None,
         description="Error information if workflow encountered a problem",
     )
 
     # ── Timestamps ────────────────────────────────────────
     created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 timestamp of workflow creation",
     )
     updated_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 timestamp of last update",
     )
 

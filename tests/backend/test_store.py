@@ -9,7 +9,7 @@ FirestoreStore.  Firestore runs only when the official emulator is available
 import json
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -21,8 +21,8 @@ from backend.database.store import (
     MemoryStore,
     Record,
     StoreUnavailableError,
-    create_store,
     _service_account_source,
+    create_store,
     describe_firestore_error,
 )
 
@@ -85,7 +85,7 @@ def test_find_handles_none_values(store) -> None:
 def test_update_merges_and_bumps_updated_at(store) -> None:
     rec = store.insert("test_executions", test_case_id=1, status="PENDING", duration_ms=None)
     updated = store.update("test_executions", rec.id, status="PASSED", duration_ms=12,
-                           completed_at=datetime(2026, 10, 21, 7, 0, tzinfo=timezone.utc))
+                           completed_at=datetime(2026, 10, 21, 7, 0, tzinfo=UTC))
     assert (updated.status, updated.duration_ms, updated.test_case_id) == ("PASSED", 12, 1)
     assert updated.completed_at == "2026-10-21T07:00:00+00:00"   # datetimes stored as ISO UTC
     assert updated.updated_at >= rec.updated_at

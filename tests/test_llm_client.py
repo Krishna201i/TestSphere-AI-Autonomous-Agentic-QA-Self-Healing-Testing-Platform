@@ -25,25 +25,24 @@ import os
 from unittest.mock import patch
 
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from agents.llm.client import LLMClient
-from agents.llm.config import LLMConfig, VALID_PROVIDERS
+from agents.llm.config import VALID_PROVIDERS, LLMConfig
 from agents.llm.exceptions import (
+    LLMAuthenticationError,
     LLMConfigurationError,
+    LLMConnectionError,
     LLMError,
     LLMProviderError,
+    LLMRateLimitError,
     LLMResponseError,
     LLMTimeoutError,
-    LLMAuthenticationError,
-    LLMRateLimitError,
-    LLMConnectionError,
 )
 from agents.llm.factory import get_llm_provider
 from agents.llm.parser import ResponseParser
 from agents.llm.providers.mock import MockLLMProvider
 from agents.llm.schemas import LLMRequest, LLMResponse, LLMUsage
-
 
 # ── Exception Hierarchy Tests ──────────────────────────────
 

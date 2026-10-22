@@ -105,7 +105,11 @@ def test_workflow_events_are_only_streamed_to_the_runs_owner(client, monkeypatch
     from backend.api import workflow
     from backend.database.session import get_store
     from backend.models import TEST_EXECUTIONS
-    from backend.orchestration.orchestrator import WorkflowEvent, WorkflowEventType, WorkflowStep
+    from backend.orchestration.orchestrator import (
+        WorkflowEvent,
+        WorkflowEventType,
+        WorkflowStep,
+    )
 
     run = get_store().insert(TEST_EXECUTIONS, test_case_id=1, status="PASSED", owner_uid="alice")
     event = WorkflowEvent(workflow_id=f"wf-exec-{run['id']}", step=WorkflowStep.COMPLETED,

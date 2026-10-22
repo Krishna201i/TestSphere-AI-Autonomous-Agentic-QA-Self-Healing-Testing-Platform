@@ -27,7 +27,6 @@ import json
 import pytest
 
 from agents.llm.client import LLMClientSession
-from agents.llm.config import LLMConfig
 from agents.llm.exceptions import (
     LLMParsingError,
     LLMProviderError,
@@ -38,17 +37,12 @@ from agents.llm.parser import ResponseParser
 from agents.llm.providers.mock import MockLLMProvider
 from agents.llm.schemas import LLMRequest, LLMResponse, LLMUsage
 from agents.planner.mock_scenarios import (
-    VALID_TEST_PLAN_RESPONSE,
     INVALID_MALFORMED_RESPONSE,
-    EMPTY_TEST_PLAN_RESPONSE,
     register_default_planner_scenario,
     register_planner_scenarios,
 )
 from agents.planner.planner import LLMTestPlanner
 from agents.planner.schemas import (
-    ApplicationContext,
-    ElementContext,
-    PageContext,
     TestPlan,
 )
 from agents.planner.validation import (
@@ -63,13 +57,10 @@ from agents.schemas.enums import (
     TestPriority,
 )
 from tests.test_fixtures import (
-    create_llm_session,
     create_mock_config,
-    create_mock_provider,
     create_sample_login_context,
     create_test_planner,
 )
-
 
 # ── Fixtures ─────────────────────────────────────────────────
 

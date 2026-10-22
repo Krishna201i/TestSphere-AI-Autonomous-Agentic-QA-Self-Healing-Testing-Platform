@@ -2,7 +2,7 @@
 TestSphere-AI — Audit Trail API Router.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
@@ -17,6 +17,6 @@ router = APIRouter(prefix="/audit", tags=["Audit"])
 @router.get("")
 def get_audit(
     limit: int = Query(200, ge=1, le=1000), db: Store = Depends(get_db), user: User = Depends(get_current_user),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """The caller's most recent audit events first: scans, approvals, retests, QA runs, pipelines, targets."""
     return list_audit(db, limit, **scope(user))

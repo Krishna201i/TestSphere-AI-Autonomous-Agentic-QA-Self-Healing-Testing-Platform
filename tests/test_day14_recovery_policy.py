@@ -34,30 +34,26 @@ No internet, browser, or real LLM required.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
-from datetime import datetime, timezone
 
 from agents.analyzer.analyzer import FailureAnalyzerAgent
-from agents.analyzer.schemas import FailureAnalysis, FailureContext, FailureEvidence
+from agents.analyzer.schemas import FailureAnalysis
 from agents.healer.healing_decision import (
-    ConfidenceThresholds,
     HealingDecisionEngine,
 )
 from agents.healer.healing_feedback import (
-    HealingResultFeedback,
     HealingResultFeedbackProcessor,
 )
 from agents.healer.healing_schemas import (
-    HealingContext,
-    HealingRecommendation,
     ScoredCandidate,
 )
-from agents.healer.schemas import HealingCandidate, HealingResult
 from agents.llm import LLMClientSession, MockLLMProvider
 from agents.llm.config import LLMConfig
 from agents.memory.healing_evidence import HealingEvidenceRetriever
 from agents.memory.in_memory_store import InMemoryStore
-from agents.memory.memory_schemas import ElementRecord, HealingRecord
+from agents.memory.memory_schemas import HealingRecord
 from agents.orchestration.agent_orchestrator import AgentOrchestrator
 from agents.orchestration.recovery_policy import (
     FailureTypePolicy,
@@ -69,37 +65,16 @@ from agents.orchestration.recovery_policy import (
 from agents.orchestration.workflow_schemas import (
     VALID_TRANSITIONS,
     AgentState,
-    ExecutionResult,
-    ExecutionResultStatus,
     OrchestratorConfig,
-    WorkflowEvent,
     WorkflowEventType,
     WorkflowStep,
 )
-from agents.planner.planner import LLMTestPlanner
-from agents.planner.schemas import (
-    ApplicationContext,
-    ElementContext,
-    PageContext,
-    TestCase,
-    TestPlan,
-    TestStep,
-)
-from agents.planner.mock_scenarios import register_planner_scenarios
 from agents.schemas.enums import (
     CandidateSource,
     ConfidenceLevel,
     FailureType,
-    HealingAction,
-    HealingDecision,
-    HealingStatus,
     RecommendedAction,
-    TestAction,
-    TestCategory,
-    TestPriority,
-    ValidationStatus,
 )
-
 
 # ══════════════════════════════════════════════════════════════
 #  Fixtures
@@ -679,7 +654,7 @@ class TestRecoveryPolicyHistoricalEvidence:
                 healing_reason="test",
                 confidence=0.85,
                 validation_result=True,
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
             ))
 
         retriever = HealingEvidenceRetriever(memory_store)
@@ -710,7 +685,7 @@ class TestRecoveryPolicyHistoricalEvidence:
                 healing_reason="test",
                 confidence=0.85,
                 validation_result=(i == 0),  # Only first succeeds
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
             ))
 
         retriever = HealingEvidenceRetriever(memory_store)
@@ -807,7 +782,7 @@ class TestIntegrationSuccessfulHealing:
                 healing_reason="historical success",
                 confidence=0.90,
                 validation_result=True,
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
             ))
 
         retriever = HealingEvidenceRetriever(memory_store)

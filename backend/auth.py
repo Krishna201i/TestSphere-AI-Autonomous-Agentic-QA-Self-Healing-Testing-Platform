@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import Header, HTTPException, status
 
@@ -31,10 +31,10 @@ logger = logging.getLogger("testsphere.auth")
 @dataclass(frozen=True)
 class User:
     uid: str
-    email: Optional[str] = None
-    name: Optional[str] = None
-    picture: Optional[str] = None
-    provider: Optional[str] = None
+    email: str | None = None
+    name: str | None = None
+    picture: str | None = None
+    provider: str | None = None
     local: bool = False
 
     @property
@@ -46,7 +46,7 @@ class User:
 LOCAL_USER = User(uid="local-dev", name="Local developer", provider="local", local=True)
 
 
-def verify_token(token: str) -> Dict[str, Any]:
+def verify_token(token: str) -> dict[str, Any]:
     """Decoded claims of a valid Firebase ID token (raises on anything else)."""
     from firebase_admin import auth
 
@@ -56,7 +56,7 @@ def verify_token(token: str) -> Dict[str, Any]:
     return auth.verify_id_token(token, app=app, clock_skew_seconds=30)
 
 
-def get_current_user(authorization: Optional[str] = Header(None)) -> User:
+def get_current_user(authorization: str | None = Header(None)) -> User:
     """FastAPI dependency: the signed-in user (or the local user when sign-in is off)."""
     if not settings.AUTH_REQUIRED:
         return LOCAL_USER
@@ -96,23 +96,23 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> User:
     )
 
 
-def scope(user: User) -> Dict[str, Any]:
+def scope(user: User) -> dict[str, Any]:
     """Equality filter limiting a query to *user*'s documents (none for the local user)."""
     return {} if user.local else {"owner_uid": user.uid}
 
 
-def owns(user: User, row: Optional[Dict[str, Any]]) -> bool:
+def owns(user: User, row: dict[str, Any] | None) -> bool:
     return row is not None and (user.local or row.get("owner_uid") == user.uid)
 
 
-def ensure_owned(user: User, row: Optional[Dict[str, Any]], what: str) -> Dict[str, Any]:
+def ensure_owned(user: User, row: dict[str, Any] | None, what: str) -> dict[str, Any]:
     """*row* if *user* may see it, else 404 "<what> not found"."""
     if not owns(user, row):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{what} not found")
     return row  # type: ignore[return-value]
 
 
-def actor_for(user: User, requested: Optional[str]) -> str:
+def actor_for(user: User, requested: str | None) -> str:
     """Name recorded in the audit trail: the verified identity when signed in,
     otherwise whatever the local operator typed."""
     if user.local:

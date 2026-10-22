@@ -23,7 +23,6 @@ from agents.healer.healing_foundation import (
 )
 from agents.schemas.enums import (
     CandidateSource,
-    ConfidenceLevel,
     FailureType,
     HealingDecision,
     HealingStatus,
