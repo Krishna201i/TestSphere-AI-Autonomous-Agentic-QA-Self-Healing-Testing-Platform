@@ -201,3 +201,34 @@ def test_missing_key_file_names_the_file(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(store_module, "SECRET_FILES_DIR", tmp_path)
     with pytest.raises(StoreUnavailableError, match=r"\(key\.json\)"):
         _service_account_source("serviceAccount/key.json")
+
+
+def test_update_if_applies_only_while_the_field_is_unchanged(store) -> None:
+    row = store.insert("projects", name="p", next_run_at="t1")
+    assert store.update_if("projects", row["id"], "next_run_at", "t1", next_run_at="t2") is True
+    assert store.update_if("projects", row["id"], "next_run_at", "t1", next_run_at="t3") is False
+    assert store.get("projects", row["id"])["next_run_at"] == "t2"
+    assert store.update_if("projects", 999, "next_run_at", "t2", next_run_at="t4") is False
+
+
+def test_update_if_treats_a_missing_field_as_none(store) -> None:
+    row = store.insert("projects", name="p")
+    assert store.update_if("projects", row["id"], "next_run_at", None, next_run_at="t1") is True
+    assert store.get("projects", row["id"])["next_run_at"] == "t1"
+
+
+def test_concurrent_update_if_has_exactly_one_winner(store) -> None:
+    row = store.insert("projects", name="p", next_run_at="t0")
+    wins = []
+
+    def claim(n):
+        if store.update_if("projects", row["id"], "next_run_at", "t0", next_run_at=f"claimed-{n}"):
+            wins.append(n)
+
+    threads = [threading.Thread(target=claim, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(wins) == 1
+    assert store.get("projects", row["id"])["next_run_at"] == f"claimed-{wins[0]}"

@@ -48,8 +48,15 @@ async def tick(db: Optional[Store] = None, now: Optional[datetime] = None) -> Li
     now = now or datetime.now(timezone.utc)
     started: List[int] = []
     for project in due_projects(db, now):
-        # Always move the schedule forward, so a busy or failing project cannot spin
-        db.update(PROJECTS, project["id"], next_run_at=next_run_after(project["schedule_minutes"], now))
+        # Claim the slot by moving the schedule forward from the value we read:
+        # only one scheduler (another instance, or the cron tick racing the
+        # in-process loop) wins; the others see it changed and skip.  Moving it
+        # forward also keeps a busy or failing project from spinning.
+        claimed = db.update_if(PROJECTS, project["id"], "next_run_at", project.get("next_run_at"),
+                               next_run_at=next_run_after(project["schedule_minutes"], now))
+        if not claimed:
+            logger.info("Project %s: slot already claimed by another scheduler", project["id"])
+            continue
         if active_run(db, project["id"]):
             logger.info("Project %s: previous run still active, skipping this slot", project["id"])
             continue
