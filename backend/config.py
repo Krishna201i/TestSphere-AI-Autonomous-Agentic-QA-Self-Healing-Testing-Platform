@@ -40,7 +40,10 @@ def _hosted() -> bool:
 
 
 def _split_origins(raw: str) -> List[str]:
-    return [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
+    """Comma-separated origins, or a JSON list (the format older versions required)."""
+    raw = raw.strip()
+    items = json.loads(raw) if raw.startswith("[") else raw.split(",")
+    return [str(origin).strip().rstrip("/") for origin in items if str(origin).strip()]
 
 
 def _default_cors_origins() -> List[str]:
