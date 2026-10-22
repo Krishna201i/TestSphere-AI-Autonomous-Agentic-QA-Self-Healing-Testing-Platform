@@ -132,3 +132,16 @@ def test_unknown_or_eventless_workflows_are_404_not_invented(client):
     resp = client.get(f"/api/workflow/stream/wf-exec-{idle['id']}", headers=as_user("token-alice"))
     assert resp.status_code == 404
     assert "No recorded events" in resp.json()["detail"]
+
+
+def test_system_info_shows_deployment_details_only_when_signed_in(client):
+    anonymous = client.get("/api/system").json()
+    assert set(anonymous) == {"service", "api_version", "auth"}  # enough to render sign-in
+    assert anonymous["auth"]["firebase"] is not None
+
+    expired = client.get("/api/system", headers=as_user("forged"))
+    assert expired.status_code == 200 and "llm" not in expired.json()  # no 401: the login page still needs it
+
+    full = client.get("/api/system", headers=as_user("token-alice")).json()
+    for key in ("commit", "llm", "scan_scope", "browser", "ingestion", "scheduler"):
+        assert key in full

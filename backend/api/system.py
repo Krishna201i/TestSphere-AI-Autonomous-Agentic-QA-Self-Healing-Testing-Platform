@@ -4,16 +4,21 @@ TestSphere-AI — System Info API Router.
 Tells the dashboard what this backend is and how it is configured, so the UI
 can show which server it is talking to and why a feature might be refused.
 Never returns secrets.
+
+Before sign-in the dashboard only needs the sign-in configuration, so that is
+all an anonymous caller gets; the rest (commit, LLM model, scan scope, browser
+path...) maps out the deployment and is shown to signed-in users only.
 """
 
 import subprocess
 import time
 from functools import lru_cache
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException
 
 from agents.llm.config import LLMConfig
+from backend.auth import get_current_user
 from backend.config import settings
 from security.scope import LOOPBACK_HOSTS
 
@@ -43,13 +48,39 @@ def _browser_status() -> Dict[str, Any]:
     return _browser_cache["value"]
 
 
+def _signed_in(authorization: Optional[str]) -> bool:
+    """Whether the caller may see deployment details (no 401: an anonymous or
+    expired session still needs the sign-in configuration)."""
+    try:
+        get_current_user(authorization)
+        return True
+    except HTTPException:
+        return False
+
+
+def _auth_config() -> Dict[str, Any]:
+    # Public Firebase web config (not secret) so the dashboard can render sign-in
+    return {
+        "required": settings.AUTH_REQUIRED,
+        "provider": "firebase" if settings.AUTH_REQUIRED else "local",
+        "firebase": {
+            "apiKey": settings.FIREBASE_WEB_API_KEY,
+            "authDomain": settings.FIREBASE_AUTH_DOMAIN
+            or (f"{settings.FIREBASE_PROJECT_ID}.firebaseapp.com" if settings.FIREBASE_PROJECT_ID else ""),
+            "projectId": settings.FIREBASE_PROJECT_ID,
+        } if settings.AUTH_REQUIRED else None,
+    }
+
+
 @router.get("")
-def system_info() -> Dict[str, Any]:
+def system_info(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+    public = {"service": settings.APP_NAME, "api_version": API_VERSION, "auth": _auth_config()}
+    if not _signed_in(authorization):
+        return public
     llm = LLMConfig.from_env()
     extra = [h.strip() for h in settings.SECURITY_SCAN_ALLOWED_HOSTS.split(",") if h.strip()]
     return {
-        "service": settings.APP_NAME,
-        "api_version": API_VERSION,
+        **public,
         "environment": settings.APP_ENV,
         "commit": _git_commit(),
         "database": settings.DATABASE_BACKEND,
@@ -59,17 +90,6 @@ def system_info() -> Dict[str, Any]:
         "ingestion": {
             "git_hosts": [h.strip() for h in settings.INGEST_GIT_HOSTS.split(",") if h.strip()],
             "local_paths": settings.INGEST_ALLOW_LOCAL_PATHS,
-        },
-        # Public Firebase web config (not secret) so the dashboard can render sign-in
-        "auth": {
-            "required": settings.AUTH_REQUIRED,
-            "provider": "firebase" if settings.AUTH_REQUIRED else "local",
-            "firebase": {
-                "apiKey": settings.FIREBASE_WEB_API_KEY,
-                "authDomain": settings.FIREBASE_AUTH_DOMAIN
-                or (f"{settings.FIREBASE_PROJECT_ID}.firebaseapp.com" if settings.FIREBASE_PROJECT_ID else ""),
-                "projectId": settings.FIREBASE_PROJECT_ID,
-            } if settings.AUTH_REQUIRED else None,
         },
         "scheduler": {"enabled": settings.SCHEDULER_ENABLED, "external_tick": bool(settings.CRON_SECRET)},
         "browser": _browser_status(),
