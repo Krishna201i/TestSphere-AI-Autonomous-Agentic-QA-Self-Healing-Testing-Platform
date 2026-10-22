@@ -34,7 +34,6 @@ from agents.orchestration.workflow_schemas import (
 from agents.planner.mock_scenarios import register_planner_scenarios
 from agents.planner.planner import LLMTestPlanner
 from agents.planner.schemas import (
-    ApplicationContext,
     Assertion,
     TestCase as Member1TestCase,
     TestStep as Member1TestStep,
@@ -212,12 +211,6 @@ class PlatformWorkflowOrchestrator:
         start_time = datetime.now(timezone.utc)
         execution = db.update(TEST_EXECUTIONS, execution.id, status=TestExecutionStatus.RUNNING.value, started_at=start_time)
 
-        # Build application context
-        app_context = ApplicationContext(
-            app_name=app.name,
-            app_url=app.base_url,
-        )
-
         # Build Member 1 TestCase model from DB record or structured description
         m1_steps: List[Member1TestStep] = []
         m1_assertions: List[Assertion] = []
@@ -225,6 +218,12 @@ class PlatformWorkflowOrchestrator:
         if test_case.description:
             try:
                 desc_obj = json.loads(test_case.description)
+            except ValueError:
+                desc_obj = None  # a plain-text description: no stored steps
+        else:
+            desc_obj = None
+        if desc_obj is not None:
+            try:
                 if isinstance(desc_obj, dict):
                     analysis_data = desc_obj.get("analysis")
                     raw_steps = desc_obj.get("steps", [])
@@ -253,7 +252,7 @@ class PlatformWorkflowOrchestrator:
                             else:
                                 try:
                                     act_enum = TestAction(act_raw)
-                                except Exception:
+                                except ValueError:
                                     act_enum = TestAction.CLICK if (s.get("target") or s.get("target_selector")) else TestAction.NAVIGATE
 
                             val = s.get("value")
@@ -269,8 +268,11 @@ class PlatformWorkflowOrchestrator:
                                     description=s.get("description", f"Step {idx}"),
                                 )
                             )
-            except Exception:
-                pass
+            except (TypeError, ValueError, AttributeError) as exc:
+                # Never fall back to a trivial "open the page" run here: it
+                # would pass a test whose stored steps never ran.
+                logger.warning("Test case #%s: stored steps unreadable: %s", test_case.id, exc)
+                return self._fail_unreadable_steps(db, execution, test_case, exc)
 
         if not m1_steps:
             m1_steps = [
@@ -449,6 +451,26 @@ class PlatformWorkflowOrchestrator:
             "events": [e.model_dump() for e in (state.events if state else [])],
             "engine_steps": [st.model_dump(mode="json") for st in engine_result.steps],
             "analysis": analysis_data,
+        }
+
+    def _fail_unreadable_steps(self, db: Store, execution: Any, test_case: Any, exc: Exception) -> Dict[str, Any]:
+        """Record a run that could not start because its stored steps are malformed."""
+        error_msg = (f"Not executed: the stored steps of test case #{test_case.id} could not be read "
+                     f"({type(exc).__name__}: {str(exc).splitlines()[0][:200] if str(exc) else ''}). "
+                     "Edit or regenerate the test case.")
+        db.update(TEST_EXECUTIONS, execution.id, status=TestExecutionStatus.FAILED.value,
+                  completed_at=datetime.now(timezone.utc), duration_ms=0, error_message=error_msg)
+        summary = DashboardWorkflowSummary(workflow_id=f"wf-exec-{execution.id}", current_step=WorkflowStep.ABORTED,
+                                           is_terminal=True, failed_tests=1)
+        return {
+            "execution_id": execution.id,
+            "status": TestExecutionStatus.FAILED.value,
+            "duration_ms": 0,
+            "error_message": error_msg,
+            "dashboard_summary": summary.model_dump(),
+            "events": [],
+            "engine_steps": [],
+            "analysis": None,
         }
 
     def execution_events(self, execution_id: int) -> List[WorkflowEvent]:

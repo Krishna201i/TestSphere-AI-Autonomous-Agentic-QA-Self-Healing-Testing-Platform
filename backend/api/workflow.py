@@ -6,6 +6,7 @@ Server-Sent Events (SSE) telemetry to platform dashboards.
 """
 
 import json
+import logging
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,6 +26,8 @@ from backend.orchestration.orchestrator import get_platform_orchestrator
 from backend.services.security_service import record_audit
 from backend.services.url_analyzer import URLAnalyzerService
 from engine.schemas import RunOptions
+
+logger = logging.getLogger("testsphere.workflow")
 
 router = APIRouter(prefix="/workflow", tags=["Workflow & Orchestration"])
 
@@ -90,8 +93,9 @@ async def plan_and_execute_workflow(
                     prompt=req.prompt,
                     test_case_name=req.test_case_name,
                 )
-            except Exception as exc:
-                live_analysis = None
+            except Exception as exc:  # noqa: BLE001 - reported to the user below
+                logger.exception("Page analysis of %s crashed", target_url)
+                live_analysis = {"success": False, "error": f"page analysis failed ({type(exc).__name__}: {exc})"}
 
             # Never synthesize tests from a page that failed to load: a 404 page
             # would yield a test asserting "Not Found" and pass.
@@ -188,11 +192,12 @@ async def plan_and_execute_workflow(
         return res
     except (HTTPException, StoreUnavailableError):
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - logged with traceback, generic answer to the client
+        logger.exception("Plan-and-execute failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Plan-and-execute workflow error: {exc}",
-        )
+            detail=f"Plan-and-execute failed unexpectedly ({type(exc).__name__}). The error is in the server log.",
+        ) from exc
 
 
 @router.post("/execute/{execution_id}", status_code=status.HTTP_200_OK)
@@ -215,11 +220,12 @@ async def execute_test_workflow(
         )
     except StoreUnavailableError:
         raise  # handled app-wide as 503 with a readable cause
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - logged with traceback, generic answer to the client
+        logger.exception("Workflow execution #%s failed", execution_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Workflow execution encountered an error: {exc}",
-        )
+            detail=f"Workflow execution failed unexpectedly ({type(exc).__name__}). The error is in the server log.",
+        ) from exc
 
 
 @router.get("/stream/{workflow_id}")

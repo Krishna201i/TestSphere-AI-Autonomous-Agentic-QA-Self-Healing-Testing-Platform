@@ -151,4 +151,4 @@ class TestPlanFromErrorPage(unittest.TestCase):
         mock_analyze.side_effect = RuntimeError("connection refused")
         res = self.client.post("/api/workflow/plan-and-execute", json={"app_url": "http://127.0.0.1:1/"})
         self.assertEqual(res.status_code, 422)
-        self.assertIn("unreachable", res.json()["detail"])
+        self.assertIn("connection refused", res.json()["detail"])  # the real cause, not just "unreachable"
