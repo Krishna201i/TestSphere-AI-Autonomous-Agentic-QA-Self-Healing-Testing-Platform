@@ -300,6 +300,42 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.execution.status, TestExecutionStatus.FAILED.value)
 
 
+class TestStoredSteps(unittest.IsolatedAsyncioTestCase):
+    """How a test case's stored description turns into steps."""
+
+    def setUp(self) -> None:
+        self.db = get_store()
+        project = ProjectService.create_project(self.db, name="Steps Project")
+        self.app = ApplicationService.create_application(self.db, project.id, name="App", base_url="https://sample.local")
+
+    def _run_for(self, description):
+        tc = TestCaseService.create_test_case(self.db, self.app.id, external_id=None, name="T", description=description)
+        execution = TestExecutionService.create_execution(self.db, tc.id, status=TestExecutionStatus.PENDING)
+        return execution, PlatformWorkflowOrchestrator().execute_test_run(db=self.db, execution_id=execution.id)
+
+    @patch("backend.orchestration.orchestrator.run_test")
+    async def test_unreadable_stored_steps_fail_the_run_instead_of_passing_a_page_load(self, mock_run_test) -> None:
+        """Regression: a parse error used to be swallowed and a bare 'open the page' run could pass."""
+        execution, run = self._run_for('{"steps": [{"action": "fill", "target": "#q", "step_number": "not-a-number"}]}')
+        result = await run
+        mock_run_test.assert_not_called()  # nothing ran, so nothing can pass
+        self.assertEqual(result["status"], TestExecutionStatus.FAILED.value)
+        self.assertIn("could not be read", result["error_message"])
+        stored = TestExecutionService.get_execution(self.db, execution.id)
+        self.assertEqual(stored.status, TestExecutionStatus.FAILED.value)
+
+    @patch("backend.orchestration.orchestrator.run_test")
+    async def test_a_plain_text_description_still_runs_the_page_check(self, mock_run_test) -> None:
+        mock_run_test.return_value = EngineTestResult(
+            test_id="t", status=TestStatus.PASSED, started_at=datetime.now(timezone.utc), duration_ms=1,
+            steps=[StepResult(step_id="step-1", status=StepStatus.PASSED, duration_ms=1)], artifacts_dir="artifacts",
+        )
+        _, run = self._run_for("Checks that the home page opens")
+        result = await run
+        mock_run_test.assert_called_once()
+        self.assertEqual(result["status"], TestExecutionStatus.PASSED.value)
+
+
 class TestApplyHealedSelector(unittest.TestCase):
     """The healed selector must only replace the broken step's locator."""
 
