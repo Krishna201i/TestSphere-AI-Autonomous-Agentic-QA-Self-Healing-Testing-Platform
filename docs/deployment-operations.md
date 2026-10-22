@@ -26,12 +26,12 @@ All settings can be configured via environment variables or a `.env` file at rep
 | `API_HOST` | `0.0.0.0` | Host binding interface for FastAPI |
 | `API_PORT` | `8000` | Port for FastAPI server |
 | `DEBUG` | `False` | Enable detailed stack traces and auto-reloading |
-| `CORS_ORIGINS` | `*` | Comma-separated list of allowed frontend origins |
+| `CORS_ORIGINS` | Vite dev servers (`localhost`/`127.0.0.1` on 3000 and 5173) locally; none when hosted | Comma-separated origins of a dashboard hosted elsewhere (e.g. `https://testsphere.vercel.app`). Not needed when the API serves the dashboard itself |
 
 ### 2.1a Sign-in & Automated Pipeline
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `AUTH_REQUIRED` | `true` if Firebase credentials set, else `false` | Require Firebase sign-in for every API call; each user sees only their own data. `false` = single local user |
+| `AUTH_REQUIRED` | `true` if Firebase credentials set, else `false` | Require Firebase sign-in for every API call; each user sees only their own data. `false` = single local user. On a hosted server (Render etc., or `APP_ENV` other than `development`) the backend **refuses to start** if sign-in is off only because credentials are missing; set `AUTH_REQUIRED=false` to run open on purpose |
 | `FIREBASE_WEB_API_KEY` | `""` | Public web API key (Firebase console → Project settings → General → Your apps → Web app). Needed for the login page |
 | `FIREBASE_AUTH_DOMAIN` | `<project id>.firebaseapp.com` | Auth domain for the login page (optional) |
 | `SCHEDULER_ENABLED` | `true` | Run scheduled pipeline re-runs while the server is awake |
