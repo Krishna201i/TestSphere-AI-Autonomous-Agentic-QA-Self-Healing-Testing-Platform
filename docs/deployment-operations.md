@@ -58,6 +58,8 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `INGEST_GIT_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts public repositories may be cloned from (https only) |
 | `INGEST_ALLOW_LOCAL_PATHS` | `true` locally in development; `false` on Render/Heroku/Railway/Fly/Cloud Run unless set | Accept local folder paths for ingestion (reads the server's disk); never enable on a public server |
 | `SECURITY_SCAN_ALLOWED_HOSTS` | `""` | Extra hosts the passive scanner may contact (loopback always allowed) |
+| `RATE_LIMIT_RUNS_PER_MINUTE` | `10` | Runs, scans and clones each user may start per minute (`0` disables); over it the API answers 429 |
+| `ENGINE_MAX_BROWSERS` | `2` | Chromium instances that may run at once; further runs wait for a slot |
 
 ### 2.3 Browser Engine Settings
 | Variable | Default Value | Description |

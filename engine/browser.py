@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import subprocess
 import sys
 import threading
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 try:
@@ -60,6 +62,20 @@ def set_request_guard(guard: Optional[Callable[[str], None]]) -> None:
     """Install (or clear, with ``None``) the outbound guard for new sessions."""
     global _request_guard
     _request_guard = guard
+
+
+# At most this many Chromium instances at once per process (each takes
+# ~150-300 MB); further sessions wait for a free slot.
+MAX_BROWSERS = max(1, int(os.getenv("ENGINE_MAX_BROWSERS", "2")))
+_slots: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+
+
+def _browser_slots() -> asyncio.Semaphore:
+    """The running loop's browser semaphore (a semaphore is bound to one loop)."""
+    loop = asyncio.get_running_loop()
+    if loop not in _slots:
+        _slots[loop] = asyncio.Semaphore(MAX_BROWSERS)
+    return _slots[loop]
 
 
 _install_lock = threading.Lock()
@@ -138,6 +154,7 @@ class BrowserSession:
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._egress: EgressProxy | None = None
+        self._slot: asyncio.Semaphore | None = None
 
     # ------------------------------------------------------------------
     # Async context-manager protocol
@@ -148,6 +165,19 @@ class BrowserSession:
             raise RuntimeError(
                 "Playwright is not installed in the environment. Please run 'pip install playwright && playwright install chromium' to enable browser automation."
             )
+        slots = _browser_slots()
+        if slots.locked():
+            log.info("All %d browser slots busy; waiting for one", MAX_BROWSERS)
+        await slots.acquire()
+        self._slot = slots
+        try:
+            await self._open()
+        except BaseException:
+            await self.__aexit__(None, None, None)
+            raise
+        return self
+
+    async def _open(self) -> None:
         if _request_guard is not None:
             self._egress = EgressProxy(_request_guard)
             self._proxy_url = await self._egress.start()
@@ -173,7 +203,6 @@ class BrowserSession:
         if self._config.tracing_enabled:
             await self._context.tracing.start(screenshots=True, snapshots=True)
             log.debug("Tracing started")
-        return self
 
     async def _launch(self) -> "Browser":
         # "<-loopback>" stops Chromium sending localhost straight past the proxy
@@ -185,16 +214,21 @@ class BrowserSession:
         )
 
     async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
-        await self._stop_tracing()
-        if self._context is not None:
-            await self._context.close()
-        if self._browser is not None:
-            await self._browser.close()
-        if self._pw is not None:
-            await self._pw.stop()
-        if self._egress is not None:
-            await self._egress.close()
-        log.debug("BrowserSession closed")
+        try:
+            await self._stop_tracing()
+            if self._context is not None:
+                await self._context.close()
+            if self._browser is not None:
+                await self._browser.close()
+            if self._pw is not None:
+                await self._pw.stop()
+            if self._egress is not None:
+                await self._egress.close()
+            log.debug("BrowserSession closed")
+        finally:
+            if self._slot is not None:
+                self._slot.release()
+                self._slot = None
 
     # ------------------------------------------------------------------
     # Public helpers

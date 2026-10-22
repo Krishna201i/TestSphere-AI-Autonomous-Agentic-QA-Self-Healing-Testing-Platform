@@ -143,6 +143,10 @@ class Settings(BaseSettings):
     # (localhost, 10.x, 169.254.x ...). Off on hosted servers (SSRF), on in local development.
     ALLOW_PRIVATE_TARGETS: bool = Field(default_factory=lambda: _default_allow_private_targets())
 
+    # Abuse limits: expensive actions (browser runs, scans, clones, LLM calls)
+    # each signed-in user may start per minute; 0 disables the limit.
+    RATE_LIMIT_RUNS_PER_MINUTE: int = Field(default_factory=lambda: int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "10")))
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
