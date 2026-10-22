@@ -147,6 +147,16 @@ class TestPlanFromErrorPage(unittest.TestCase):
         self.assertEqual(self.client.get("/api/test-cases").json(), [])
 
     @patch("backend.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
+    def test_a_run_without_a_target_is_refused_not_pointed_at_example_com(self, mock_analyze: AsyncMock) -> None:
+        for payload in ({}, {"app_url": "   "}, {"app_name": "Shop"}):
+            res = self.client.post("/api/workflow/plan-and-execute", json=payload)
+            self.assertEqual(res.status_code, 422, payload)
+            self.assertIn("app_url", res.json()["detail"])
+        mock_analyze.assert_not_called()
+        for url in ("", "   "):
+            self.assertEqual(self.client.post("/api/workflow/analyze", json={"url": url}).status_code, 422)
+
+    @patch("backend.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
     def test_unreachable_target_is_refused(self, mock_analyze: AsyncMock) -> None:
         mock_analyze.side_effect = RuntimeError("connection refused")
         res = self.client.post("/api/workflow/plan-and-execute", json={"app_url": "http://127.0.0.1:1/"})

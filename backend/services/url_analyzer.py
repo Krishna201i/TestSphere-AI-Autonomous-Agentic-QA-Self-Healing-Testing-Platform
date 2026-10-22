@@ -65,7 +65,7 @@ class URLAnalyzerService:
         """Ensure URL has a valid scheme."""
         url = (raw_url or "").strip()
         if not url:
-            return "https://example.com"
+            raise ValueError("A URL is required.")
         if not url.startswith("http://") and not url.startswith("https://"):
             url = f"https://{url}"
         return url

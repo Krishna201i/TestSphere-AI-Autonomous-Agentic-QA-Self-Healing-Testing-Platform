@@ -8,6 +8,7 @@ Server-Sent Events (SSE) telemetry to platform dashboards.
 import json
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -36,8 +37,8 @@ _workflow_orchestrator = get_platform_orchestrator()
 
 class PlanAndExecuteRequest(BaseModel):
     application_id: Optional[int] = None
-    app_name: Optional[str] = "Demo Application"
-    app_url: Optional[str] = "https://example.com"
+    app_name: Optional[str] = Field(None, max_length=255)
+    app_url: Optional[str] = Field(None, max_length=1024, description="Page to test; required unless test_case_id is given")
     test_case_id: Optional[int] = None
     test_case_name: Optional[str] = None
     prompt: Optional[str] = None
@@ -46,7 +47,7 @@ class PlanAndExecuteRequest(BaseModel):
 
 
 class AnalyzeURLRequest(BaseModel):
-    url: str
+    url: str = Field(..., min_length=1, max_length=1024)
     prompt: Optional[str] = None
     test_case_name: Optional[str] = None
 
@@ -54,6 +55,8 @@ class AnalyzeURLRequest(BaseModel):
 @router.post("/analyze", status_code=status.HTTP_200_OK)
 async def analyze_url_endpoint(req: AnalyzeURLRequest, _user: User = Depends(limit_runs)) -> Dict[str, Any]:
     """Perform live DOM element extraction, security/a11y audit, and QA synthesis on any URL."""
+    if not req.url.strip():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A URL is required.")
     return await URLAnalyzerService.analyze_live_website(
         url=req.url,
         prompt=req.prompt,
@@ -86,7 +89,10 @@ async def plan_and_execute_workflow(
                 )
         else:
             # Perform live website inspection on the target URL
-            target_url = req.app_url or "https://example.com"
+            target_url = (req.app_url or "").strip()
+            if not target_url:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                    detail="Give the page to test (app_url) or an existing test_case_id.")
             try:
                 live_analysis = await URLAnalyzerService.analyze_live_website(
                     url=target_url,
@@ -118,7 +124,7 @@ async def plan_and_execute_workflow(
             resolved_app_name = req.app_name
             resolved_app_url = target_url
             if live_analysis and live_analysis.get("page_title"):
-                if not resolved_app_name or resolved_app_name in ("Demo Application", "E-Commerce Webapp"):
+                if not resolved_app_name:
                     resolved_app_name = live_analysis["page_title"][:60]
                 resolved_app_url = live_analysis["url"]
 
@@ -138,7 +144,7 @@ async def plan_and_execute_workflow(
                     app_entity = db.insert(
                         APPLICATIONS,
                         project_id=proj.id,
-                        name=resolved_app_name or "Demo Application",
+                        name=resolved_app_name or urlparse(resolved_app_url).netloc or resolved_app_url,
                         base_url=resolved_app_url,
                         description=None,
                         owner_uid=user.uid,
