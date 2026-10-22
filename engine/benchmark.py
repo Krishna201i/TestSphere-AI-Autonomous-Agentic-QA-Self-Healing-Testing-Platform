@@ -1,4 +1,4 @@
-﻿"""
+"""
 engine/benchmark.py
 ===================
 Benchmark harness for the TestSphere-AI self-healing engine.

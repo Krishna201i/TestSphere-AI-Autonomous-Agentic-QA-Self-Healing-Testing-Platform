@@ -230,7 +230,7 @@ class APIProvider(LLMClient):
 
         result = self._parse_response(body)
 
-        logger.info(
+        logger.info(  # nosemgrep: python-logger-credential-disclosure - token *counts*, no secrets
             "APIProvider response — duration=%.2fs, tokens=%d+%d, finish=%s",
             time.monotonic() - start_time,
             result.usage.prompt_tokens,
