@@ -140,7 +140,7 @@ def test_unknown_or_eventless_workflows_are_404_not_invented(client):
 
 def test_system_info_shows_deployment_details_only_when_signed_in(client):
     anonymous = client.get("/api/system").json()
-    assert set(anonymous) == {"service", "api_version", "auth"}  # enough to render sign-in
+    assert set(anonymous) == {"service", "api_version", "auth", "privacy"}  # sign-in + the privacy notice
     assert anonymous["auth"]["firebase"] is not None
 
     expired = client.get("/api/system", headers=as_user("forged"))

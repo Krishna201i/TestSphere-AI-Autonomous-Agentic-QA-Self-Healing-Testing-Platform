@@ -123,6 +123,8 @@ export const getPipelineRun = (id) => request(`/api/pipelines/runs/${id}`);
 export const getMe = () => request('/api/me');
 export const recordLogin = () => request('/api/me/login', { method: 'POST' });
 export const updateMe = (payload) => request('/api/me', { method: 'PUT', body: payload });
+// Erases the account and all its data; `confirm` must be exactly "DELETE MY ACCOUNT"
+export const deleteMe = (confirm) => request('/api/me', { method: 'DELETE', body: { confirm } });
 
 /** Webhook URL GitHub should call for a project (absolute, using the API base). */
 export const webhookUrl = (projectId) =>

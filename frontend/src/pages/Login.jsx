@@ -172,6 +172,9 @@ function Login() {
         <button type="button" className="link-btn" onClick={() => switchTo('signin')}>Back to sign in</button>
       )}
       <Diagnostics />
+      <button type="button" className="link-btn small" onClick={() => { window.location.hash = '/privacy'; }}>
+        How we handle your data
+      </button>
     </AuthShell>
   );
 }
