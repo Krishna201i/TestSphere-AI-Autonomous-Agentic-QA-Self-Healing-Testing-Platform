@@ -20,7 +20,7 @@ All settings can be configured via environment variables or a `.env` file at rep
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
 | `DATABASE_BACKEND` | `firestore` if credentials set, else `local` | `firestore` (production), `local` (JSON file), `memory` (tests) |
-| `FIREBASE_CREDENTIALS` | `""` | Service-account key JSON (whole file contents) or a path to it |
+| `FIREBASE_CREDENTIALS` | `""` | Service-account key JSON (whole file contents) or a path to it. A bare file name also resolves to a Render Secret File in `/etc/secrets/` |
 | `FIREBASE_PROJECT_ID` | from the key | Firebase project id (optional) |
 | `LOCAL_DB_PATH` | `./data/local_db.json` | Database file for `DATABASE_BACKEND=local` |
 | `API_HOST` | `0.0.0.0` | Host binding interface for FastAPI |
