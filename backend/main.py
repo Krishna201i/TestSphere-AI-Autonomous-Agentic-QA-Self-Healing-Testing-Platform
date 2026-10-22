@@ -33,8 +33,14 @@ from backend.api import (
 )
 from backend.database.session import get_store, init_db
 from backend.database.store import StoreUnavailableError
+from backend.netguard import check_target
+from engine.browser import set_request_guard
 
 logger = logging.getLogger("testsphere.backend")
+
+# Browser runs fetch whatever a test step (or an LLM-planned step) points at:
+# hold them to the same SSRF policy as the server's own HTTP requests.
+set_request_guard(check_target)
 
 
 @asynccontextmanager
