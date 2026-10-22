@@ -97,6 +97,9 @@ class Store(ABC):
     def _update(self, collection: str, doc_id: int, changes: dict) -> Optional[Record]: ...
 
     @abstractmethod
+    def _update_if(self, collection: str, doc_id: int, field: str, expected: Any, changes: dict) -> bool: ...
+
+    @abstractmethod
     def delete(self, collection: str, doc_id: int) -> bool: ...
 
     @abstractmethod
@@ -116,6 +119,11 @@ class Store(ABC):
 
     def update(self, collection: str, doc_id: int, **changes: Any) -> Optional[Record]:
         return self._update(collection, doc_id, {**_clean(changes), "updated_at": now_iso()})
+
+    def update_if(self, collection: str, doc_id: int, field: str, expected: Any, **changes: Any) -> bool:
+        """Atomically apply *changes* only if *field* still equals *expected*
+        (a missing field counts as None).  False when someone changed it first."""
+        return self._update_if(collection, doc_id, field, expected, {**_clean(changes), "updated_at": now_iso()})
 
     def find_one(self, collection: str, **equals: Any) -> Optional[Record]:
         rows = self.find(collection, limit=1, **equals)
@@ -180,6 +188,15 @@ class MemoryStore(Store):
             doc.update(copy.deepcopy(changes))
             self._persist()
             return Record(copy.deepcopy(doc))
+
+    def _update_if(self, collection, doc_id, field, expected, changes):
+        with self._lock:
+            doc = self._table(collection).get(_as_int(doc_id))
+            if doc is None or doc.get(field) != expected:
+                return False
+            doc.update(copy.deepcopy(changes))
+            self._persist()
+            return True
 
     def delete(self, collection, doc_id):
         with self._lock:
@@ -419,6 +436,21 @@ class FirestoreStore(Store):
             ref.update(changes)
             return Record(ref.get().to_dict())
         return self._call(run)
+
+    def _update_if(self, collection, doc_id, field, expected, changes):
+        from google.cloud import firestore as gcf
+
+        ref = self._db.collection(collection).document(str(_as_int(doc_id)))
+
+        @gcf.transactional
+        def swap(txn) -> bool:
+            snap = ref.get(transaction=txn)
+            if not snap.exists or (snap.to_dict() or {}).get(field) != expected:
+                return False
+            txn.update(ref, changes)
+            return True
+
+        return self._call(lambda: swap(self._db.transaction()))
 
     def delete(self, collection, doc_id):
         def run():

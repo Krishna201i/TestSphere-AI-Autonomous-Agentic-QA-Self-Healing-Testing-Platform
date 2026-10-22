@@ -253,6 +253,23 @@ def test_scheduler_starts_due_projects_once(fresh_store, no_background):
     assert datetime.fromisoformat(fresh_store.get(PROJECTS, due["id"])["next_run_at"]) > datetime.now(timezone.utc)
 
 
+def test_two_schedulers_racing_start_one_run(fresh_store, no_background, monkeypatch):
+    """Both read the project as due before either moved its schedule (two
+    instances, or the cron tick racing the in-process loop): one run, not two."""
+    due = make_project(fresh_store, schedule_minutes=60)
+    fresh_store.update(PROJECTS, due["id"], next_run_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())
+    stale = scheduler.due_projects(fresh_store, datetime.now(timezone.utc))
+    monkeypatch.setattr(scheduler, "due_projects", lambda db, now: stale)
+    monkeypatch.setattr(scheduler, "active_run", lambda db, pid: None)  # neither has seen the other's run yet
+
+    async def go():
+        return await asyncio.gather(scheduler.tick(fresh_store), scheduler.tick(fresh_store))
+
+    first, second = asyncio.run(go())
+    assert len(first) + len(second) == 1
+    assert len(fresh_store.find(PIPELINE_RUNS, project_id=due["id"])) == 1
+
+
 def test_cron_tick_requires_the_secret(monkeypatch, no_background):
     client = TestClient(app)
     assert client.post("/api/pipelines/scheduler/tick").status_code == 503
