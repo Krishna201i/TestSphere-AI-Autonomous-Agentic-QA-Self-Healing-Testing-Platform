@@ -14,7 +14,7 @@ export function initialsOf(name) {
 const CONFIRM_PHRASE = 'DELETE MY ACCOUNT';
 
 /** Right to erasure: removes every document the user owns and their sign-in account. */
-function DeleteAccount({ onDeleted }) {
+export function DeleteAccount({ onDeleted }) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
