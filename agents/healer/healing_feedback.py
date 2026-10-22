@@ -30,8 +30,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -68,11 +68,11 @@ class HealingResultFeedback(BaseModel):
         ..., min_length=1,
         description="ID of the test case being healed",
     )
-    failure_id: Optional[str] = Field(
+    failure_id: str | None = Field(
         default=None,
         description="ID of the specific failure being addressed",
     )
-    execution_id: Optional[str] = Field(
+    execution_id: str | None = Field(
         default=None,
         description="Execution ID of the test run",
     )
@@ -84,7 +84,7 @@ class HealingResultFeedback(BaseModel):
         ..., min_length=1,
         description="The replacement selector that was attempted",
     )
-    candidate_id: Optional[str] = Field(
+    candidate_id: str | None = Field(
         default=None,
         description="ID of the healing candidate, if tracked",
     )
@@ -96,7 +96,7 @@ class HealingResultFeedback(BaseModel):
         ...,
         description="Browser validation outcome from Member 2",
     )
-    failure_category: Optional[FailureType] = Field(
+    failure_category: FailureType | None = Field(
         default=None,
         description="Type of failure that triggered healing",
     )
@@ -109,10 +109,10 @@ class HealingResultFeedback(BaseModel):
         description="Which attempt number this represents",
     )
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 timestamp of when validation was performed",
     )
-    error_reason: Optional[str] = Field(
+    error_reason: str | None = Field(
         default=None,
         description="Error message if healing/validation failed",
     )

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 
 from agents.schemas.enums import FailureType
 
@@ -245,10 +244,10 @@ class FailureClassifier:
         error_message: str,
         action: str = "",
         target_selector: str = "",
-        expected_result: Optional[str] = None,
-        actual_result: Optional[str] = None,
-        current_url: Optional[str] = None,
-        dom_evidence: Optional[dict] = None,
+        expected_result: str | None = None,
+        actual_result: str | None = None,
+        current_url: str | None = None,
+        dom_evidence: dict | None = None,
     ) -> ClassificationResult:
         """Classify a test failure based on available evidence.
 
@@ -355,7 +354,7 @@ class FailureClassifier:
 
     @staticmethod
     def _has_state_mismatch(
-        expected: Optional[str], actual: Optional[str],
+        expected: str | None, actual: str | None,
     ) -> bool:
         """Check if expected and actual results indicate a mismatch."""
         return (
@@ -366,10 +365,10 @@ class FailureClassifier:
 
     @staticmethod
     def _classify_state_mismatch(
-        expected: Optional[str],
-        actual: Optional[str],
+        expected: str | None,
+        actual: str | None,
         error_lower: str,
-    ) -> Optional[ClassificationResult]:
+    ) -> ClassificationResult | None:
         """Classify a state mismatch as an assertion failure."""
         # Only classify if there's a clear expected/actual mismatch
         if expected is None or actual is None:
@@ -399,7 +398,7 @@ class FailureClassifier:
         error_message: str,
         action: str,
         target_selector: str,
-        dom_evidence: Optional[dict],
+        dom_evidence: dict | None,
     ) -> float:
         """Adjust confidence based on supporting evidence."""
         confidence = base_confidence

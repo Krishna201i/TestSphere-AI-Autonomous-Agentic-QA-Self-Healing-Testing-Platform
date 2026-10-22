@@ -22,19 +22,16 @@ Member 1 ◄────────────── HealingResultFeedback ─
 
 from __future__ import annotations
 
-import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from pydantic import BaseModel
 
 from agents.analyzer.schemas import (
-    FailureAnalysis,
     FailureContext,
     TestFailure,
 )
 from agents.healer.healing_feedback import HealingResultFeedback
 from agents.healer.healing_schemas import (
-    HealingContext,
     HealingRecommendation,
     ScoredCandidate,
 )
@@ -43,27 +40,12 @@ from agents.orchestration.workflow_schemas import (
     ExecutionResultStatus,
 )
 from agents.planner.schemas import (
-    ApplicationContext,
     Assertion,
-    ElementContext,
-    PageContext,
     TestCase,
     TestPlan,
     TestStep,
 )
 from agents.schemas.enums import (
-    AssertionType,
-    CandidateSource,
-    ConfidenceLevel,
-    ExecutionStatus,
-    FailureType,
-    HealingAction,
-    HealingDecision,
-    HealingStatus,
-    RecommendedAction,
-    TestAction,
-    TestCategory,
-    TestPriority,
     ValidationStatus,
 )
 
@@ -113,7 +95,7 @@ def serialize_for_member2(model: BaseModel) -> str:
 
 
 def parse_member2_execution_result(
-    payload: Union[str, Dict[str, Any]]
+    payload: str | dict[str, Any]
 ) -> ExecutionResult:
     """Parse and validate an ExecutionResult received from Member 2.
 
@@ -133,7 +115,7 @@ def parse_member2_execution_result(
 
 
 def parse_member2_feedback(
-    payload: Union[str, Dict[str, Any]]
+    payload: str | dict[str, Any]
 ) -> HealingResultFeedback:
     """Parse and validate a HealingResultFeedback received from Member 2.
 

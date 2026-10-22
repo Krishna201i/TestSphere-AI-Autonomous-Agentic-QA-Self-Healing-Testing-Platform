@@ -6,7 +6,7 @@ Does NOT execute browser automation, invoke Playwright, or trigger AI agents.
 """
 
 from datetime import datetime
-from typing import Any, List, Optional, Union
+from typing import Any
 
 from backend.database.store import Record, Store
 from backend.models import TEST_CASES, TEST_EXECUTIONS
@@ -22,7 +22,7 @@ class TestExecutionService:
     """Service layer for TestExecution entities."""
 
     @staticmethod
-    def _validate_status(status_val: Union[str, TestExecutionStatus]) -> str:
+    def _validate_status(status_val: str | TestExecutionStatus) -> str:
         raw = status_val.value if hasattr(status_val, "value") else str(status_val)
         allowed = {s.value for s in TestExecutionStatus}
         if raw not in allowed:
@@ -31,10 +31,10 @@ class TestExecutionService:
 
     @staticmethod
     def create_execution(
-        db: Store, test_case_id: int, status: Union[str, TestExecutionStatus] = TestExecutionStatus.PENDING,
-        started_at: Optional[datetime] = None, completed_at: Optional[datetime] = None,
-        duration_ms: Optional[int] = None, error_message: Optional[str] = None,
-        owner_uid: Optional[str] = None,
+        db: Store, test_case_id: int, status: str | TestExecutionStatus = TestExecutionStatus.PENDING,
+        started_at: datetime | None = None, completed_at: datetime | None = None,
+        duration_ms: int | None = None, error_message: str | None = None,
+        owner_uid: str | None = None,
     ) -> Record:
         test_case = db.get(TEST_CASES, test_case_id)
         if not test_case:
@@ -46,7 +46,7 @@ class TestExecutionService:
         )
 
     @staticmethod
-    def list_executions(db: Store, test_case_id: Optional[int] = None, **filters: Any) -> List[Record]:
+    def list_executions(db: Store, test_case_id: int | None = None, **filters: Any) -> list[Record]:
         if test_case_id is not None:
             filters["test_case_id"] = test_case_id
         return db.find(TEST_EXECUTIONS, **filters)
@@ -60,9 +60,9 @@ class TestExecutionService:
 
     @staticmethod
     def update_execution(
-        db: Store, execution_id: int, status: Optional[Union[str, TestExecutionStatus]] = None,
-        started_at: Optional[datetime] = None, completed_at: Optional[datetime] = None,
-        duration_ms: Optional[int] = None, error_message: Optional[str] = None,
+        db: Store, execution_id: int, status: str | TestExecutionStatus | None = None,
+        started_at: datetime | None = None, completed_at: datetime | None = None,
+        duration_ms: int | None = None, error_message: str | None = None,
     ) -> Record:
         TestExecutionService.get_execution(db, execution_id)
         changes = {"started_at": started_at, "completed_at": completed_at,

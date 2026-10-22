@@ -45,7 +45,6 @@ Day 5: Full LLM-based generation logic.
 
 from __future__ import annotations
 
-import json
 import logging
 from abc import ABC, abstractmethod
 
@@ -60,7 +59,6 @@ from agents.planner.validation import (
     validate_application_context,
     validate_element_references,
     validate_test_case,
-    validate_test_plan,
 )
 
 logger = logging.getLogger(__name__)

@@ -6,25 +6,30 @@ Server-Sent Events (SSE) telemetry to platform dashboards.
 """
 
 import json
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+import logging
+from typing import Any
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
+from agents.schemas.member3_contract import format_sse_event
 from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
-from backend.ratelimit import limit_runs
 from backend.database.session import get_db
 from backend.database.store import Store, StoreUnavailableError
 from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
 from backend.models.test_execution import TestExecutionStatus
+from backend.orchestration.orchestrator import get_platform_orchestrator
+from backend.ratelimit import limit_runs
 from backend.services.application_service import default_project
+from backend.services.security_service import record_audit
 from backend.services.test_case_service import TestCaseService
 from backend.services.test_execution_service import TestExecutionService
-from agents.schemas.member3_contract import format_sse_event
-from backend.orchestration.orchestrator import get_platform_orchestrator
-from backend.services.security_service import record_audit
 from backend.services.url_analyzer import URLAnalyzerService
 from engine.schemas import RunOptions
+
+logger = logging.getLogger("testsphere.workflow")
 
 router = APIRouter(prefix="/workflow", tags=["Workflow & Orchestration"])
 
@@ -32,25 +37,27 @@ _workflow_orchestrator = get_platform_orchestrator()
 
 
 class PlanAndExecuteRequest(BaseModel):
-    application_id: Optional[int] = None
-    app_name: Optional[str] = "Demo Application"
-    app_url: Optional[str] = "https://example.com"
-    test_case_id: Optional[int] = None
-    test_case_name: Optional[str] = None
-    prompt: Optional[str] = None
-    steps: Optional[List[Dict[str, Any]]] = None
+    application_id: int | None = None
+    app_name: str | None = Field(None, max_length=255)
+    app_url: str | None = Field(None, max_length=1024, description="Page to test; required unless test_case_id is given")
+    test_case_id: int | None = None
+    test_case_name: str | None = None
+    prompt: str | None = None
+    steps: list[dict[str, Any]] | None = None
     headless: bool = True
 
 
 class AnalyzeURLRequest(BaseModel):
-    url: str
-    prompt: Optional[str] = None
-    test_case_name: Optional[str] = None
+    url: str = Field(..., min_length=1, max_length=1024)
+    prompt: str | None = None
+    test_case_name: str | None = None
 
 
 @router.post("/analyze", status_code=status.HTTP_200_OK)
-async def analyze_url_endpoint(req: AnalyzeURLRequest, _user: User = Depends(limit_runs)) -> Dict[str, Any]:
+async def analyze_url_endpoint(req: AnalyzeURLRequest, _user: User = Depends(limit_runs)) -> dict[str, Any]:
     """Perform live DOM element extraction, security/a11y audit, and QA synthesis on any URL."""
+    if not req.url.strip():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A URL is required.")
     return await URLAnalyzerService.analyze_live_website(
         url=req.url,
         prompt=req.prompt,
@@ -60,10 +67,10 @@ async def analyze_url_endpoint(req: AnalyzeURLRequest, _user: User = Depends(lim
 
 @router.post("/plan-and-execute", status_code=status.HTTP_200_OK)
 async def plan_and_execute_workflow(
-    payload: Optional[PlanAndExecuteRequest] = None,
+    payload: PlanAndExecuteRequest | None = None,
     db: Store = Depends(get_db),
     user: User = Depends(limit_runs),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Autonomous plan and execute workflow endpoint.
     
     Dynamically identifies or provisions the target application context,
@@ -83,15 +90,19 @@ async def plan_and_execute_workflow(
                 )
         else:
             # Perform live website inspection on the target URL
-            target_url = req.app_url or "https://example.com"
+            target_url = (req.app_url or "").strip()
+            if not target_url:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                    detail="Give the page to test (app_url) or an existing test_case_id.")
             try:
                 live_analysis = await URLAnalyzerService.analyze_live_website(
                     url=target_url,
                     prompt=req.prompt,
                     test_case_name=req.test_case_name,
                 )
-            except Exception as exc:
-                live_analysis = None
+            except Exception as exc:  # noqa: BLE001 - reported to the user below
+                logger.exception("Page analysis of %s crashed", target_url)
+                live_analysis = {"success": False, "error": f"page analysis failed ({type(exc).__name__}: {exc})"}
 
             # Never synthesize tests from a page that failed to load: a 404 page
             # would yield a test asserting "Not Found" and pass.
@@ -114,7 +125,7 @@ async def plan_and_execute_workflow(
             resolved_app_name = req.app_name
             resolved_app_url = target_url
             if live_analysis and live_analysis.get("page_title"):
-                if not resolved_app_name or resolved_app_name in ("Demo Application", "E-Commerce Webapp"):
+                if not resolved_app_name:
                     resolved_app_name = live_analysis["page_title"][:60]
                 resolved_app_url = live_analysis["url"]
 
@@ -134,7 +145,7 @@ async def plan_and_execute_workflow(
                     app_entity = db.insert(
                         APPLICATIONS,
                         project_id=proj.id,
-                        name=resolved_app_name or "Demo Application",
+                        name=resolved_app_name or urlparse(resolved_app_url).netloc or resolved_app_url,
                         base_url=resolved_app_url,
                         description=None,
                         owner_uid=user.uid,
@@ -188,11 +199,12 @@ async def plan_and_execute_workflow(
         return res
     except (HTTPException, StoreUnavailableError):
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - logged with traceback, generic answer to the client
+        logger.exception("Plan-and-execute failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Plan-and-execute workflow error: {exc}",
-        )
+            detail=f"Plan-and-execute failed unexpectedly ({type(exc).__name__}). The error is in the server log.",
+        ) from exc
 
 
 @router.post("/execute/{execution_id}", status_code=status.HTTP_200_OK)
@@ -200,7 +212,7 @@ async def execute_test_workflow(
     execution_id: int,
     db: Store = Depends(get_db),
     user: User = Depends(limit_runs),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Execute a test execution run with autonomous AI diagnosis and self-healing."""
     ensure_owned(user, db.get(TEST_EXECUTIONS, execution_id), f"TestExecution #{execution_id}")
     try:
@@ -212,14 +224,15 @@ async def execute_test_workflow(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
-        )
+        ) from exc
     except StoreUnavailableError:
         raise  # handled app-wide as 503 with a readable cause
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - logged with traceback, generic answer to the client
+        logger.exception("Workflow execution #%s failed", execution_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Workflow execution encountered an error: {exc}",
-        )
+            detail=f"Workflow execution failed unexpectedly ({type(exc).__name__}). The error is in the server log.",
+        ) from exc
 
 
 @router.get("/stream/{workflow_id}")

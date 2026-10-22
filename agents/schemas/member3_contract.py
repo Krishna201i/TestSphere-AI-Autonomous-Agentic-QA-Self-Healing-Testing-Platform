@@ -23,20 +23,15 @@ dashboard visualization, test management, and reporting.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from agents.analyzer.schemas import (
     FailureAnalysis,
-    FailureContext,
-    FailureEvidence,
-    HistoricalContext,
-    TestFailure,
 )
 from agents.healer.healing_feedback import HealingResultFeedback
 from agents.healer.healing_schemas import (
-    HealingContext,
     HealingRecommendation,
     ScoredCandidate,
 )
@@ -47,7 +42,6 @@ from agents.orchestration.recovery_policy import (
 )
 from agents.orchestration.workflow_schemas import (
     AgentState,
-    ExecutionResult,
     ExecutionResultStatus,
     OrchestratorConfig,
     WorkflowEvent,
@@ -57,29 +51,13 @@ from agents.orchestration.workflow_schemas import (
 from agents.planner.schemas import (
     ApplicationContext,
     Assertion,
-    ElementContext,
-    PageContext,
-    PageInfo,
     TestCase,
     TestPlan,
     TestStep,
 )
 from agents.schemas.enums import (
-    AssertionType,
-    CandidateSource,
-    ChangeType,
-    ConfidenceLevel,
-    ExecutionStatus,
     FailureType,
-    HealingAction,
-    HealingDecision,
-    HealingPatternType,
     HealingStatus,
-    RecommendedAction,
-    TestAction,
-    TestCategory,
-    TestPriority,
-    ValidationStatus,
 )
 
 __all__ = [
@@ -131,14 +109,14 @@ class DashboardWorkflowSummary(BaseModel):
     healed_tests: int = Field(default=0, description="Number of successfully healed tests")
     healing_attempts: int = Field(default=0, description="Total healing attempts made")
     retry_count: int = Field(default=0, description="Total retries executed")
-    latest_decision: Optional[RecoveryAction] = Field(
+    latest_decision: RecoveryAction | None = Field(
         default=None, description="Latest recovery policy action"
     )
-    latest_failure_type: Optional[FailureType] = Field(
+    latest_failure_type: FailureType | None = Field(
         default=None, description="Type of the last encountered failure"
     )
     event_count: int = Field(default=0, description="Number of events logged")
-    error_message: Optional[str] = Field(
+    error_message: str | None = Field(
         default=None, description="Workflow error message if failed/aborted"
     )
 
@@ -151,7 +129,7 @@ class DashboardEventMessage(BaseModel):
     workflow_id: str = Field(..., description="Associated workflow ID")
     step: WorkflowStep = Field(..., description="Pipeline step when event occurred")
     message: str = Field(default="", description="Human-readable event message")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Event payload")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Event payload")
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +215,10 @@ def build_dashboard_summary(state: AgentState) -> DashboardWorkflowSummary:
     if state.recovery_decision:
         latest_decision = state.recovery_decision.decision
 
-    total_tests = len(state.test_plan.test_cases) if state.test_plan else 0
+    # Platform runs execute one stored test case without a planner test_plan;
+    # the total must never be smaller than the results it summarises.
+    planned = len(state.test_plan.test_cases) if state.test_plan else 0
+    total_tests = max(planned, passed + failed)
     healed_count = (
         1
         if (

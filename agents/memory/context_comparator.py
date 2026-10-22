@@ -17,7 +17,6 @@ from agents.memory.memory_schemas import (
 )
 from agents.schemas.enums import ChangeType
 
-
 # Fields to compare directly between two ElementRecord instances.
 _COMPARABLE_FIELDS: list[str] = [
     "selector",

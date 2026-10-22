@@ -17,7 +17,7 @@ Usage::
 Provider selection is driven by ``LLM_PROVIDER`` env var::
 
     LLM_PROVIDER=mock   →  MockLLMProvider  (default, no deps)
-    LLM_PROVIDER=local  →  LocalLLMProvider (future)
+    LLM_PROVIDER=local  →  APIProvider      (local OpenAI-compatible server, e.g. Ollama)
     LLM_PROVIDER=api    →  APIProvider      (OpenAI-compatible chat API)
 """
 
@@ -63,17 +63,11 @@ def get_llm_provider(config: LLMConfig | None = None) -> LLMClient:
         logger.info("Creating MockLLMProvider (model=%s)", config.model)
         return MockLLMProvider(config)
 
-    if provider == "local":
-        raise LLMConfigurationError(
-            "LLM_PROVIDER='local' is not yet implemented. "
-            "It will be available in a future development day.",
-            provider="local",
-        )
-
-    if provider == "api":
+    if provider in ("api", "local"):
+        # local = an OpenAI-compatible server on your machine (Ollama, vLLM, ...)
         from agents.llm.providers.api import APIProvider
 
-        logger.info("Creating APIProvider (model=%s)", config.model)
+        logger.info("Creating APIProvider (provider=%s, model=%s)", provider, config.model)
         return APIProvider(config)
 
     raise LLMConfigurationError(

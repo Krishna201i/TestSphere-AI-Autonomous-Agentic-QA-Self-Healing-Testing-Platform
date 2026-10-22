@@ -5,7 +5,7 @@ Provides CRUD endpoints for web applications under test (only the caller's own).
 Delegates persistence and business logic to ApplicationService.
 """
 
-from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.api.schemas import (
@@ -18,8 +18,8 @@ from backend.database.session import get_db
 from backend.database.store import Record, Store
 from backend.models import APPLICATIONS, PROJECTS
 from backend.services.application_service import ApplicationService
-from backend.services.security_service import record_audit
 from backend.services.exceptions import ProjectNotFoundError
+from backend.services.security_service import record_audit
 
 router = APIRouter(prefix="/applications", tags=["Applications"])
 
@@ -49,18 +49,18 @@ def create_application(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found",
-        )
+        ) from None
     record_audit(db, actor=actor_for(user, None), kind="target", level="success", ref=str(app.id),
                  message=f"Target registered: {app.name} ({app.base_url})", owner_uid=user.uid)
     return app
 
 
-@router.get("", response_model=List[ApplicationResponse])
+@router.get("", response_model=list[ApplicationResponse])
 def list_applications(
-    project_id: Optional[int] = Query(None, description="Filter by parent Project ID"),
+    project_id: int | None = Query(None, description="Filter by parent Project ID"),
     db: Store = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> List[Record]:
+) -> list[Record]:
     """Retrieve the caller's applications, with optional project_id filtering."""
     return ApplicationService.list_applications(db=db, project_id=project_id, **scope(user))
 

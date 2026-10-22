@@ -7,14 +7,14 @@ handlers through the ``get_db`` dependency (name kept for compatibility).
 
 import logging
 import threading
-from typing import Generator, Optional
+from collections.abc import Generator
 
 from backend.config import settings
 from backend.database.store import Store, StoreUnavailableError, create_store
 
 logger = logging.getLogger("testsphere.database")
 
-_store: Optional[Store] = None
+_store: Store | None = None
 _lock = threading.Lock()
 
 
@@ -34,7 +34,7 @@ def get_store() -> Store:
     return _store
 
 
-def set_store(store: Optional[Store]) -> None:
+def set_store(store: Store | None) -> None:
     """Replace the process-wide store (tests)."""
     global _store
     with _lock:

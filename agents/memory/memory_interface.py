@@ -14,7 +14,7 @@ Day 8: Foundation interface.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 from agents.memory.memory_schemas import (
     ElementRecord,
@@ -83,7 +83,7 @@ class MemoryStore(ABC):
     def get_latest_successful_execution(
         self,
         test_id: str,
-    ) -> Optional[TestExecutionRecord]:
+    ) -> TestExecutionRecord | None:
         """Retrieve the most recent successful execution for a test.
 
         Parameters
@@ -142,8 +142,8 @@ class MemoryStore(ABC):
     def get_element_by_selector(
         self,
         selector: str,
-        page_url: Optional[str] = None,
-    ) -> Optional[ElementRecord]:
+        page_url: str | None = None,
+    ) -> ElementRecord | None:
         """Retrieve the latest element record matching a selector.
 
         Parameters

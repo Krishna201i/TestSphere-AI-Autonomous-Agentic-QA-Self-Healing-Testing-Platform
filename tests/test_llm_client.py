@@ -25,25 +25,24 @@ import os
 from unittest.mock import patch
 
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from agents.llm.client import LLMClient
-from agents.llm.config import LLMConfig, VALID_PROVIDERS
+from agents.llm.config import VALID_PROVIDERS, LLMConfig
 from agents.llm.exceptions import (
+    LLMAuthenticationError,
     LLMConfigurationError,
+    LLMConnectionError,
     LLMError,
     LLMProviderError,
+    LLMRateLimitError,
     LLMResponseError,
     LLMTimeoutError,
-    LLMAuthenticationError,
-    LLMRateLimitError,
-    LLMConnectionError,
 )
 from agents.llm.factory import get_llm_provider
 from agents.llm.parser import ResponseParser
 from agents.llm.providers.mock import MockLLMProvider
 from agents.llm.schemas import LLMRequest, LLMResponse, LLMUsage
-
 
 # ── Exception Hierarchy Tests ──────────────────────────────
 
@@ -383,10 +382,14 @@ class TestProviderFactory:
             if env_backup is not None:
                 os.environ["LLM_PROVIDER"] = env_backup
 
-    def test_local_not_implemented(self):
-        config = LLMConfig(provider="local", model="some-model")
-        with pytest.raises(LLMConfigurationError, match="not yet implemented"):
-            get_llm_provider(config)
+    def test_local_uses_the_openai_compatible_provider_without_a_key(self):
+        from agents.llm.providers.api import DEFAULT_LOCAL_BASE_URL, APIProvider
+
+        config = LLMConfig(provider="local", model="llama3.2")
+        provider = get_llm_provider(config)
+        assert isinstance(provider, APIProvider)
+        assert provider._base_url == DEFAULT_LOCAL_BASE_URL
+        assert config.is_configured
 
     def test_api_returns_api_provider(self):
         config = LLMConfig(provider="api", model="gpt-4", api_key="sk-test")

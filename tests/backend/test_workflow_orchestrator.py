@@ -9,25 +9,27 @@ Verifies:
 """
 
 import unittest
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
-from datetime import datetime, timezone
 
 from agents.planner.schemas import (
     Assertion,
+)
+from agents.planner.schemas import (
     TestCase as Member1TestCase,
+)
+from agents.planner.schemas import (
     TestStep as Member1TestStep,
 )
 from agents.schemas.enums import AssertionType, TestAction
 from backend.database.session import get_store
 from backend.models.test_execution import TestExecutionStatus
-from backend.services.application_service import ApplicationService
-from backend.services.project_service import ProjectService
-from backend.services.test_case_service import TestCaseService
-from backend.services.test_execution_service import TestExecutionService
 from backend.orchestration.converters import (
     engine_result_to_execution_result,
     map_action_to_engine,
     map_assertion_to_engine,
+)
+from backend.orchestration.converters import (
     test_case_to_engine_plan as convert_test_case_to_engine_plan,
 )
 from backend.orchestration.orchestrator import (
@@ -35,16 +37,24 @@ from backend.orchestration.orchestrator import (
     apply_healed_selector,
     create_default_orchestrator,
 )
-from engine.schemas import HealingReport
+from backend.services.application_service import ApplicationService
+from backend.services.project_service import ProjectService
+from backend.services.test_case_service import TestCaseService
+from backend.services.test_execution_service import TestExecutionService
 from engine.schemas import (
     ActionType,
+    HealingReport,
     Step,
     StepResult,
     StepStatus,
     Target,
-    TestPlan as EngineTestPlan,
-    TestResult as EngineTestResult,
     TestStatus,
+)
+from engine.schemas import (
+    TestPlan as EngineTestPlan,
+)
+from engine.schemas import (
+    TestResult as EngineTestResult,
 )
 
 
@@ -124,7 +134,7 @@ class TestWorkflowConverters(unittest.TestCase):
         engine_res = EngineTestResult(
             test_id="TC-001",
             status=TestStatus.PASSED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=120,
             steps=[
                 StepResult(
@@ -148,7 +158,7 @@ class TestWorkflowConverters(unittest.TestCase):
         engine_res = EngineTestResult(
             test_id="TC-001",
             status=TestStatus.FAILED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=250,
             steps=[
                 StepResult(
@@ -213,7 +223,7 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-LOGIN-001",
             status=TestStatus.PASSED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=150,
             steps=[
                 StepResult(
@@ -242,7 +252,7 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-LOGIN-001",
             status=TestStatus.HEALED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=200,
             steps=[
                 StepResult(
@@ -279,7 +289,7 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-LOGIN-001",
             status=TestStatus.FAILED,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=5,
             steps=[
                 StepResult(
@@ -298,6 +308,42 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["error_message"].startswith("Not executed: the browser could not start"))
         self.execution = self._reload_execution()
         self.assertEqual(self.execution.status, TestExecutionStatus.FAILED.value)
+
+
+class TestStoredSteps(unittest.IsolatedAsyncioTestCase):
+    """How a test case's stored description turns into steps."""
+
+    def setUp(self) -> None:
+        self.db = get_store()
+        project = ProjectService.create_project(self.db, name="Steps Project")
+        self.app = ApplicationService.create_application(self.db, project.id, name="App", base_url="https://sample.local")
+
+    def _run_for(self, description):
+        tc = TestCaseService.create_test_case(self.db, self.app.id, external_id=None, name="T", description=description)
+        execution = TestExecutionService.create_execution(self.db, tc.id, status=TestExecutionStatus.PENDING)
+        return execution, PlatformWorkflowOrchestrator().execute_test_run(db=self.db, execution_id=execution.id)
+
+    @patch("backend.orchestration.orchestrator.run_test")
+    async def test_unreadable_stored_steps_fail_the_run_instead_of_passing_a_page_load(self, mock_run_test) -> None:
+        """Regression: a parse error used to be swallowed and a bare 'open the page' run could pass."""
+        execution, run = self._run_for('{"steps": [{"action": "fill", "target": "#q", "step_number": "not-a-number"}]}')
+        result = await run
+        mock_run_test.assert_not_called()  # nothing ran, so nothing can pass
+        self.assertEqual(result["status"], TestExecutionStatus.FAILED.value)
+        self.assertIn("could not be read", result["error_message"])
+        stored = TestExecutionService.get_execution(self.db, execution.id)
+        self.assertEqual(stored.status, TestExecutionStatus.FAILED.value)
+
+    @patch("backend.orchestration.orchestrator.run_test")
+    async def test_a_plain_text_description_still_runs_the_page_check(self, mock_run_test) -> None:
+        mock_run_test.return_value = EngineTestResult(
+            test_id="t", status=TestStatus.PASSED, started_at=datetime.now(UTC), duration_ms=1,
+            steps=[StepResult(step_id="step-1", status=StepStatus.PASSED, duration_ms=1)], artifacts_dir="artifacts",
+        )
+        _, run = self._run_for("Checks that the home page opens")
+        result = await run
+        mock_run_test.assert_called_once()
+        self.assertEqual(result["status"], TestExecutionStatus.PASSED.value)
 
 
 class TestApplyHealedSelector(unittest.TestCase):

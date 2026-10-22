@@ -6,7 +6,7 @@ Delegates persistence and business logic to TestCaseService.
 Does not import, modify, or duplicate Member 1 TestCase business logic.
 """
 
-from typing import List, Optional
+
 from fastapi import APIRouter, Depends, Query, status
 
 from backend.api.schemas import (
@@ -48,12 +48,12 @@ def create_test_case(
     )
 
 
-@router.get("", response_model=List[TestCaseResponse])
+@router.get("", response_model=list[TestCaseResponse])
 def list_test_cases(
-    application_id: Optional[int] = Query(None, description="Filter by parent Application ID"),
+    application_id: int | None = Query(None, description="Filter by parent Application ID"),
     db: Store = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> List[Record]:
+) -> list[Record]:
     """Retrieve the caller's test cases, with optional application_id filtering."""
     return TestCaseService.list_test_cases(db=db, application_id=application_id, **scope(user))
 

@@ -38,9 +38,8 @@ Member 2's Self-Healing Engine can consume.
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -344,7 +343,7 @@ class HealingDecisionEngine:
 
     def _check_safety_rules(
         self, analysis: FailureAnalysis,
-    ) -> Optional[HealingRecommendation]:
+    ) -> HealingRecommendation | None:
         """Check if healing should be blocked for this failure type.
 
         Returns a DO_NOT_HEAL recommendation if healing is unsafe,
@@ -419,7 +418,7 @@ class HealingDecisionEngine:
         ranked: list[ScoredCandidate],
         analysis: FailureAnalysis,
         is_ambiguous: bool = False,
-    ) -> tuple[Optional[ScoredCandidate], ConfidenceLevel, HealingAction]:
+    ) -> tuple[ScoredCandidate | None, ConfidenceLevel, HealingAction]:
         """Evaluate ranked candidates and determine action.
 
         Returns (selected_candidate, confidence_level, action).
@@ -484,7 +483,7 @@ class HealingDecisionEngine:
 
     @staticmethod
     def _determine_decision(
-        selected: Optional[ScoredCandidate],
+        selected: ScoredCandidate | None,
         confidence_level: ConfidenceLevel,
         action: HealingAction,
         is_ambiguous: bool,
@@ -546,7 +545,7 @@ class HealingDecisionEngine:
     def _build_evidence_summary(
         analysis: FailureAnalysis,
         ranked: list[ScoredCandidate],
-        selected: Optional[ScoredCandidate],
+        selected: ScoredCandidate | None,
         action: HealingAction,
         is_ambiguous: bool = False,
     ) -> list[str]:
@@ -584,7 +583,7 @@ class HealingDecisionEngine:
         self,
         ranked: list[ScoredCandidate],
         analysis: FailureAnalysis,
-    ) -> Optional[ScoredCandidate]:
+    ) -> ScoredCandidate | None:
         """Use the LLM evaluator to disambiguate ambiguous candidates.
 
         Only called when:

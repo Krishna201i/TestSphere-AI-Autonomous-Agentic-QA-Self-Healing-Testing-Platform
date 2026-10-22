@@ -10,6 +10,13 @@ Anthropic (OpenAI-compat endpoint) through a single code path::
     LLM_MODEL=gpt-4o-mini
     LLM_BASE_URL=https://api.openai.com/v1   # optional, this is the default
 
+The same code path serves local OpenAI-compatible servers (Ollama, vLLM,
+LM Studio, llama.cpp) as ``LLM_PROVIDER=local``: no API key needed, and
+``LLM_BASE_URL`` defaults to Ollama's ``http://localhost:11434/v1``::
+
+    LLM_PROVIDER=local
+    LLM_MODEL=llama3.2
+
 HTTP failures are translated into the project's exception hierarchy so
 ``LLMClientSession`` can decide what to retry:
 
@@ -47,6 +54,7 @@ from agents.llm.schemas import LLMRequest, LLMResponse, LLMUsage
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_LOCAL_BASE_URL = "http://localhost:11434/v1"  # Ollama
 
 # Map OpenAI-style finish reasons onto the values the session understands
 _FINISH_REASONS = {
@@ -64,8 +72,10 @@ class APIProvider(LLMClient):
     Parameters
     ----------
     config:
-        LLM configuration. ``api_key`` is required; ``base_url``
-        defaults to the OpenAI API.
+        LLM configuration. For ``provider=self._config.provider`` an ``api_key`` is
+        required and ``base_url`` defaults to the OpenAI API; for
+        ``provider="local"`` the key is optional and ``base_url`` defaults
+        to a local Ollama server.
     transport:
         Optional ``httpx`` transport, used by tests to stub the network.
     """
@@ -77,11 +87,13 @@ class APIProvider(LLMClient):
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         super().__init__(config)
-        self._base_url = (config.base_url or DEFAULT_BASE_URL).rstrip("/")
+        default = DEFAULT_LOCAL_BASE_URL if config.provider == "local" else DEFAULT_BASE_URL
+        self._base_url = (config.base_url or default).rstrip("/")
         self._transport = transport
 
         logger.info(
-            "APIProvider initialized — model=%s, base_url=%s",
+            "APIProvider initialized — provider=%s, model=%s, base_url=%s",
+            config.provider,
             config.model,
             self._base_url,
         )
@@ -133,12 +145,12 @@ class APIProvider(LLMClient):
         message = f"API returned HTTP {status}: {detail}"
 
         if status in (401, 403):
-            raise LLMAuthenticationError(message, provider="api")
+            raise LLMAuthenticationError(message, provider=self._config.provider)
         if status == 429:
-            raise LLMRateLimitError(message, provider="api")
+            raise LLMRateLimitError(message, provider=self._config.provider)
         if status >= 500:
-            raise LLMProviderError(message, provider="api")
-        raise LLMRequestValidationError(message, provider="api")
+            raise LLMProviderError(message, provider=self._config.provider)
+        raise LLMRequestValidationError(message, provider=self._config.provider)
 
     # ── Response parsing ──────────────────────────────────────
 
@@ -150,7 +162,7 @@ class APIProvider(LLMClient):
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMResponseError(
                 "API response is missing choices[0].message.content.",
-                provider="api",
+                provider=self._config.provider,
             ) from exc
 
         usage = body.get("usage") or {}
@@ -159,7 +171,7 @@ class APIProvider(LLMClient):
         return LLMResponse(
             content=content if content is not None else "",
             model=body.get("model") or self._config.model,
-            provider="api",
+            provider=self._config.provider,
             usage=LLMUsage(
                 prompt_tokens=usage.get("prompt_tokens", 0) or 0,
                 completion_tokens=usage.get("completion_tokens", 0) or 0,
@@ -180,10 +192,9 @@ class APIProvider(LLMClient):
             See the module docstring for the mapping.
         """
         start_time = time.monotonic()
-        headers = {
-            "Authorization": f"Bearer {self._config.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
+        if self._config.api_key:  # local servers usually need none
+            headers["Authorization"] = f"Bearer {self._config.api_key}"
 
         try:
             async with httpx.AsyncClient(
@@ -199,12 +210,12 @@ class APIProvider(LLMClient):
         except httpx.TimeoutException as exc:
             raise LLMTimeoutError(
                 f"API request timed out after {self._config.timeout}s.",
-                provider="api",
+                provider=self._config.provider,
             ) from exc
         except httpx.RequestError as exc:
             raise LLMConnectionError(
                 f"Could not reach LLM API at {self._base_url}: {type(exc).__name__}",
-                provider="api",
+                provider=self._config.provider,
             ) from exc
 
         self._raise_for_status(response)
@@ -214,12 +225,12 @@ class APIProvider(LLMClient):
         except ValueError as exc:
             raise LLMResponseError(
                 "API returned a non-JSON response body.",
-                provider="api",
+                provider=self._config.provider,
             ) from exc
 
         result = self._parse_response(body)
 
-        logger.info(
+        logger.info(  # nosemgrep: python-logger-credential-disclosure - token *counts*, no secrets
             "APIProvider response — duration=%.2fs, tokens=%d+%d, finish=%s",
             time.monotonic() - start_time,
             result.usage.prompt_tokens,

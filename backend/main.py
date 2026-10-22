@@ -6,16 +6,17 @@ Exposes REST API endpoints and coordinates the TestSphere-AI platform services.
 
 import asyncio
 import contextlib
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 import logging
+import os
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
+
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.config import settings, startup_safety_problem
 from backend.api import (
     applications_router,
     audit_router,
@@ -31,12 +32,22 @@ from backend.api import (
     webhooks_router,
     workflow_router,
 )
+from backend.config import settings, startup_safety_problem
 from backend.database.session import get_store, init_db
 from backend.database.store import StoreUnavailableError
 from backend.netguard import check_target
+from backend.observability import (
+    RequestContextMiddleware,
+    configure_logging,
+    default_log_format,
+    init_error_reporting,
+)
 from engine.browser import set_request_guard
 
+configure_logging(settings.LOG_LEVEL, default_log_format())
 logger = logging.getLogger("testsphere.backend")
+if init_error_reporting(settings.SENTRY_DSN, settings.APP_ENV, os.getenv("RENDER_GIT_COMMIT")):
+    logger.info("Error reporting to Sentry enabled")
 
 # Browser runs fetch whatever a test step (or an LLM-planned step) points at:
 # hold them to the same SSRF policy as the server's own HTTP requests.
@@ -55,14 +66,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         init_db()
         logger.info("Database connection verified successfully.")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - startup check: log and keep serving
         logger.warning(f"Database connection initialization check encountered: {exc}")
     try:
         from backend.pipeline.runner import recover_interrupted
 
         if interrupted := recover_interrupted(get_store()):
             logger.warning("Marked %d pipeline run(s) interrupted by the restart.", interrupted)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - startup check: log and keep serving
         logger.warning("Could not check for interrupted pipeline runs: %s", exc)
     scheduler_task = None
     if settings.SCHEDULER_ENABLED:
@@ -102,6 +113,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Outermost: request ids and the access log cover CORS answers too
+app.add_middleware(RequestContextMiddleware)
 
 # Include API routes (both under /api prefix and root for full compatibility)
 api_routers = [

@@ -8,8 +8,6 @@ how validation results are recorded.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 from agents.schemas.enums import HealingStatus
@@ -98,7 +96,7 @@ class HealingResult(BaseModel):
         default="execution_engine",
         description="What validated the result (always 'execution_engine')",
     )
-    validation_error: Optional[str] = Field(
+    validation_error: str | None = Field(
         default=None,
         description="Error message if validation failed",
     )

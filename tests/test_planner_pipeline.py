@@ -24,7 +24,6 @@ import json
 import pytest
 
 from agents.llm.client import LLMClientSession
-from agents.llm.config import LLMConfig
 from agents.llm.exceptions import (
     LLMProviderError,
     LLMResponseError,
@@ -65,13 +64,11 @@ from agents.schemas.enums import (
     TestPriority,
 )
 from tests.test_fixtures import (
-    create_llm_session,
     create_mock_config,
     create_mock_provider,
     create_sample_login_context,
     create_test_planner,
 )
-
 
 # ── Fixtures ─────────────────────────────────────────────────
 
@@ -251,7 +248,7 @@ class TestGenerationFlow:
         result2 = await planner.generate_tests(sample_context)
 
         assert len(result1) == len(result2)
-        for tc1, tc2 in zip(result1, result2):
+        for tc1, tc2 in zip(result1, result2, strict=True):
             assert tc1.test_id == tc2.test_id
 
     @pytest.mark.asyncio
@@ -733,8 +730,7 @@ class TestPromptConstruction:
         planner, provider = create_test_planner()
         # Capture what prompt is sent
         captured_prompts: list[str] = []
-        original_generate = provider.generate
-
+        
         async def capturing_generate(request: LLMRequest):
             captured_prompts.append(request.prompt)
             # Return a valid response so the pipeline continues
@@ -765,8 +761,7 @@ class TestPromptConstruction:
         """The prompt should include the supported action vocabulary."""
         planner, provider = create_test_planner()
         captured_prompts: list[str] = []
-        original_generate = provider.generate
-
+        
         async def capturing_generate(request: LLMRequest):
             captured_prompts.append(request.prompt)
             from agents.llm.schemas import LLMResponse, LLMUsage

@@ -17,12 +17,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.analyzer.schemas import FailureAnalysis, TestFailure
-from agents.healer.healer import SelfHealingAgent
 from agents.healer.schemas import HealingCandidate
-from agents.memory.healing_history import HealingMemory
-from agents.planner.planner import TestPlannerAgent
 from agents.planner.schemas import ApplicationContext, TestCase
 
 

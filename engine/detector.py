@@ -166,7 +166,7 @@ async def build_fingerprint(
             bounding_box=bbox,
         )
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - the engine reports failures in its result and never raises
         log.warning("build_fingerprint failed for %r: %s", locator_str, exc)
         return None
 
@@ -204,7 +204,7 @@ async def extract_candidates(
 
     try:
         raw: list[dict] = await page.evaluate(_CANDIDATES_JS, [selectors, max_candidates])
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - the engine reports failures in its result and never raises
         log.warning("extract_candidates JS evaluation failed: %s", exc)
         return []
 

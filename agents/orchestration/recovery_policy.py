@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -41,10 +40,8 @@ from agents.analyzer.schemas import FailureAnalysis
 from agents.healer.healing_schemas import ScoredCandidate
 from agents.memory.healing_evidence import (
     HealingEvidenceRetriever,
-    ReplacementStats,
 )
 from agents.schemas.enums import (
-    ConfidenceLevel,
     FailureType,
 )
 
@@ -101,7 +98,7 @@ class RecoveryDecision(BaseModel):
         default="",
         description="Test case this decision applies to",
     )
-    failure_type: Optional[FailureType] = Field(
+    failure_type: FailureType | None = Field(
         default=None,
         description="Classified failure type from the analysis",
     )
@@ -113,7 +110,7 @@ class RecoveryDecision(BaseModel):
         default=0.0, ge=0.0, le=1.0,
         description="Confidence in the decision (0.0 to 1.0)",
     )
-    selected_candidate: Optional[ScoredCandidate] = Field(
+    selected_candidate: ScoredCandidate | None = Field(
         default=None,
         description=(
             "Selected candidate for TRY_HEALING. "
