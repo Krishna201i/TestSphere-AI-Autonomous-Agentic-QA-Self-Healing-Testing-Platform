@@ -21,7 +21,7 @@ export default function AttackerCard({ onOpen }) {
           <span className="label">Radar Map Visualizer</span>
           <RadarChart values={radarValues(findings)} labels={RADAR_AXES.map((a) => a.label)} size={230} />
           <span className="pill blue" title="Passive checks only, and only hosts on the server's scope allowlist">
-            Safe-Mode: <span style={{ color: 'var(--blue)' }}>Enforced</span>
+            Safe-Mode: <span style={{ color: 'var(--pill-blue-fg)' }}>Enforced</span>
           </span>
         </div>
 
@@ -45,7 +45,7 @@ export default function AttackerCard({ onOpen }) {
                     <div>Severity: {cap(top.severity)} / Impact: {top.root_cause}</div>
                   </>
                 ) : (
-                  <div style={{ color: 'var(--green)' }}>No weaknesses found by passive checks.</div>
+                  <div style={{ color: 'var(--green-text)' }}>No weaknesses found by passive checks.</div>
                 )}
               </div>
             )}

@@ -4,8 +4,8 @@ import { executionStats, pct, retestStats, timeAgo } from '../lib/derive';
 import { HealthWaveformBox, ValidationRings } from '../components/ValidationCard';
 
 export default function ValidationEngine({ onNavigate }) {
-  const { executions, testCases, findings, retests, retest, retesting } = useWorkspace();
-  const ex = executionStats(executions);
+  const { executions, executionTotals, testCases, findings, retests, retest, retesting } = useWorkspace();
+  const ex = executionStats(executions, executionTotals);
   const rt = retestStats(retests);
   const nameOf = (id) => testCases.find((t) => t.id === id)?.name || `Test case #${id}`;
   const approvedOrTested = findings.filter((f) => retests[f.key]);
@@ -33,7 +33,7 @@ export default function ValidationEngine({ onNavigate }) {
           <div className="card-head"><h3>Deployment</h3><span className="pill green">6 · Health Check &amp; Rollback</span></div>
           <div className="shield subbox">
             <span>Rollback Shield: <span className="planned">Planned</span></span>
-            <span className="toggle" role="switch" aria-checked="false" aria-disabled="true" />
+            <span className="toggle" role="switch" aria-checked="false" aria-disabled="true" aria-label="Rollback Shield (planned, not available yet)" />
           </div>
           <p className="hint" style={{ margin: 0 }}>Deploying target apps, post-deploy health checks and rollback are module 5.7 and not built yet. Below is the platform's own backend health.</p>
           <HealthWaveformBox />
@@ -71,7 +71,7 @@ export default function ValidationEngine({ onNavigate }) {
       </section>
 
       <section className="card">
-        <div className="card-head"><h3>Test executions</h3><span className="muted small">{executions.length}</span></div>
+        <div className="card-head"><h3>Test executions</h3><span className="muted small">{executions.length > 50 ? `latest 50 of ${ex.total} finished` : executions.length}</span></div>
         {executions.length === 0 ? <div className="empty">No executions yet.</div> : (
           <div className="table-wrap">
             <table className="table">

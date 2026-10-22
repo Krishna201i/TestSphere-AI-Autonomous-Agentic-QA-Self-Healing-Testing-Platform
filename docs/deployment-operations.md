@@ -62,6 +62,7 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `ENGINE_MAX_BROWSERS` | `2` | Chromium instances that may run at once; further runs wait for a slot |
 | `PIPELINE_EXECUTION` | `inline` | `inline`: pipeline runs execute in the API process. `worker`: the API only queues them and a separate `python -m backend.worker` service executes them (and runs the scheduler). Requires Firestore. See §3.1 |
 | `WORKER_POLL_SECONDS` / `WORKER_HEARTBEAT_SECONDS` / `WORKER_STALE_SECONDS` | `5` / `30` / `600` | Worker queue polling; heartbeat while a run executes; a running run silent for longer than the stale limit is marked interrupted |
+| `PRIVACY_CONTACT` | `""` | E-mail or URL users contact about their data, shown on the dashboard's privacy notice (`#/privacy`, readable before sign-in). Without it the notice says "the operator of this server" |
 | `LOG_LEVEL` | `INFO` | Level for the app's own loggers |
 | `LOG_FORMAT` | `json` when hosted, `text` locally | `json` = one JSON object per line (ts, level, logger, message, request_id, extras), searchable in Render's log viewer |
 | `SENTRY_DSN` | `""` | Send unhandled errors to Sentry (free tier is enough); no personal data or performance tracing is sent |
@@ -75,6 +76,22 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `CAPTURE_SCREENSHOTS`| `True` | Whether to capture PNG screenshots on step completion/failure |
 | `CAPTURE_DOM_SNAPSHOT`| `True`| Whether to serialize DOM snapshot upon failure for healing |
 | `ARTIFACTS_DIR` | `./artifacts` | Local directory path where run artifacts are stored |
+
+---
+
+## 2.4 Firestore rules and indexes
+
+`firestore.rules` denies all client access (only the backend's Admin SDK, which bypasses rules, uses the
+database). `firestore.indexes.json` lists the composite indexes for "newest N of my …" queries (test
+executions, pipeline runs, audit events, blueprints). Deploy both with the Firebase CLI:
+
+```bash
+npm install -g firebase-tools && firebase login
+firebase deploy --only firestore --project <your-project-id>
+```
+
+Without the indexes everything still works: the backend reads every matching document and sorts them
+itself, and logs a one-time warning with a link that creates the missing index.
 
 ---
 

@@ -22,8 +22,8 @@ export function HealthWaveformBox() {
 }
 
 export function ValidationRings() {
-  const { executions, retests } = useWorkspace();
-  const ex = executionStats(executions);
+  const { executions, executionTotals, retests } = useWorkspace();
+  const ex = executionStats(executions, executionTotals);
   const rt = retestStats(retests);
   return (
     <div className="rings">
@@ -47,8 +47,8 @@ export function ValidationRings() {
 }
 
 export default function ValidationCard() {
-  const { executions } = useWorkspace();
-  const ex = executionStats(executions);
+  const { executions, executionTotals } = useWorkspace();
+  const ex = executionStats(executions, executionTotals);
 
   return (
     <section className="card" aria-labelledby="validation-title">
@@ -76,7 +76,7 @@ export default function ValidationCard() {
           </div>
           <div className="subbox shield" title="Deployment and rollback for target apps are not built yet (module 5.7)">
             <span>Rollback Shield: <span className="planned">Planned</span></span>
-            <span className="toggle" role="switch" aria-checked="false" aria-disabled="true" />
+            <span className="toggle" role="switch" aria-checked="false" aria-disabled="true" aria-label="Rollback Shield (planned, not available yet)" />
           </div>
         </div>
       </div>

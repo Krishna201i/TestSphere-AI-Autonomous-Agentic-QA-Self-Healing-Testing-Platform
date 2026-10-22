@@ -14,7 +14,7 @@
 
   --text: #1c1e2a;
   --text-2: #464958;
-  --muted: #8b8d98;
+  --muted: #6c6d76;  /* 4.5:1 on cards and page background (WCAG AA) */
 
   --navy: #22254f;
   --indigo-1: #2a2370;
@@ -24,9 +24,11 @@
 
   --blue: #4a6fd6;
   --green: #3aa864;
+  --green-text: #2b7d4a;  /* --green for text: 4.5:1 on light backgrounds */
   --green-soft: #7fd39c;
   --amber: #e0a03a;
   --red: #d94b4b;
+  --red-text: #c14242;  /* --red for text: 4.5:1 on light backgrounds */
 
   --pill-blue-bg: #dce6fd;   --pill-blue-bd: #9fb8f3;   --pill-blue-fg: #1f3a8a;
   --pill-orange-bg: #fde4cc; --pill-orange-bd: #f2ae74; --pill-orange-fg: #7a3a0a;
@@ -74,7 +76,7 @@ a { color: var(--indigo-2); }
 .workspace-status .health { padding-left: 16px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--green); box-shadow: 0 0 0 3px rgba(58, 168, 100, 0.18); }
 .dot.off { background: var(--red); box-shadow: 0 0 0 3px rgba(217, 75, 75, 0.18); }
-.ok-text { color: var(--green); }
+.ok-text { color: var(--green-text); }
 .warn-text { color: #b26b00; }
 .dot.warn { background: var(--amber); box-shadow: 0 0 0 3px rgba(224, 160, 58, 0.2); }
 .alert-banner {
@@ -84,7 +86,7 @@ a { color: var(--indigo-2); }
 }
 .alert-banner b { color: #4a2e00; }
 @media (max-width: 640px) { .alert-banner { margin: 0 16px 14px; } }
-.bad-text { color: var(--red); }
+.bad-text { color: var(--red-text); }
 
 .navpills {
   display: flex;
@@ -325,7 +327,7 @@ button.user:hover { background: rgba(0, 0, 0, 0.04); }
 .radar-col .label { font-size: 17px; font-weight: 500; }
 .evidence-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .evidence-lines { font-size: 15px; line-height: 1.32; color: var(--text); overflow-wrap: anywhere; }
-.evidence-lines .warn { color: var(--red); }
+.evidence-lines .warn { color: var(--red-text); }
 .bars-box { display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; }
 .bars-box .rate { font-size: 17px; }
 
@@ -368,6 +370,14 @@ button.user:hover { background: rgba(0, 0, 0, 0.04); }
 .btn-primary:hover:not(:disabled) { filter: brightness(1.08); background: linear-gradient(90deg, var(--indigo-1), var(--indigo-2) 60%, var(--indigo-1)); }
 .btn-block { width: 100%; padding: 12px 16px; font-size: 19px; border-radius: 9px; }
 .btn-sm { padding: 5px 10px; font-size: 13px; border-radius: 8px; }
+.btn-danger { color: var(--red-text); border-color: rgba(217, 75, 75, 0.45); }
+.btn-danger:hover:not(:disabled) { background: rgba(217, 75, 75, 0.08); }
+
+/* ── Privacy notice ──────────────────────────────────────── */
+.privacy { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 26px; align-items: start; }
+.privacy .kv { grid-template-columns: 120px 1fr; row-gap: 12px; }
+.privacy-standalone { max-width: 1200px; margin: 0 auto; padding-top: 34px; }
+@media (max-width: 640px) { .privacy .kv { grid-template-columns: 1fr; row-gap: 2px; } .privacy .kv dd { margin-bottom: 10px; } }
 
 /* ── Validation card ─────────────────────────────────────── */
 .validation-top { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; }
@@ -399,8 +409,12 @@ button.user:hover { background: rgba(0, 0, 0, 0.04); }
   font-size: 15px;
 }
 .input:focus { outline: 2px solid #c9c1fa; border-color: var(--violet); }
+/* Keyboard focus: visible on every control (mouse clicks don't show it) */
+:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: 4px; }
+tr.selectable:focus-visible { outline-offset: -2px; }
+.search:focus-within { outline: 2px solid var(--violet); outline-offset: 2px; }
 label.field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--text-2); flex: 1; min-width: 180px; }
-.error-text { color: var(--red); font-size: 14px; }
+.error-text { color: var(--red-text); font-size: 14px; }
 .hint { font-size: 13px; color: var(--muted); }
 
 .table-wrap { overflow-x: auto; }
@@ -481,7 +495,7 @@ img.avatar { object-fit: cover; }
 /* ── Security sub-tabs ───────────────────────────────────── */
 .subnav { padding: 8px 34px 0; }
 .subnav .tab { padding: 7px 14px; font-size: 14.5px; }
-.subnav .tab .muted-on-tab { opacity: 0.6; }
+.subnav .tab .muted-on-tab { opacity: 0.8; }
 @media (max-width: 640px) { .subnav { padding: 4px 16px 0; } .subnav .tabs { flex-wrap: wrap; } }
 
 /* ── Report charts ───────────────────────────────────────── */

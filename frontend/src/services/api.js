@@ -92,7 +92,10 @@ export const createProject = (payload) => request('/api/projects', { method: 'PO
 export const getApplications = () => request('/api/applications');
 export const createApplication = (payload) => request('/api/applications', { method: 'POST', body: payload });
 export const getTestCases = () => request('/api/test-cases');
-export const getTestExecutions = () => request('/api/test-executions');
+// Only the newest `limit` executions (oldest first); totals come from getExecutionStats
+export const getTestExecutions = (limit = RECENT_EXECUTIONS) => request(`/api/test-executions?limit=${limit}`);
+export const getExecutionStats = () => request('/api/test-executions/stats');
+export const RECENT_EXECUTIONS = 200;
 
 export const planAndExecute = (payload) =>
   request('/api/workflow/plan-and-execute', { method: 'POST', body: payload });
@@ -120,6 +123,8 @@ export const getPipelineRun = (id) => request(`/api/pipelines/runs/${id}`);
 export const getMe = () => request('/api/me');
 export const recordLogin = () => request('/api/me/login', { method: 'POST' });
 export const updateMe = (payload) => request('/api/me', { method: 'PUT', body: payload });
+// Erases the account and all its data; `confirm` must be exactly "DELETE MY ACCOUNT"
+export const deleteMe = (confirm) => request('/api/me', { method: 'DELETE', body: { confirm } });
 
 /** Webhook URL GitHub should call for a project (absolute, using the API base). */
 export const webhookUrl = (projectId) =>

@@ -1,14 +1,64 @@
 import React, { useEffect, useState } from 'react';
-import { LogOut, Save } from 'lucide-react';
+import { LogOut, Save, ShieldCheck, Trash2 } from 'lucide-react';
 import { useAuth } from '../state/Auth';
 import { useWorkspace } from '../state/Workspace';
-import { getMe, updateMe } from '../services/api';
+import { deleteMe, getMe, updateMe } from '../services/api';
 import { timeAgo, toDate } from '../lib/derive';
 
 const PROVIDERS = { password: 'Email & password', 'google.com': 'Google', local: 'Local (sign-in off)' };
 
 export function initialsOf(name) {
   return (name || '').split(/[\s._@-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
+}
+
+const CONFIRM_PHRASE = 'DELETE MY ACCOUNT';
+
+/** Right to erasure: removes every document the user owns and their sign-in account. */
+export function DeleteAccount({ onDeleted }) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function onDelete(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await deleteMe(typed);
+      onDeleted(result);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="btn btn-danger" onClick={() => setOpen(true)}>
+        <Trash2 size={16} /> Delete account…
+      </button>
+    );
+  }
+  return (
+    <form className="auth-form" onSubmit={onDelete}>
+      <p className="small" style={{ margin: 0 }}>
+        This permanently erases your projects, test cases, results, pipeline runs, findings, blueprints, audit
+        trail and profile, and deletes your sign-in account. It cannot be undone.
+      </p>
+      <label className="field">
+        Type <span className="mono">{CONFIRM_PHRASE}</span> to confirm
+        <input className="input" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" spellCheck={false} />
+      </label>
+      {error && <div className="error-text" role="alert">{error}</div>}
+      <div className="form-row" style={{ alignItems: 'center' }}>
+        <button type="submit" className="btn btn-danger" disabled={busy || typed !== CONFIRM_PHRASE}>
+          <Trash2 size={16} /> {busy ? 'Deleting…' : 'Delete everything'}
+        </button>
+        <button type="button" className="link-btn" onClick={() => { setOpen(false); setTyped(''); setError(null); }} disabled={busy}>Cancel</button>
+      </div>
+    </form>
+  );
 }
 
 export default function Profile({ onNavigate }) {
@@ -125,6 +175,19 @@ export default function Profile({ onNavigate }) {
           </div>
         </section>
       </div>
+
+      <section className="card">
+        <div className="card-head"><h3>Your data</h3></div>
+        <p className="small" style={{ margin: 0 }}>
+          Only you can see your projects and results. Read what is stored and where in the{' '}
+          <button type="button" className="link-btn" onClick={() => onNavigate('privacy')}>
+            <ShieldCheck size={14} style={{ verticalAlign: '-2px' }} /> privacy notice
+          </button>.
+        </p>
+        {auth.mode === 'firebase'
+          ? <DeleteAccount onDeleted={() => auth.signOut()} />
+          : <p className="muted small" style={{ margin: 0 }}>Sign-in is off on this server, so there is no personal account to delete.</p>}
+      </section>
     </div>
   );
 }

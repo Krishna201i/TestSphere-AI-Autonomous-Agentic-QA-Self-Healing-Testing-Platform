@@ -55,6 +55,13 @@ TestSphere-AI maintains a strict 100% test pass requirement. All new features an
 python -m pytest tests/engine/ tests/backend/ (Get-ChildItem tests/test_*.py | ForEach-Object { $_.FullName }) -v
 ```
 
+### 2.1a Frontend and end-to-end tests
+```powershell
+cd frontend; npm test              # Vitest unit/component tests (src/**/*.test.js[x])
+npm run build; cd ..               # the end-to-end tests drive the built dashboard
+python -m pytest tests/e2e         # backend + dashboard in Chromium; skipped if not built
+```
+
 ### 2.2 Running Subsystem Tests
 ```powershell
 # Browser Execution Engine tests
