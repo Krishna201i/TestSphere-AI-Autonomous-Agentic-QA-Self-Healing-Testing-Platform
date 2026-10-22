@@ -33,7 +33,7 @@ export default function ValidationEngine({ onNavigate }) {
           <div className="card-head"><h3>Deployment</h3><span className="pill green">6 · Health Check &amp; Rollback</span></div>
           <div className="shield subbox">
             <span>Rollback Shield: <span className="planned">Planned</span></span>
-            <span className="toggle" role="switch" aria-checked="false" aria-disabled="true" />
+            <span className="toggle" role="switch" aria-checked="false" aria-disabled="true" aria-label="Rollback Shield (planned, not available yet)" />
           </div>
           <p className="hint" style={{ margin: 0 }}>Deploying target apps, post-deploy health checks and rollback are module 5.7 and not built yet. Below is the platform's own backend health.</p>
           <HealthWaveformBox />

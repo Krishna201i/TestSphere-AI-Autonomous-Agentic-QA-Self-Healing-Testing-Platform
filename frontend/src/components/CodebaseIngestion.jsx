@@ -18,7 +18,7 @@ function BlueprintView({ bp }) {
         <div className="stat-tile"><div className="v">{langs[0]?.[0] || '—'}</div><div className="l">main language</div></div>
         <div className="stat-tile"><div className="v">{bp.routes.length}</div><div className="l">HTTP routes found</div></div>
         <div className="stat-tile"><div className="v">{testFiles}</div><div className="l">existing test files</div></div>
-        <div className="stat-tile"><div className="v" style={{ color: bp.risks.length ? 'var(--red)' : 'var(--green)' }}>{bp.risks.length}</div><div className="l">static risks</div></div>
+        <div className="stat-tile"><div className="v" style={{ color: bp.risks.length ? 'var(--red-text)' : 'var(--green-text)' }}>{bp.risks.length}</div><div className="l">static risks</div></div>
       </div>
 
       {langs.length > 0 && (
@@ -60,7 +60,7 @@ function BlueprintView({ bp }) {
 
         <div>
           <h4 style={{ margin: '0 0 6px' }}>Static risks</h4>
-          {bp.risks.length === 0 ? <div className="small" style={{ color: 'var(--green)' }}>No committed secrets, .env files or debug flags found.</div> : (
+          {bp.risks.length === 0 ? <div className="small" style={{ color: 'var(--green-text)' }}>No committed secrets, .env files or debug flags found.</div> : (
             <div className="table-wrap" style={{ maxHeight: 220, overflow: 'auto' }}>
               <table className="table">
                 <tbody>

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Play } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { pipelineStages, timeAgo, toDate, urlError } from '../lib/derive';
+import { selectableRow } from '../lib/a11y';
 import { WorkflowPanel } from './CommandCenter';
 import CodebaseIngestion from '../components/CodebaseIngestion';
 
@@ -207,7 +208,7 @@ export default function PipelineVisualizer({ onNavigate }) {
           <table className="table">
             <tbody>
               {stages.map((s) => (
-                <tr key={s.id} className={`selectable ${s.id === active ? 'selected' : ''}`} onClick={() => onNavigate(s.page)}>
+                <tr key={s.id} className={`selectable ${s.id === active ? 'selected' : ''}`} {...selectableRow(() => onNavigate(s.page), s.id === active)}>
                   <td style={{ whiteSpace: 'nowrap' }}><b>{s.num} {s.title}</b></td>
                   <td><span className={`pill ${s.tone}`}>{s.badge}</span></td>
                   <td style={{ whiteSpace: 'nowrap' }}><span className={`node-state ${s.status}`} style={{ position: 'static', display: 'inline-block', width: 8, height: 8, marginRight: 6 }} />{STATUS_LABEL[s.status]}</td>
