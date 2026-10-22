@@ -19,6 +19,7 @@ from backend.models.test_execution import TestExecutionStatus
 from backend.services.application_service import default_project
 from backend.services.test_case_service import TestCaseService
 from backend.services.test_execution_service import TestExecutionService
+from agents.schemas.member3_contract import format_sse_event
 from backend.orchestration.orchestrator import get_platform_orchestrator
 from backend.services.security_service import record_audit
 from backend.services.url_analyzer import URLAnalyzerService
@@ -221,9 +222,24 @@ async def execute_test_workflow(
 
 
 @router.get("/stream/{workflow_id}")
-async def stream_workflow_events(workflow_id: str, _user: User = Depends(get_current_user)) -> StreamingResponse:
-    """Stream live workflow state transitions and events using Server-Sent Events (SSE)."""
+async def stream_workflow_events(
+    workflow_id: str,
+    db: Store = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Recorded events of a workflow run, as Server-Sent Events (SSE).
+
+    *workflow_id* is ``wf-exec-<execution id>`` or the bare execution id; only
+    the execution's owner may read it.
+    """
+    raw = workflow_id.removeprefix("wf-exec-")
+    execution = db.get(TEST_EXECUTIONS, int(raw)) if raw.isdigit() else None
+    ensure_owned(user, execution, "Workflow")
+    events = _workflow_orchestrator.execution_events(execution["id"])
+    if not events:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="No recorded events for this workflow (it has not run since the server started).")
     return StreamingResponse(
-        _workflow_orchestrator.stream_execution_events(workflow_id),
+        (format_sse_event(event) for event in events),
         media_type="text/event-stream",
     )
