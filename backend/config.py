@@ -143,6 +143,13 @@ class Settings(BaseSettings):
         default_factory=lambda: os.getenv("SCHEDULER_ENABLED", "true").lower() in ("true", "1")
     )
     SCHEDULER_INTERVAL_SECONDS: int = Field(default_factory=lambda: int(os.getenv("SCHEDULER_INTERVAL_SECONDS", "60")))
+
+    # Where pipeline runs execute: "inline" in the API process (one service,
+    # fits a free host), or "worker": the API only queues them and
+    # `python -m backend.worker` (a separate service) claims and runs them,
+    # and runs the scheduler.  Queued runs then survive API restarts.
+    PIPELINE_EXECUTION: str = Field(
+        default_factory=lambda: os.getenv("PIPELINE_EXECUTION", "inline").strip().lower())
     CRON_SECRET: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", ""))
 
     # Security scanning: comma-separated extra hosts the passive scanner may
@@ -187,6 +194,15 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+def pipeline_problem() -> str | None:
+    if settings.PIPELINE_EXECUTION not in ("inline", "worker"):
+        return f"PIPELINE_EXECUTION must be 'inline' or 'worker', not {settings.PIPELINE_EXECUTION!r}."
+    if settings.PIPELINE_EXECUTION == "worker" and settings.DATABASE_BACKEND != "firestore":
+        return (f"PIPELINE_EXECUTION=worker needs a database the API and the worker share (Firestore), "
+                f"but DATABASE_BACKEND is {settings.DATABASE_BACKEND!r}: queued runs would never be seen.")
+    return None
+
+
 def startup_safety_problem() -> str | None:
     """Why this server must not start as configured, or None.
 
@@ -198,4 +214,4 @@ def startup_safety_problem() -> str | None:
         return ("Sign-in is off on a public server because no Firebase credentials are set: every visitor "
                 "would share one account and all of its data. Set FIREBASE_CREDENTIALS (sign-in then turns "
                 "on), or set AUTH_REQUIRED=false to run without sign-in on purpose.")
-    return None
+    return pipeline_problem()
