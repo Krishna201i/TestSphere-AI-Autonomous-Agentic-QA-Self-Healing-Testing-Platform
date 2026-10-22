@@ -9,6 +9,7 @@ import contextlib
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 import logging
+import os
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -34,9 +35,18 @@ from backend.api import (
 from backend.database.session import get_store, init_db
 from backend.database.store import StoreUnavailableError
 from backend.netguard import check_target
+from backend.observability import (
+    RequestContextMiddleware,
+    configure_logging,
+    default_log_format,
+    init_error_reporting,
+)
 from engine.browser import set_request_guard
 
+configure_logging(settings.LOG_LEVEL, default_log_format())
 logger = logging.getLogger("testsphere.backend")
+if init_error_reporting(settings.SENTRY_DSN, settings.APP_ENV, os.getenv("RENDER_GIT_COMMIT")):
+    logger.info("Error reporting to Sentry enabled")
 
 # Browser runs fetch whatever a test step (or an LLM-planned step) points at:
 # hold them to the same SSRF policy as the server's own HTTP requests.
@@ -102,6 +112,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Outermost: request ids and the access log cover CORS answers too
+app.add_middleware(RequestContextMiddleware)
 
 # Include API routes (both under /api prefix and root for full compatibility)
 api_routers = [
