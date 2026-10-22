@@ -169,6 +169,10 @@ class Settings(BaseSettings):
     # (localhost, 10.x, 169.254.x ...). Off on hosted servers (SSRF), on in local development.
     ALLOW_PRIVATE_TARGETS: bool = Field(default_factory=lambda: _default_allow_private_targets())
 
+    # Logging & error reporting (see backend/observability.py)
+    LOG_LEVEL: str = Field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+    SENTRY_DSN: str = Field(default_factory=lambda: os.getenv("SENTRY_DSN", ""))
+
     # Abuse limits: expensive actions (browser runs, scans, clones, LLM calls)
     # each signed-in user may start per minute; 0 disables the limit.
     RATE_LIMIT_RUNS_PER_MINUTE: int = Field(default_factory=lambda: int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "10")))
