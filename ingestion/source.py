@@ -73,7 +73,7 @@ def clone(url: str, workspace: Path, allowed_hosts: frozenset[str] = DEFAULT_GIT
     """Shallow-clone *url* into *workspace* and return the checkout directory."""
     url = validate_git_url(url, allowed_hosts)
     workspace.mkdir(parents=True, exist_ok=True)
-    target = workspace / f"{repo_name(url)}-{hashlib.sha1(url.encode()).hexdigest()[:8]}"
+    target = workspace / f"{repo_name(url)}-{hashlib.sha1(url.encode(), usedforsecurity=False).hexdigest()[:8]}"  # nosemgrep: insecure-hash-algorithm-sha1 - folder name, not security
     try:
         removed = _remove_tree(target)  # re-ingest: start from a fresh checkout
     except OSError:

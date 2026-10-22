@@ -118,7 +118,7 @@ class EgressProxy:
             path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
             headers = [line for line in lines[1:] if line and not line.lower().startswith(_HOP_BY_HOP)]
             request = "\r\n".join([f"{method} {path} {version}", *headers, "Connection: close", "", ""])
-            up_writer.write(request.encode("latin-1"))
+            up_writer.write(request.encode("latin-1"))  # nosemgrep: request-data-write - forwarding after the destination check
         await asyncio.gather(_pipe(reader, up_writer), _pipe(up_reader, writer))
 
 

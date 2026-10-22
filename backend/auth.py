@@ -75,7 +75,7 @@ def get_current_user(authorization: str | None = Header(None)) -> User:
                             detail=f"Sign-in is unavailable on this server: {exc}") from exc
     except Exception as exc:
         reason = (str(exc).splitlines() or [repr(exc)])[0][:200]
-        logger.info("Rejected ID token: %s", reason)
+        logger.info("Rejected ID token: %s", reason)  # nosemgrep: python-logger-credential-disclosure - Firebase's reason, never the token
         detail = "Your session has expired or is invalid. Sign in again."
         if "audience" in reason.lower() or "aud" in reason.lower().split():
             # The dashboard's Firebase project differs from the backend's credentials

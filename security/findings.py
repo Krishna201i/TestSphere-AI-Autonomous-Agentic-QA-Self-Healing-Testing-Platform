@@ -65,7 +65,7 @@ class Finding(BaseModel):
     @property
     def key(self) -> str:
         """Deduplication key: same check on the same component = same finding."""
-        return hashlib.sha1(f"{self.check_id}|{self.component}".encode()).hexdigest()[:16]
+        return hashlib.sha1(f"{self.check_id}|{self.component}".encode(), usedforsecurity=False).hexdigest()[:16]  # nosemgrep: insecure-hash-algorithm-sha1 - stored dedup key; changing it would orphan existing findings
 
 
 def dedupe(findings: list[Finding]) -> list[Finding]:
