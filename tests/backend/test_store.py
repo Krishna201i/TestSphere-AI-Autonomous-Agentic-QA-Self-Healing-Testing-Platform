@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+import backend.database.store as store_module
 from backend.database.store import (
     FirestoreStore,
     LocalStore,
@@ -21,6 +22,7 @@ from backend.database.store import (
     Record,
     StoreUnavailableError,
     create_store,
+    _service_account_source,
     describe_firestore_error,
 )
 
@@ -183,3 +185,19 @@ def test_firestore_bad_credentials_raise_store_error(monkeypatch) -> None:
         pass
     with pytest.raises(StoreUnavailableError, match="service-account"):
         FirestoreStore.from_settings('{"type": "service_account", "project_id": "x"}', None)
+
+
+def test_service_account_json_is_parsed_even_when_quoted() -> None:
+    assert _service_account_source("'{\"project_id\": \"p\"}'") == {"project_id": "p"}
+
+
+def test_missing_key_file_falls_back_to_secret_files(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "key.json").write_text("{}")
+    monkeypatch.setattr(store_module, "SECRET_FILES_DIR", tmp_path)
+    assert _service_account_source("C:/Users/me/key.json") == str(tmp_path / "key.json")
+
+
+def test_missing_key_file_names_the_file(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(store_module, "SECRET_FILES_DIR", tmp_path)
+    with pytest.raises(StoreUnavailableError, match=r"\(key\.json\)"):
+        _service_account_source("serviceAccount/key.json")
