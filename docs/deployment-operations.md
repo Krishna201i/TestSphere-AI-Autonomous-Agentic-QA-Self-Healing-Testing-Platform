@@ -60,6 +60,8 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `SECURITY_SCAN_ALLOWED_HOSTS` | `""` | Extra hosts the passive scanner may contact (loopback always allowed) |
 | `RATE_LIMIT_RUNS_PER_MINUTE` | `10` | Runs, scans and clones each user may start per minute (`0` disables); over it the API answers 429 |
 | `ENGINE_MAX_BROWSERS` | `2` | Chromium instances that may run at once; further runs wait for a slot |
+| `PIPELINE_EXECUTION` | `inline` | `inline`: pipeline runs execute in the API process. `worker`: the API only queues them and a separate `python -m backend.worker` service executes them (and runs the scheduler). Requires Firestore. See §3.1 |
+| `WORKER_POLL_SECONDS` / `WORKER_HEARTBEAT_SECONDS` / `WORKER_STALE_SECONDS` | `5` / `30` / `600` | Worker queue polling; heartbeat while a run executes; a running run silent for longer than the stale limit is marked interrupted |
 | `LOG_LEVEL` | `INFO` | Level for the app's own loggers |
 | `LOG_FORMAT` | `json` when hosted, `text` locally | `json` = one JSON object per line (ts, level, logger, message, request_id, extras), searchable in Render's log viewer |
 | `SENTRY_DSN` | `""` | Send unhandled errors to Sentry (free tier is enough); no personal data or performance tracing is sent |
@@ -98,6 +100,22 @@ docker run -p 8000:8000 -e AUTH_REQUIRED=false -e DATABASE_BACKEND=local testsph
 ```
 
 `PORT` (default 8000) sets the listening port. The image does not include `tests/` or `docs/`.
+
+### 3.1 Separate pipeline worker
+
+By default pipeline runs (Autopilot, scheduled and webhook runs) execute inside the API process: one
+service, fits a free host, but Chromium shares the API's memory and a restart interrupts queued runs.
+With a worker:
+
+1. Set `PIPELINE_EXECUTION=worker` on **both** the API and the worker (same environment otherwise,
+   including Firestore credentials; the worker refuses to start without a shared database).
+2. Run the worker: `python -m backend.worker` (Docker: `docker run --env-file .env testsphere python -m backend.worker`;
+   Render: a *Background Worker* service with that start command, which needs a paid instance type).
+
+The API then only queues runs. The worker claims the oldest queued run atomically (several workers never
+take the same run), executes one at a time, refreshes `heartbeat_at`, and runs the scheduler, so
+scheduled runs fire even while the API sleeps. A run whose worker died is marked interrupted, not re-run.
+Interactive runs from the Pipeline page (`/api/workflow/*`) still execute in the API process.
 
 ---
 

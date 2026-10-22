@@ -76,7 +76,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:  # noqa: BLE001 - startup check: log and keep serving
         logger.warning("Could not check for interrupted pipeline runs: %s", exc)
     scheduler_task = None
-    if settings.SCHEDULER_ENABLED:
+    if settings.PIPELINE_EXECUTION == "worker":
+        logger.info("Pipeline runs are queued for the worker (PIPELINE_EXECUTION=worker); it also runs the scheduler.")
+    elif settings.SCHEDULER_ENABLED:
         from backend.pipeline.scheduler import scheduler_loop
 
         scheduler_task = asyncio.create_task(scheduler_loop())
