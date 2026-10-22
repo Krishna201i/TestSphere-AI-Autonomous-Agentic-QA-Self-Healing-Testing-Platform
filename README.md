@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | AI QA Agent | Live | Plans tests from a live page, runs them in Playwright, records results |
 | Locator self-healing | Live | `engine/healer.py`: stored fallbacks, then fingerprint scoring; refuses tag changes and ambiguous matches |
-| LLM | Live (opt-in) | `LLM_PROVIDER=api` for any OpenAI-compatible API (OpenAI, Gemini, Groq, OpenRouter, Ollama Cloud); `mock` stays the offline default; `LLM_PROVIDER=local` is not built |
+| LLM | Live (opt-in) | `LLM_PROVIDER=api` for any OpenAI-compatible API (OpenAI, Gemini, Groq, OpenRouter, Ollama Cloud); `LLM_PROVIDER=local` for a model on your own machine (Ollama, vLLM, LM Studio); `mock` stays the offline default |
 | Attacker Agent | Live (passive) | `security/`: scope-checked passive scan (headers, cookies, CORS, TLS, forms); no attack payloads |
 | Remediation | Partial | Fix proposals for header/cookie findings, human approval, retest; source-code patches not built |
 | Validation | Live | Security retests and test re-execution; findings auto-resolve or reopen as regressions |
