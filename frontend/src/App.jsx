@@ -8,6 +8,7 @@ import Autopilot from './pages/Autopilot';
 import Reports from './pages/Reports';
 import Security from './pages/Security';
 import Profile from './pages/Profile';
+import Privacy, { PrivacyStandalone } from './pages/Privacy';
 import { AuthGate } from './pages/Login';
 import PipelineVisualizer from './pages/PipelineVisualizer';
 import AuditLogs from './pages/AuditLogs';
@@ -32,6 +33,7 @@ const VIEWS = {
   visualizer: PipelineVisualizer,
   audit: AuditLogs,
   profile: Profile,
+  privacy: Privacy,
 };
 
 // Older page ids (links inside cards, bookmarks) → where they live now
@@ -45,7 +47,7 @@ const ALIASES = {
 };
 
 // Reachable by link (profile menu), not shown as a nav pill
-const EXTRA_PAGES = [{ id: 'profile', label: 'Profile' }];
+const EXTRA_PAGES = [{ id: 'profile', label: 'Profile' }, { id: 'privacy', label: 'Privacy' }];
 
 /** "security/remediation" or an old id like "attacker" → { page, tab }. */
 function resolve(raw) {
@@ -69,7 +71,16 @@ export default function App() {
 /** The dashboard only mounts once signed in; it remounts per user so no data leaks across accounts. */
 function SignedIn() {
   const auth = useAuth();
-  if (auth.status !== 'signedIn') return <AuthGate />;
+  const [hash, setHash] = useState(window.location.hash);
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  if (auth.status !== 'signedIn') {
+    // The privacy notice must be readable before creating an account
+    return hash.replace(/^#\/?/, '') === 'privacy' ? <PrivacyStandalone /> : <AuthGate />;
+  }
   return <Dashboard key={auth.user.uid} />;
 }
 
