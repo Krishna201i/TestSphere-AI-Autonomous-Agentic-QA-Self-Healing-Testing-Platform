@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
+from backend.ratelimit import limit_runs
 from backend.database.session import get_db
 from backend.database.store import Store, StoreUnavailableError
 from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
@@ -48,7 +49,7 @@ class AnalyzeURLRequest(BaseModel):
 
 
 @router.post("/analyze", status_code=status.HTTP_200_OK)
-async def analyze_url_endpoint(req: AnalyzeURLRequest, _user: User = Depends(get_current_user)) -> Dict[str, Any]:
+async def analyze_url_endpoint(req: AnalyzeURLRequest, _user: User = Depends(limit_runs)) -> Dict[str, Any]:
     """Perform live DOM element extraction, security/a11y audit, and QA synthesis on any URL."""
     return await URLAnalyzerService.analyze_live_website(
         url=req.url,
@@ -61,7 +62,7 @@ async def analyze_url_endpoint(req: AnalyzeURLRequest, _user: User = Depends(get
 async def plan_and_execute_workflow(
     payload: Optional[PlanAndExecuteRequest] = None,
     db: Store = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(limit_runs),
 ) -> Dict[str, Any]:
     """Autonomous plan and execute workflow endpoint.
     
@@ -198,7 +199,7 @@ async def plan_and_execute_workflow(
 async def execute_test_workflow(
     execution_id: int,
     db: Store = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(limit_runs),
 ) -> Dict[str, Any]:
     """Execute a test execution run with autonomous AI diagnosis and self-healing."""
     ensure_owned(user, db.get(TEST_EXECUTIONS, execution_id), f"TestExecution #{execution_id}")
