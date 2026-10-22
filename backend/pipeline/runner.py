@@ -37,7 +37,7 @@ from backend.pipeline import suite
 from backend.services.security_service import record_audit
 from backend.services.test_case_service import TestCaseService
 from backend.services.test_execution_service import TestExecutionService
-from backend.services.url_analyzer import URLAnalyzerService
+from backend.services.url_analyzer import URLAnalyzerService, get_verifying_first
 
 logger = logging.getLogger("testsphere.pipeline")
 
@@ -274,17 +274,17 @@ async def _stage_codebase(state: _RunState, project: Record) -> Optional[Dict[st
 
 async def _reachable(urls: List[str]) -> Dict[str, Optional[int]]:
     """HTTP status per URL (None when unreachable), checked concurrently."""
-    from backend.netguard import BlockedTargetError, guard_request
+    from backend.netguard import BlockedTargetError
 
-    async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, verify=False,
-                                 headers={"User-Agent": URLAnalyzerService.USER_AGENT},
-                                 event_hooks={"request": [guard_request]}) as client:
-        async def one(url: str) -> Optional[int]:
-            try:
-                return (await client.get(url)).status_code
-            except (httpx.HTTPError, BlockedTargetError):
-                return None
-        codes = await asyncio.gather(*(one(u) for u in urls))
+    async def one(url: str) -> Optional[int]:
+        try:
+            response, _ = await get_verifying_first(url, timeout=8.0,
+                                                    headers={"User-Agent": URLAnalyzerService.USER_AGENT})
+            return response.status_code
+        except (httpx.HTTPError, BlockedTargetError):
+            return None
+
+    codes = await asyncio.gather(*(one(u) for u in urls))
     return dict(zip(urls, codes))
 
 

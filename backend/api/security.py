@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from backend.auth import User, actor_for, get_current_user, scope
+from backend.ratelimit import limit_runs
 from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Store
@@ -66,7 +67,7 @@ async def scan(
     req: ScanRequest,
     scanner: PassiveScanner = Depends(get_scanner),
     db: Store = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(limit_runs),
 ) -> Dict[str, Any]:
     """Passively scan one authorized URL; findings are sorted most severe first.
 
@@ -163,7 +164,7 @@ async def retest_finding(
     req: ActorRequest,
     scanner: PassiveScanner = Depends(get_scanner),
     db: Store = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(limit_runs),
 ) -> Dict[str, Any]:
     """Re-run the check behind a tracked finding and store the result."""
     return await _retest(_finding_or_404(db, key, user), scanner, db, actor_for(user, req.actor), user.uid)
@@ -171,7 +172,7 @@ async def retest_finding(
 
 @router.post("/retest", status_code=status.HTTP_200_OK)
 async def retest(
-    finding: Finding, scanner: PassiveScanner = Depends(get_scanner), _user: User = Depends(get_current_user),
+    finding: Finding, scanner: PassiveScanner = Depends(get_scanner), _user: User = Depends(limit_runs),
 ) -> Dict[str, Any]:
     """Stateless retest of a finding passed in the body (not stored)."""
     try:
