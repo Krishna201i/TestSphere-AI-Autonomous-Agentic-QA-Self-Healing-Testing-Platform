@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.analyzer.schemas import FailureContext
@@ -80,6 +80,10 @@ from agents.schemas.enums import (
     HealingStatus,
     ValidationStatus,
 )
+
+if TYPE_CHECKING:
+    from agents.analyzer.schemas import FailureAnalysis
+    from agents.healer.schemas import HealingResult
 
 logger = logging.getLogger(__name__)
 
