@@ -382,10 +382,14 @@ class TestProviderFactory:
             if env_backup is not None:
                 os.environ["LLM_PROVIDER"] = env_backup
 
-    def test_local_not_implemented(self):
-        config = LLMConfig(provider="local", model="some-model")
-        with pytest.raises(LLMConfigurationError, match="not yet implemented"):
-            get_llm_provider(config)
+    def test_local_uses_the_openai_compatible_provider_without_a_key(self):
+        from agents.llm.providers.api import DEFAULT_LOCAL_BASE_URL, APIProvider
+
+        config = LLMConfig(provider="local", model="llama3.2")
+        provider = get_llm_provider(config)
+        assert isinstance(provider, APIProvider)
+        assert provider._base_url == DEFAULT_LOCAL_BASE_URL
+        assert config.is_configured
 
     def test_api_returns_api_provider(self):
         config = LLMConfig(provider="api", model="gpt-4", api_key="sk-test")
