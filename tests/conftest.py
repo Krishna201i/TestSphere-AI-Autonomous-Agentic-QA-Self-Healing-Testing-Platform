@@ -23,3 +23,13 @@ def fresh_store():
     set_store(store)
     yield store
     set_store(None)
+
+
+@pytest.fixture(autouse=True)
+def fresh_rate_limits():
+    """Rate-limit counts never carry over between tests."""
+    from backend import ratelimit
+
+    ratelimit.reset()
+    yield
+    ratelimit.reset()

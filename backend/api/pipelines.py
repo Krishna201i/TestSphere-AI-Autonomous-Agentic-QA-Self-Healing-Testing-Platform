@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from backend.api.projects import owned_project
 from backend.api.schemas import _check_http_url
 from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
+from backend.ratelimit import limit_runs
 from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Record, Store
@@ -50,13 +51,13 @@ def _start(db: Store, user: User, project: Record, ingest: bool = False) -> Reco
 
 
 @router.post("/run", status_code=status.HTTP_202_ACCEPTED)
-async def run_project(req: RunRequest, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+async def run_project(req: RunRequest, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> Dict[str, Any]:
     """Run the whole pipeline for one of the caller's projects."""
     return _start(db, user, owned_project(db, user, req.project_id), req.ingest)
 
 
 @router.post("/quick", status_code=status.HTTP_202_ACCEPTED)
-async def quick_run(req: QuickRunRequest, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+async def quick_run(req: QuickRunRequest, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> Dict[str, Any]:
     """One click from a URL: reuse the caller's project for that URL (or create one) and run it."""
     try:
         url = _check_http_url(req.url, "URL")

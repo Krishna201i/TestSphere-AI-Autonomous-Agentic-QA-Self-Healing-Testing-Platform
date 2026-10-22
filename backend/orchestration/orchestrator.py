@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.healer.healing_decision import HealingDecisionEngine
@@ -47,7 +47,6 @@ from agents.schemas.enums import (
 from agents.schemas.member3_contract import (
     DashboardWorkflowSummary,
     build_dashboard_summary,
-    format_sse_event,
 )
 
 from backend.database.store import Store, StoreUnavailableError
@@ -452,26 +451,9 @@ class PlatformWorkflowOrchestrator:
             "analysis": analysis_data,
         }
 
-    async def stream_execution_events(
-        self,
-        workflow_id: str,
-    ) -> AsyncGenerator[str, None]:
-        """Stream SSE chunks for active workflow events."""
-        target_id = workflow_id
-        state = self.ai_orchestrator.get_state(target_id)
-        if not state and str(target_id).isdigit():
-            state = self.ai_orchestrator.get_state(f"wf-exec-{target_id}")
-        elif not state and str(target_id).startswith("wf-exec-"):
-            state = self.ai_orchestrator.get_state(str(target_id).replace("wf-exec-", ""))
-
-        if state and state.events:
-            for event in state.events:
-                yield format_sse_event(event)
-        else:
-            fallback_event = WorkflowEvent(
-                workflow_id=str(target_id),
-                step=WorkflowStep.COMPLETED,
-                event_type=WorkflowEventType.STATE_TRANSITION,
-                message=f"Telemetry stream active for workflow {target_id}",
-            )
-            yield format_sse_event(fallback_event)
+    def execution_events(self, execution_id: int) -> List[WorkflowEvent]:
+        """Recorded events of the workflow run for *execution_id* (empty when
+        none are held, e.g. after a restart)."""
+        state = (self.ai_orchestrator.get_state(f"wf-exec-{execution_id}")
+                 or self.ai_orchestrator.get_state(str(execution_id)))
+        return list(state.events) if state else []

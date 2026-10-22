@@ -2,10 +2,10 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/Tests-1320%20Passed-brightgreen.svg)]()
+[![CI](https://github.com/Krishna201i/TestSphere-AI-Autonomous-Agentic-QA-Self-Healing-Testing-Platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Krishna201i/TestSphere-AI-Autonomous-Agentic-QA-Self-Healing-Testing-Platform/actions/workflows/ci.yml)
 [![Engine](https://img.shields.io/badge/Engine-Playwright-orange.svg)]()
 [![Backend](https://img.shields.io/badge/Backend-FastAPI-teal.svg)]()
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **TestSphere-AI** is an intelligent, multi-agent autonomous testing platform designed to plan, generate, execute, analyze, and self-heal end-to-end web application tests.
 
@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | AI QA Agent | Live | Plans tests from a live page, runs them in Playwright, records results |
 | Locator self-healing | Live | `engine/healer.py`: stored fallbacks, then fingerprint scoring; refuses tag changes and ambiguous matches |
-| LLM | Live (opt-in) | `LLM_PROVIDER=api` for any OpenAI-compatible API; `mock` stays the offline default |
+| LLM | Live (opt-in) | `LLM_PROVIDER=api` for any OpenAI-compatible API (OpenAI, Gemini, Groq, OpenRouter, Ollama Cloud); `mock` stays the offline default; `LLM_PROVIDER=local` is not built |
 | Attacker Agent | Live (passive) | `security/`: scope-checked passive scan (headers, cookies, CORS, TLS, forms); no attack payloads |
 | Remediation | Partial | Fix proposals for header/cookie findings, human approval, retest; source-code patches not built |
 | Validation | Live | Security retests and test re-execution; findings auto-resolve or reopen as regressions |
@@ -25,6 +25,9 @@
 | Database | Live | Firebase Cloud Firestore behind a `Store` interface (`backend/database/store.py`); local JSON file for offline dev |
 | Healing memory | Live | Persisted in the database across restarts |
 | Codebase ingestion (5.1) | Live | `ingestion/`: public Git URL or local folder → blueprint (languages, frameworks, dependencies, test suites, HTTP routes, committed secrets); static only |
+| Sign-in & data isolation | Live | Firebase Authentication; every document carries `owner_uid` and other users' ids answer 404 |
+| Abuse protection | Live | SSRF guard on server requests and on everything the test browser fetches (`backend/netguard.py`, `engine/egress.py`); per-user run limit (429); concurrent-browser cap |
+| CI | Live | `.github/workflows/ci.yml`: locked deps, tests, lint, `pip-audit`, frontend build, `npm audit` |
 | Deployment & rollback (5.7) | Not built | |
 
 **Self-healing benchmark** (`python -m engine.benchmark`, 6 broken-page mutants of the demo app): 4/4 healable mutants healed, 2/2 unhealable mutants refused, 0 false heals (verified against ground truth).
@@ -39,7 +42,7 @@ For in-depth architectural and developer documentation, explore our detailed gui
 - 🎭 **[Browser Execution Engine Guide](docs/engine-architecture.md)**: Playwright lifecycle, `BrowserSession`, multi-tier `LocatorResolver`, and forensic screenshot/DOM artifact extraction.
 - 🔄 **[Self-Healing & Autonomous Orchestration](docs/self-healing-orchestration.md)**: Closed-loop self-healing lifecycle, failure categorization, candidate generation, and dynamic schema bridging.
 - 🔌 **[End-to-End Integration Guide](docs/integration-guide.md)**: Multi-agent coordination, offline mock vs cloud LLM providers, and real-time frontend streaming.
-- 🚢 **[Deployment & Operations Guide](docs/deployment-operations.md)**: Environment variables, Render/Vercel deployment, and example Docker and CI configurations (not yet included in the repo).
+- 🚢 **[Deployment & Operations Guide](docs/deployment-operations.md)**: Environment variables, Render/Vercel deployment, and an example Docker configuration (not included in the repo). CI runs from [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 - 🧠 **[Member 1 AI Agent Architecture](docs/member1-architecture.md)**: Deep dive into LLM prompt engineering, schema validation, and planner contracts.
 
 ---
@@ -55,7 +58,7 @@ For in-depth architectural and developer documentation, explore our detailed gui
   - Agent Orchestration & pipeline controller
 
 - **Member 2: Browser Execution Engine**:
-  - Playwright browser automation (Chromium, Firefox, WebKit)
+  - Playwright browser automation (Chromium)
   - DOM snapshot & screenshot extraction
   - Deterministic step execution engine (`PlaywrightRunner`)
   - Selector healing execution & validation
@@ -63,11 +66,11 @@ For in-depth architectural and developer documentation, explore our detailed gui
 - **Member 3: Platform Backend & Multi-Agent Orchestration — Prashansha Maheshwari**:
   - **Live Real-World Website Analyzer & DOM Synthesis Engine**: Engineered [`URLAnalyzerService`](backend/services/url_analyzer.py) to inspect any target website URL live over HTTP/HTTPS, extracting real DOM interactive elements (inputs, buttons, forms, links, headings), auditing SSL security & accessibility compliance, and synthesizing real Playwright test suites dynamically.
   - **Full-Stack Orchestration Bridge**: Architected and developed [`PlatformWorkflowOrchestrator`](backend/orchestration/orchestrator.py), seamlessly binding Member 1's cognitive AI agents and Member 2's browser automation into an automated, self-healing test execution pipeline.
-  - **Production Database Migration & Clean State**: Connected Supabase PostgreSQL via resilient IPv4 pooler configuration, completely purged legacy dummy/mock records, and disabled auto-seeding to ensure only 100% genuine real-world testing analytics are captured.
+  - **Production Database Migration & Clean State**: Connected Supabase PostgreSQL via resilient IPv4 pooler configuration, completely purged legacy dummy/mock records, and disabled auto-seeding to ensure only 100% genuine real-world testing analytics are captured. *(PostgreSQL was later replaced by Firebase Cloud Firestore.)*
   - **Instant Live QA Dashboard Experience**: Integrated a sleek **Real Live Website QA Analyzer** hero bar into the dashboard frontend, providing 1-click live testing with quick presets (`The Internet (Login)`, `Playwright TodoMVC`, `Hacker News`, `Example Domain`), real DOM selector trees, and real-time execution streaming.
   - **Bidirectional Schema Converters**: Designed [`converters.py`](backend/orchestration/converters.py) enabling zero-loss data interchange between Member 1 planner schemas and Member 2 Playwright engine representations.
   - **REST APIs & Real-Time SSE Telemetry**: Engineered high-throughput FastAPI endpoints ([`backend/api/`](backend/api/)) and Server-Sent Events (SSE) streaming for real-time test step monitoring, execution progress, and live healing event notifications.
-  - **Relational Persistence Layer**: Implemented declarative SQLAlchemy models ([`backend/models/`](backend/models/)) and atomic CRUD service architecture ([`backend/services/`](backend/services/)) supporting both SQLite and PostgreSQL.
+  - **Relational Persistence Layer**: Implemented declarative SQLAlchemy models ([`backend/models/`](backend/models/)) and atomic CRUD service architecture ([`backend/services/`](backend/services/)) supporting both SQLite and PostgreSQL. *(Later replaced by the `Store` interface over Firestore, [`backend/database/store.py`](backend/database/store.py).)*
   - **Backend Test Suite**: Authored 83 passing unit and integration tests covering database transactions, service boundaries, and REST/SSE API endpoints.
   - **System Consolidation & Conflict Resolution**: Merged and integrated all member branches into a cohesive production codebase, resolved git merge conflicts, eliminated obsolete duplicate artifacts, and updated [`.gitignore`](.gitignore).
   - **Technical Documentation & Governance**: Authored comprehensive technical documentation covering backend architecture, engine internals, self-healing lifecycle, integration guide, deployment/DevOps operations, and contributing guidelines.
@@ -1211,11 +1214,11 @@ for event in orchestrator.get_state().events:
 | # | Subsystem | Core Module(s) | Primary Test Suite | Status | Key Deliverable |
 |---|---|---|---|:---:|---|
 | **1** | **FastAPI Platform Architecture** | `backend/main.py`, `backend/config.py` | `tests/backend/test_health.py` | ✅ Complete | Asynchronous FastAPI service, CORS middleware, centralized configuration, health check probes |
-| **2** | **Relational Persistence Layer** | `backend/models/`, `backend/database/` | `tests/backend/test_database.py` | ✅ Complete | Declarative SQLAlchemy 2.0 models (`Project`, `Application`, `TestCase`, `TestExecution`) with SQLite & Supabase PostgreSQL support |
+| **2** | **Persistence Layer** | `backend/models/`, `backend/database/` | `tests/backend/test_store.py` | ✅ Complete | `Store` interface with Firestore (production), JSON-file (offline dev) and in-memory (tests) backends. Originally SQLAlchemy 2.0 with SQLite & Supabase PostgreSQL, since replaced |
 | **3** | **Contract Boundary & Validation** | `backend/api/schemas.py` | `tests/backend/test_*.py` | ✅ Complete | Strict Pydantic v2 schemas for all request/response DTOs, URL normalization, and execution states |
 | **4** | **Domain Service Layer** | `backend/services/` | `tests/backend/test_*_service.py` | ✅ Complete | Atomic transaction management, business logic boundaries, custom exception hierarchy (`EntityNotFoundError`, etc.) |
 | **5** | **REST API Router Suite** | `backend/api/` | `tests/backend/test_*_api.py` | ✅ Complete | Full CRUD endpoints for workspaces, apps, test definitions, execution runs, and diagnostic logs |
-| **6** | **Cross-Layer Schema Converters** | `backend/orchestration/converters.py` | `tests/backend/test_converters.py` | ✅ Complete | Zero-loss data translation bridging Member 1 AI Agent schemas and Member 2 Playwright engine structures |
+| **6** | **Cross-Layer Schema Converters** | `backend/orchestration/converters.py` | `tests/backend/test_workflow_orchestrator.py` | ✅ Complete | Zero-loss data translation bridging Member 1 AI Agent schemas and Member 2 Playwright engine structures |
 | **7** | **Platform Workflow Orchestrator** | `backend/orchestration/orchestrator.py` | `tests/backend/test_workflow_orchestrator.py` | ✅ Complete | End-to-end autonomous QA runner uniting Agent Planning, Playwright Execution, and Self-Healing |
 | **8** | **Real-Time SSE Telemetry Stream** | `backend/api/workflow.py` | `tests/backend/test_workflow_api.py` | ✅ Complete | Live event stream (`text/event-stream`) broadcasting step progression, screenshots, and locator healing events |
 | **9** | **Live Real-World Website Analyzer** | `backend/services/url_analyzer.py` | `tests/backend/test_workflow_api.py` | ✅ Complete | Live network inspection, interactive DOM element extraction (inputs, buttons, forms), SSL & A11y health scoring, autonomous test synthesis |
@@ -1302,7 +1305,7 @@ for event in orchestrator.get_state().events:
 #### 🧪 Day 12: Backend Test Suite & Isolation Harness
 - Authored comprehensive test suite in [`tests/backend/`](tests/backend/):
   - 83 unit and integration tests across database sessions, services, APIs, and orchestration logic.
-  - Isolated in-memory SQLite database fixtures (`test_db`) ensuring fast, deterministic, zero-side-effect test runs.
+  - Isolated in-memory SQLite database fixtures (`test_db`) ensuring fast, deterministic, zero-side-effect test runs. *(Now an in-memory `MemoryStore` per test, `tests/conftest.py`.)*
   - Verified 100% test pass rate across database CRUD, REST APIs, converter transformations, and orchestrator pipelines.
 
 #### 🔀 Day 13: Repository Consolidation, Merge Conflict Resolution & Artifact Cleanup
@@ -1311,10 +1314,9 @@ for event in orchestrator.get_state().events:
 - Removed over 4,400 lines of obsolete duplicate code (`artifacts/agents/`), stale test screenshots, and scratch files.
 - Modernized [`.gitignore`](.gitignore) with artifact and database exclusions to keep Git history clean.
 
-#### 🐳 Day 14: Containerization & DevOps Infrastructure
-- Designed production-grade `Dockerfile` with multi-browser Playwright support (Chromium, Firefox, WebKit).
-- Authored `docker-compose.yml` for unified local stack orchestration (FastAPI, PostgreSQL, shared artifact storage).
-- Configured GitHub Actions CI/CD matrix testing across Python 3.10, 3.11, and 3.12.
+#### 🐳 Day 14: Containerization & DevOps Infrastructure (planned)
+- Drafted a `Dockerfile`, a `docker-compose.yml` and a GitHub Actions matrix. **None of these were committed**; the example Docker configuration lives in [`docs/deployment-operations.md`](docs/deployment-operations.md).
+- CI now runs from [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on Python 3.11 (locked dependencies, full test suite, lint, `pip-audit`, frontend build and `npm audit`).
 
 #### 📚 Day 15: Technical Documentation & Platform Governance Suite
 - Created 5 comprehensive technical architectural specifications in [`docs/`](docs/):
@@ -1322,7 +1324,7 @@ for event in orchestrator.get_state().events:
   - [`docs/engine-architecture.md`](docs/engine-architecture.md): Playwright browser engine & locator resolution.
   - [`docs/self-healing-orchestration.md`](docs/self-healing-orchestration.md): Autonomous self-healing lifecycle & state machine.
   - [`docs/integration-guide.md`](docs/integration-guide.md): Developer guide, offline mock vs cloud LLM configurations.
-  - [`docs/deployment-operations.md`](docs/deployment-operations.md): Docker, Kubernetes, and operations manual.
+  - [`docs/deployment-operations.md`](docs/deployment-operations.md): Environment variables, Render deployment, example Docker/Kubernetes configurations, and operations manual.
   - [`CONTRIBUTING.md`](CONTRIBUTING.md): Code style, testing guidelines, and PR workflow.
 
 #### 🌐 Day 16: Live Real-World Website Analyzer & DOM Synthesis Engine
@@ -1332,7 +1334,7 @@ for event in orchestrator.get_state().events:
   - Audits site security (HTTPS, HSTS, X-Frame-Options, CSP), accessibility compliance (unlabeled inputs, missing alt tags), and performance ratings.
   - Autonomously synthesizes executable Playwright test plans tailored to the discovered DOM elements.
 
-#### ☁️ Day 17: Supabase PostgreSQL Migration & IPv4 Pooler Hardening
+#### ☁️ Day 17: Supabase PostgreSQL Migration & IPv4 Pooler Hardening *(superseded: storage moved to Firebase Cloud Firestore)*
 - Integrated cloud Supabase PostgreSQL persistence via dedicated IPv4 transaction pooler (`aws-0-*.pooler.supabase.com:5432`).
 - Fixed cloud connection issues on Render and deployed container environments with fallback to live HTTP-DOM verification when browser binaries are missing.
 - Hardened Playwright navigation with `wait_until="domcontentloaded"` and 15s timeout to prevent cold-start timeouts.

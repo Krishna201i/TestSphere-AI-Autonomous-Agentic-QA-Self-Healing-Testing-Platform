@@ -22,13 +22,27 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1   # On Windows
 # source .venv/bin/activate  # On macOS/Linux
 
-# Install development dependencies
+# Install the exact versions production runs, then the dev tools
 pip install --upgrade pip
+pip install -r requirements.txt
 pip install -e ".[dev]"
 
-# Install Playwright browser engines
-playwright install chromium firefox webkit
+# Install the Playwright browser the engine uses
+playwright install chromium
 ```
+
+### 1.1 Changing dependencies
+
+`requirements.in` lists the allowed version ranges; `requirements.txt` is the
+lock generated from it (exact versions + hashes, for Linux and Windows) and is
+what Render installs. Edit `requirements.in`, then regenerate the lock:
+
+```powershell
+uv pip compile requirements.in --universal --python-version 3.11 --generate-hashes -o requirements.txt
+```
+
+Use `--upgrade` (or `--upgrade-package <name>`) to move pinned versions forward.
+Run the test suite before committing the new lock.
 
 ---
 

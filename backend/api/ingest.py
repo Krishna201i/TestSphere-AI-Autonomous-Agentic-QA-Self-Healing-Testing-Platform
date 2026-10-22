@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
+from backend.ratelimit import limit_runs
 from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Record, Store
@@ -79,7 +80,7 @@ def save_blueprint(
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def ingest(req: IngestRequest, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+def ingest(req: IngestRequest, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> Dict[str, Any]:
     """Fetch and analyze a codebase. Runs in a worker thread (cloning can take a while)."""
     source = req.source.strip()
     actor = actor_for(user, req.actor)

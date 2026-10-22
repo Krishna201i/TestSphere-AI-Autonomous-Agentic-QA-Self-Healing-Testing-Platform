@@ -98,3 +98,37 @@ def test_sign_in_off_runs_as_the_local_user():
     me = client.get("/api/me").json()
     assert me["local"] is True
     assert client.get("/api/system").json()["auth"] == {"required": False, "provider": "local", "firebase": None}
+
+
+def test_workflow_events_are_only_streamed_to_the_runs_owner(client, monkeypatch):
+    """Regression: any signed-in user could read any run's events by guessing wf-exec-<n>."""
+    from backend.api import workflow
+    from backend.database.session import get_store
+    from backend.models import TEST_EXECUTIONS
+    from backend.orchestration.orchestrator import WorkflowEvent, WorkflowEventType, WorkflowStep
+
+    run = get_store().insert(TEST_EXECUTIONS, test_case_id=1, status="PASSED", owner_uid="alice")
+    event = WorkflowEvent(workflow_id=f"wf-exec-{run['id']}", step=WorkflowStep.COMPLETED,
+                          event_type=WorkflowEventType.STATE_TRANSITION, message="done")
+    monkeypatch.setattr(workflow._workflow_orchestrator, "execution_events",
+                        lambda eid: [event] if eid == run["id"] else [])
+
+    own = client.get(f"/api/workflow/stream/wf-exec-{run['id']}", headers=as_user("token-alice"))
+    assert own.status_code == 200 and "done" in own.text
+    assert client.get(f"/api/workflow/stream/{run['id']}", headers=as_user("token-alice")).status_code == 200
+
+    other = client.get(f"/api/workflow/stream/wf-exec-{run['id']}", headers=as_user("token-bob"))
+    assert other.status_code == 404
+    assert "done" not in other.text
+
+
+def test_unknown_or_eventless_workflows_are_404_not_invented(client):
+    from backend.database.session import get_store
+    from backend.models import TEST_EXECUTIONS
+
+    for wid in ("wf-exec-999", "999", "not-a-run"):
+        assert client.get(f"/api/workflow/stream/{wid}", headers=as_user("token-alice")).status_code == 404
+    idle = get_store().insert(TEST_EXECUTIONS, test_case_id=1, status="PENDING", owner_uid="alice")
+    resp = client.get(f"/api/workflow/stream/wf-exec-{idle['id']}", headers=as_user("token-alice"))
+    assert resp.status_code == 404
+    assert "No recorded events" in resp.json()["detail"]

@@ -7,11 +7,11 @@ Does not hardcode any sensitive information.
 
 import json
 import os
-from typing import List
+from typing import Annotated, List
 
 from dotenv import load_dotenv
-from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode
 
 # Load .env into the process environment first: several defaults below are
 # derived from other variables via os.getenv (e.g. DATABASE_BACKEND from
@@ -32,6 +32,26 @@ def _default_database_backend() -> str:
 # Set by common hosting platforms; their servers are public, so local-path
 # ingestion (reading the server's own disk) must be opted into explicitly there.
 _CLOUD_MARKERS = ("RENDER", "DYNO", "RAILWAY_ENVIRONMENT", "FLY_APP_NAME", "K_SERVICE", "VERCEL")
+
+
+def _hosted() -> bool:
+    """A public deployment: a hosting platform, or any APP_ENV but development."""
+    return os.getenv("APP_ENV", "development") != "development" or any(os.getenv(m) for m in _CLOUD_MARKERS)
+
+
+def _split_origins(raw: str) -> List[str]:
+    """Comma-separated origins, or a JSON list (the format older versions required)."""
+    raw = raw.strip()
+    items = json.loads(raw) if raw.startswith("[") else raw.split(",")
+    return [str(origin).strip().rstrip("/") for origin in items if str(origin).strip()]
+
+
+def _default_cors_origins() -> List[str]:
+    """The Vite dev servers locally; none when hosted, where the dashboard is
+    served from the API's own origin.  CORS_ORIGINS (comma-separated) overrides."""
+    if _hosted():
+        return []
+    return [f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in (3000, 5173)]
 
 
 def _default_allow_local_paths() -> bool:
@@ -88,8 +108,14 @@ class Settings(BaseSettings):
     HOST: str = Field(default_factory=lambda: os.getenv("BACKEND_HOST", "127.0.0.1"))
     PORT: int = Field(default_factory=lambda: int(os.getenv("BACKEND_PORT", "8000")))
 
-    # CORS settings
-    CORS_ORIGINS: List[str] = ["*"]
+    # Other origins allowed to call the API from a browser (e.g. a dashboard on
+    # Vercel). Auth is a bearer token, never a cookie, so credentials stay off.
+    CORS_ORIGINS: Annotated[List[str], NoDecode] = Field(default_factory=_default_cors_origins)
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value):
+        return _split_origins(value) if isinstance(value, str) else value
 
     # Database settings (SQLite default for local development)
     # Storage: "firestore" (production), "local" (JSON file, offline dev) or
@@ -143,6 +169,10 @@ class Settings(BaseSettings):
     # (localhost, 10.x, 169.254.x ...). Off on hosted servers (SSRF), on in local development.
     ALLOW_PRIVATE_TARGETS: bool = Field(default_factory=lambda: _default_allow_private_targets())
 
+    # Abuse limits: expensive actions (browser runs, scans, clones, LLM calls)
+    # each signed-in user may start per minute; 0 disables the limit.
+    RATE_LIMIT_RUNS_PER_MINUTE: int = Field(default_factory=lambda: int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "10")))
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
@@ -151,3 +181,17 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def startup_safety_problem() -> str | None:
+    """Why this server must not start as configured, or None.
+
+    Sign-in defaults to off when no Firebase credentials are set.  On a public
+    server that would silently put every visitor in one shared account with
+    all its data, so it has to be chosen explicitly (AUTH_REQUIRED=false).
+    """
+    if _hosted() and not settings.AUTH_REQUIRED and os.getenv("AUTH_REQUIRED") is None:
+        return ("Sign-in is off on a public server because no Firebase credentials are set: every visitor "
+                "would share one account and all of its data. Set FIREBASE_CREDENTIALS (sign-in then turns "
+                "on), or set AUTH_REQUIRED=false to run without sign-in on purpose.")
+    return None
