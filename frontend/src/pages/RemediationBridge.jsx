@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useWorkspace } from '../state/Workspace';
 import { ApprovalControls, DiffView } from '../components/RemediationCard';
 import { timeAgo } from '../lib/derive';
+import { selectableRow } from '../lib/a11y';
 
 function proposalState(f, approvals, retests) {
   if (retests[f.key]?.result === 'pass') return ['resolved', 'Resolved'];
@@ -118,7 +119,7 @@ export default function RemediationBridge({ onNavigate }) {
                   {findings.map((f) => {
                     const [cls, label] = proposalState(f, approvals, retests);
                     return (
-                      <tr key={f.key} className={`selectable ${selected?.key === f.key ? 'selected' : ''}`} onClick={() => setSelectedKey(f.key)}>
+                      <tr key={f.key} className={`selectable ${selected?.key === f.key ? 'selected' : ''}`} {...selectableRow(() => setSelectedKey(f.key), selected?.key === f.key)}>
                         <td><span className={`sev ${f.severity}`}>{f.severity}</span></td>
                         <td className="cell-wrap">{f.title}<div className="mono small muted">{f.check_id}</div></td>
                         <td><span className={`status ${cls}`}>{label}</span></td>

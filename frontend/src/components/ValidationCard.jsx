@@ -76,7 +76,7 @@ export default function ValidationCard() {
           </div>
           <div className="subbox shield" title="Deployment and rollback for target apps are not built yet (module 5.7)">
             <span>Rollback Shield: <span className="planned">Planned</span></span>
-            <span className="toggle" role="switch" aria-checked="false" aria-disabled="true" />
+            <span className="toggle" role="switch" aria-checked="false" aria-disabled="true" aria-label="Rollback Shield (planned, not available yet)" />
           </div>
         </div>
       </div>

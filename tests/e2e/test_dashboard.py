@@ -20,6 +20,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 DIST = ROOT / "frontend" / "dist" / "index.html"
+AXE = ROOT / "frontend" / "node_modules" / "axe-core" / "axe.min.js"
+WCAG_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]
 
 pytestmark = pytest.mark.skipif(not DIST.exists(), reason="dashboard not built (cd frontend && npm run build)")
 
@@ -86,6 +88,20 @@ def test_every_page_renders_without_errors(server, browser, route, selector):
     assert "Backend unreachable" not in page.content()
     assert errors == []
     page.close()
+
+
+@pytest.mark.skipif(not AXE.exists(), reason="axe-core not installed (cd frontend && npm ci)")
+@pytest.mark.parametrize(("route", "selector"), PAGES, ids=[p[0] or "home" for p in PAGES])
+def test_every_page_meets_wcag_21_aa(server, browser, route, selector):
+    """axe-core automated checks (contrast, names, labels, ARIA); not a substitute for a manual audit."""
+    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    page.goto(f"{server}/#/{route}")
+    page.wait_for_selector(selector, timeout=15_000)
+    page.wait_for_timeout(500)
+    page.add_script_tag(path=str(AXE))
+    violations = page.evaluate("tags => axe.run(document, {runOnly: {type: 'tag', values: tags}}).then(r => r.violations)", WCAG_AA)
+    page.close()
+    assert [f"{v['id']} ({len(v['nodes'])}): {v['help']}" for v in violations] == []
 
 
 def test_privacy_notice_is_reachable_before_sign_in(server, browser):
