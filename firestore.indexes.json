@@ -1,0 +1,93 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "test_executions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "owner_uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "id",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "pipeline_runs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "owner_uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "id",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "pipeline_runs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "owner_uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "project_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "id",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "audit_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "owner_uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "id",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "codebase_blueprints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "owner_uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "id",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "codebase_blueprints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "project_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "id",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

@@ -46,10 +46,21 @@ class TestExecutionService:
         )
 
     @staticmethod
-    def list_executions(db: Store, test_case_id: int | None = None, **filters: Any) -> list[Record]:
+    def list_executions(db: Store, test_case_id: int | None = None, limit: int | None = None,
+                        **filters: Any) -> list[Record]:
+        """Executions oldest first; with *limit*, only the newest *limit* of them."""
         if test_case_id is not None:
             filters["test_case_id"] = test_case_id
-        return db.find(TEST_EXECUTIONS, **filters)
+        if limit:
+            return db.find(TEST_EXECUTIONS, order_by="id", descending=True, limit=limit, **filters)[::-1]
+        return db.find(TEST_EXECUTIONS, order_by="id", **filters)
+
+    FINISHED = ("PASSED", "HEALED", "FAILED")
+
+    @staticmethod
+    def execution_counts(db: Store, **filters: Any) -> dict[str, int]:
+        """Finished executions per status, counted without reading them."""
+        return {s.lower(): db.count(TEST_EXECUTIONS, status=s, **filters) for s in TestExecutionService.FINISHED}
 
     @staticmethod
     def get_execution(db: Store, execution_id: int) -> Record:

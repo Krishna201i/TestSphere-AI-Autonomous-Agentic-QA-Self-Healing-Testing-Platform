@@ -232,3 +232,62 @@ def test_concurrent_update_if_has_exactly_one_winner(store) -> None:
         t.join()
     assert len(wins) == 1
     assert store.get("projects", row["id"])["next_run_at"] == f"claimed-{wins[0]}"
+
+
+def test_count_matches_find(store) -> None:
+    for status in ("PASSED", "PASSED", "FAILED"):
+        store.insert("test_executions", status=status, owner_uid="u1")
+    store.insert("test_executions", status="PASSED", owner_uid="u2")
+    assert store.count("test_executions", status="PASSED", owner_uid="u1") == 2
+    assert store.count("test_executions", owner_uid="u1") == 3
+    assert store.count("test_executions", owner_uid="nobody") == 0
+
+
+def test_filtered_newest_first_with_limit(store) -> None:
+    """Numeric id order, not string order: id 10 is newer than id 9."""
+    for n in range(12):
+        store.insert("test_executions", status="PASSED", owner_uid="u1" if n % 2 == 0 else "u2", n=n)
+    newest = store.find("test_executions", order_by="id", descending=True, limit=3, owner_uid="u1")
+    assert [r["n"] for r in newest] == [10, 8, 6]
+
+
+def test_firestore_falls_back_when_the_composite_index_is_missing(caplog) -> None:
+    """Production Firestore refuses filtered + ordered + limited queries without an
+    index; the store must still answer (sorting itself) and say how to fix it."""
+
+    class Snap:
+        def __init__(self, doc):
+            self._doc = doc
+
+        def to_dict(self):
+            return dict(self._doc)
+
+    class Query:
+        def __init__(self, docs, ordered=False):
+            self.docs, self.ordered = docs, ordered
+
+        def where(self, filter):  # noqa: A002 - Firestore's keyword
+            return Query([d for d in self.docs if d.get(filter.field_path) == filter.value])
+
+        def order_by(self, *a, **k):
+            return Query(self.docs, ordered=True)
+
+        def limit(self, n):
+            return self
+
+        def stream(self):
+            if self.ordered:
+                raise Exception("400 The query requires an index. You can create it here: "
+                                "https://console.firebase.google.com/project/x/firestore/indexes?create_composite=abc")
+            return [Snap(d) for d in self.docs]
+
+    class Db:
+        def collection(self, name):
+            return Query([{"id": n, "owner_uid": "u1"} for n in (2, 10, 9)])
+
+    store = FirestoreStore(Db())
+    with caplog.at_level("WARNING"):
+        rows = store.find("test_executions", order_by="id", descending=True, limit=2, owner_uid="u1")
+    assert [r["id"] for r in rows] == [10, 9]
+    assert "firebase deploy --only firestore:indexes" in caplog.text
+    assert "create_composite=abc" in caplog.text
