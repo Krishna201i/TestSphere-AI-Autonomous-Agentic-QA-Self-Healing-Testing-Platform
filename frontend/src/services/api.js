@@ -1,14 +1,16 @@
 /**
  * TestSphere-AI — API client for the FastAPI backend.
  *
- * Base URL: VITE_API_URL when set; same-origin when served by Vite (proxy,
- * port 3000) or by the backend itself (port 8000); otherwise 127.0.0.1:8000.
+ * Base URL: VITE_API_URL when set (a dashboard hosted apart from the API,
+ * e.g. on Vercel); otherwise the page's own origin: the backend serves the
+ * built dashboard itself, and the Vite dev server proxies /api.  (Guessing
+ * from the port broke hosted pages: on Render the port is the default 443,
+ * so the dashboard called http://127.0.0.1:8000 on the visitor's machine.)
  */
 
 function getApiBase() {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL.replace(/\/$/, '');
-  if (typeof window !== 'undefined' && ['3000', '8000'].includes(window.location.port)) return '';
-  return 'http://127.0.0.1:8000';
+  return '';
 }
 
 const BASE_URL = getApiBase();
