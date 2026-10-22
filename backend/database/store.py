@@ -261,6 +261,34 @@ def describe_firestore_error(exc: BaseException) -> str:
     return "The backend could not use Firestore (check FIREBASE_CREDENTIALS and that Firestore is enabled)."
 
 
+SECRET_FILES_DIR = Path("/etc/secrets")
+
+
+def _service_account_source(credentials: str) -> dict | str:
+    """The parsed key JSON, or the path to the key file.
+
+    Tolerates the value being wrapped in quotes, and a bare file name for a
+    Render Secret File (mounted under /etc/secrets).  A path that cannot be
+    found raises ``StoreUnavailableError`` naming the file, never the value
+    itself in case it is a mangled key.
+    """
+    info = credentials.strip()
+    if len(info) >= 2 and info[0] == info[-1] and info[0] in "'\"":
+        info = info[1:-1].strip()
+    if info.startswith("{"):
+        return json.loads(info)
+    if Path(info).is_file():
+        return info
+    secret = SECRET_FILES_DIR / Path(info).name
+    if secret.is_file():
+        return str(secret)
+    name = Path(info).name if info.lower().endswith(".json") and len(info) < 260 else "key.json"
+    raise StoreUnavailableError(
+        f"FIREBASE_CREDENTIALS points to a file that does not exist on this server ({name}). "
+        "Paste the key file's JSON contents into FIREBASE_CREDENTIALS, or upload it as a "
+        f"secret file and set the full path (e.g. {SECRET_FILES_DIR.as_posix()}/{name}).")
+
+
 def firebase_app(credentials: str | None, project_id: str | None) -> Any:
     """The process-wide firebase-admin app (shared by Firestore and Firebase Auth).
 
@@ -290,11 +318,12 @@ def firebase_app(credentials: str | None, project_id: str | None) -> Any:
             cred = _EmulatorCredentials()
             options = {"projectId": project_id or "demo-testsphere"}
         elif credentials:
-            info = credentials.strip()
-            cred = fb_credentials.Certificate(json.loads(info) if info.startswith("{") else info)
+            cred = fb_credentials.Certificate(_service_account_source(credentials))
         else:
             cred = fb_credentials.ApplicationDefault()
         return firebase_admin.initialize_app(cred, options, name="testsphere")
+    except StoreUnavailableError:
+        raise
     except Exception as exc:
         raise StoreUnavailableError(describe_firestore_error(exc)) from exc
 
