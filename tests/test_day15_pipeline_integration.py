@@ -1096,6 +1096,7 @@ class TestMember1ToMember3Contract:
         assert summary.current_step == WorkflowStep.COMPLETED
         assert summary.is_terminal is True
         assert summary.passed_tests == 1
+        assert summary.total_test_cases == 1  # no test_plan: the one executed case still counts
         assert summary.healed_tests == 1
         assert summary.healing_attempts == 2
         assert summary.retry_count == 1

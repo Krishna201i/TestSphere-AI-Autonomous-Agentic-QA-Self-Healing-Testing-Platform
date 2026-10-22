@@ -237,7 +237,10 @@ def build_dashboard_summary(state: AgentState) -> DashboardWorkflowSummary:
     if state.recovery_decision:
         latest_decision = state.recovery_decision.decision
 
-    total_tests = len(state.test_plan.test_cases) if state.test_plan else 0
+    # Platform runs execute one stored test case without a planner test_plan;
+    # the total must never be smaller than the results it summarises.
+    planned = len(state.test_plan.test_cases) if state.test_plan else 0
+    total_tests = max(planned, passed + failed)
     healed_count = (
         1
         if (
