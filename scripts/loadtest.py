@@ -119,29 +119,48 @@ def pct(values: list[float], q: float) -> float:
     return values[min(len(values) - 1, int(round(q * (len(values) - 1))))]
 
 
-async def api_level(base: str, clients: int, seconds: float) -> dict:
+def api_level(base: str, clients: int, seconds: float) -> dict:
+    """Threads with keep-alive connections, like browsers.  (An asyncio httpx
+    client saturates on Windows long before the server does: 3 req/s at 50
+    clients against a bare hello-world app, which serves 6,500 req/s this way.)"""
+    import concurrent.futures
+    import http.client
+    from urllib.parse import urlsplit
+
+    host, port = urlsplit(base).hostname, urlsplit(base).port
     latencies: list[float] = []
     errors = 0
+    lock = threading.Lock()
     stop = time.monotonic() + seconds
 
-    async def client(i: int) -> None:
+    def client(i: int) -> None:
         nonlocal errors
-        async with httpx.AsyncClient(base_url=base, timeout=30) as c:
-            n = i
-            while time.monotonic() < stop:
-                path = DASHBOARD_CALLS[n % len(DASHBOARD_CALLS)]
-                n += 1
-                started = time.monotonic()
-                try:
-                    r = await c.get(path)
-                    if r.status_code >= 400:
-                        errors += 1
-                except httpx.HTTPError:
-                    errors += 1
-                latencies.append((time.monotonic() - started) * 1000)
+        conn = http.client.HTTPConnection(host, port, timeout=30)
+        mine: list[float] = []
+        bad = 0
+        n = i
+        while time.monotonic() < stop:
+            path = DASHBOARD_CALLS[n % len(DASHBOARD_CALLS)]
+            n += 1
+            started = time.monotonic()
+            try:
+                conn.request("GET", path)
+                resp = conn.getresponse()
+                resp.read()
+                bad += resp.status >= 400
+            except (OSError, http.client.HTTPException):
+                bad += 1
+                conn.close()
+                conn = http.client.HTTPConnection(host, port, timeout=30)
+            mine.append((time.monotonic() - started) * 1000)
+        conn.close()
+        with lock:
+            latencies.extend(mine)
+            errors += bad
 
     started = time.monotonic()
-    await asyncio.gather(*(client(i) for i in range(clients)))
+    with concurrent.futures.ThreadPoolExecutor(clients) as pool:
+        list(pool.map(client, range(clients)))
     elapsed = time.monotonic() - started
     return {"clients": clients, "requests": len(latencies), "rps": len(latencies) / elapsed, "errors": errors,
             "p50": pct(latencies, 0.5), "p95": pct(latencies, 0.95), "p99": pct(latencies, 0.99)}
@@ -244,7 +263,7 @@ async def main() -> None:
         idle = backend.rss_mb()
         api = []
         for n in args.clients:
-            res = await api_level(backend.base, n, args.seconds)
+            res = await asyncio.to_thread(api_level, backend.base, n, args.seconds)
             print(f"API {n:>3} clients: {res['rps']:.0f} req/s  p95 {res['p95']:.0f} ms  errors {res['errors']}", flush=True)
             api.append(res)
         runs = []

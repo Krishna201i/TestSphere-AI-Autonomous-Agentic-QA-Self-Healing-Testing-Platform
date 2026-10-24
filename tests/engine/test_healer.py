@@ -345,3 +345,11 @@ def test_a_look_alike_sharing_no_identity_is_capped_below_the_threshold():
     assert score <= NO_IDENTITY_CAP
     same_but_renamed = stored.model_copy(update={"id": "x", "name": "y"})  # placeholder still identifies it
     assert score_fingerprint(stored, same_but_renamed, frozenset({"data-testid"}))[0] > NO_IDENTITY_CAP
+
+
+def test_a_different_kind_of_input_is_never_the_same_element():
+    box = ElementFingerprint(tag="input", id="remember", attributes={"type": "checkbox"})
+    radio = box.model_copy(update={"attributes": {"type": "radio"}})
+    email = ElementFingerprint(tag="input", id="email", attributes={"type": "email"})
+    assert score_fingerprint(box, radio)[0] == 0.0
+    assert score_fingerprint(email, email.model_copy(update={"attributes": {"type": "text"}}))[0] > 0.0
