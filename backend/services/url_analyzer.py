@@ -66,6 +66,9 @@ class URLAnalyzerService:
         url = (raw_url or "").strip()
         if not url:
             raise ValueError("A URL is required.")
+        scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+        if scheme and scheme not in ("http", "https"):
+            raise ValueError(f"Only http:// and https:// pages can be tested, not {scheme}://.")
         if not url.startswith("http://") and not url.startswith("https://"):
             url = f"https://{url}"
         return url
@@ -522,16 +525,9 @@ class URLAnalyzerService:
         })
         step_num += 1
 
-        # Step 2: Page Title Assertion
-        clean_title = page_title.split("-")[0].split("|")[0].strip() or page_title
-        steps.append({
-            "step_number": step_num,
-            "action": "ASSERT_CONTAINS_TEXT",
-            "target": "head > title",
-            "value": clean_title[:30],
-            "description": f"Verify page title contains '{clean_title[:30]}'",
-        })
-        step_num += 1
+        # No title check here: assertions run after the interaction, when a
+        # successful login or submit has already moved to another page (the
+        # smoke test checks the title of the page as loaded).
 
         # Step 3: Interactive Inputs (if discovered)
         # Check if user prompt mentions login or credentials
@@ -548,16 +544,16 @@ class URLAnalyzerService:
                     continue
                 if "pass" in hint or itype == "password":
                     val = given.get("password", "AutoQAPassword!99")
-                    desc = f"Enter the password in {target_sel}"
+                    desc = "the password field"
                 elif any(k in hint for k in ("user", "email", "login")) or itype == "email":
                     val = given.get("username", "qa_user@testsphere.ai")
-                    desc = f"Enter the user name in {target_sel}"
+                    desc = "the user name field"
                 elif "search" in hint or itype == "search" or "search" in p_lower:
                     val = given.get("text", "TestSphere QA Automation")
-                    desc = f"Search in {target_sel}"
+                    desc = "the search field"
                 else:
                     val = given.get("text", "Verified Test Input")
-                    desc = f"Type into {target_sel}"
+                    desc = f"the {(inp.get('placeholder') or inp.get('aria_label') or inp.get('name') or 'text')[:40]} field"
 
                 steps.append({
                     "step_number": step_num,
@@ -576,7 +572,7 @@ class URLAnalyzerService:
                 "action": "CLICK",
                 "target": primary_btn["selector"],
                 "value": None,
-                "description": f"Trigger interactive action on '{primary_btn['text']}' ({primary_btn['selector']})",
+                "description": f"the '{primary_btn['text']}' button",
             })
             step_num += 1
         elif any(st["action"] == "FILL" for st in steps):
@@ -587,7 +583,7 @@ class URLAnalyzerService:
                 "action": "PRESS",
                 "target": last_filled["target"],
                 "value": "Enter",
-                "description": f"Press Enter in {last_filled['target']}",
+                "description": last_filled["description"],
             })
             step_num += 1
         else:

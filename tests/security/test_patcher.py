@@ -304,3 +304,20 @@ def test_fastapi_get_application_factory(tmp_path):
     # a second patch extends the nested hook instead of adding another
     again = build_patch(root, [finding("SEC-HDR-CSP")], SITE)
     assert "@application.middleware" not in again.patch and "Content-Security-Policy" in again.patch
+
+
+def test_typescript_express_patches_are_syntax_checked(tmp_path):
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
+    root = write(tmp_path / "repo", {"src/main.ts": """
+        import express, { Express } from "express";
+
+        const app: Express = express();
+        app.get("/", (req, res) => res.send("ok"));
+        app.listen(3000);
+    """})
+    result = build_patch(root, HEADERS, SITE)
+    assert result.frameworks == ["express"]
+    assert result.files[0].verified in (True, None)  # None only on Node older than 22.13
+    if result.files[0].verified is None:
+        assert "Node 22.13" in result.files[0].check_note

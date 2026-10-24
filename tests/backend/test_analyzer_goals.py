@@ -48,3 +48,13 @@ def test_a_lone_input_without_a_button_submits_with_enter():
 ])
 def test_client_rendered_shells_are_recognised(html, client):
     assert U._looks_client_rendered(html) is client
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "gopher://127.0.0.1/", "ftp://example.com/"])
+def test_other_schemes_are_refused_clearly(url):
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+
+    r = TestClient(app).post("/api/workflow/analyze", json={"url": url})
+    assert r.status_code == 422 and "Only http:// and https://" in r.json()["detail"]

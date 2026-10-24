@@ -55,9 +55,14 @@ ROUTE_PATTERNS = [
     (re.compile(r"\b(?:app|router|server|api)\.(get|post|put|patch|delete|all)\(\s*['\"`]([^'\"`]+)['\"`]"), "js"),
     # Spring:  @GetMapping("/x")
     (re.compile(r"@(Get|Post|Put|Patch|Delete|Request)Mapping\(\s*(?:value\s*=\s*|path\s*=\s*)?['\"]([^'\"]+)['\"]"), "java"),
-    # Django:  path("x/", view)
-    (re.compile(r"\b(path|re_path)\(\s*r?['\"]([^'\"]*)['\"]\s*,"), "django"),
+    # Django:  path("x/", view), re_path(r"^x/$", view), url(r"^x/?$", view)
+    (re.compile(r"\b(path|re_path|url)\(\s*r?['\"]([^'\"]*)['\"]\s*,"), "django"),
+    # Django REST framework:  router.register(r"articles", ViewSet)
+    (re.compile(r"\b\w+\.(register)\(\s*r?['\"]([^'\"]+)['\"]\s*,"), "django"),
 ]
+
+# Flask:  @bp.route("/x", methods=["POST", "DELETE"])
+_FLASK_METHODS = re.compile(r"methods\s*=\s*[\[(]([^\])]*)[\])]")
 
 SECRET_PATTERNS = [
     ("AWS access key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
@@ -296,14 +301,24 @@ def _routes(text: str, rel: str, suffix: str) -> list[Route]:
                 continue  # example in a comment, not a real route
             groups = m.groups()[-2:]  # (method, path); python pattern has a leading router-variable group
             method = groups[0].upper()
-            method = {"ROUTE": "ANY", "ALL": "ANY", "REQUEST": "ANY", "PATH": "ANY", "RE_PATH": "ANY"}.get(method, method)
+            method = {"ROUTE": "ANY", "ALL": "ANY", "REQUEST": "ANY", "PATH": "ANY", "RE_PATH": "ANY",
+                      "URL": "ANY", "REGISTER": "ANY"}.get(method, method)
             path = groups[1]
             if kind == "python":
                 path = prefixes.get(m.group("var"), "") + path
+            if kind == "django":
+                path = re.sub(r"^\^|/?\??\$$", "", path)  # regex anchors: ^articles/feed/?$ -> articles/feed
+                path = re.sub(r"\(\?P<(\w+)>[^)]*\)", r"<\1>", path)  # (?P<slug>[-\w]+) -> <slug>
+                path = "/" + path.lstrip("/")
             path = path or "/"
-            if kind == "django" and not path.startswith("/"):
-                path = "/" + path
-            routes.append(Route(method=method, path=path, file=rel, line=text.count("\n", 0, m.start()) + 1))
+            methods = [method]
+            if method == "ANY" and kind == "python":
+                call = text[m.end(): text.find(")", m.end()) + 1]
+                listed = _FLASK_METHODS.search(call)
+                if listed:
+                    methods = [x.strip(" '\"").upper() for x in listed.group(1).split(",") if x.strip(" '\"")] or methods
+            line = text.count("\n", 0, m.start()) + 1
+            routes += [Route(method=meth, path=path, file=rel, line=line) for meth in methods]
     return routes
 
 
@@ -330,11 +345,17 @@ def _secrets(text: str, rel: str, in_tests: bool = False) -> list[Risk]:
 _DEBUG = re.compile(r"^\s*DEBUG\s*=\s*True\b", re.M)
 
 
+def _in_docstring(text: str, pos: int) -> bool:
+    before = text[:pos]
+    return before.count('"""') % 2 == 1 or before.count("\'\'\'") % 2 == 1
+
+
 def _debug_flags(text: str, rel: str) -> list[Risk]:
     return [
         Risk(kind="Debug mode enabled", file=rel, line=text.count("\n", 0, m.start()) + 1,
              detail="DEBUG = True in code; make sure it is off in production.")
         for m in _DEBUG.finditer(text)
+        if not _in_docstring(text, m.start())
     ]
 
 
@@ -366,10 +387,17 @@ def _dependencies(root: Path) -> dict[str, list[str]]:
             entries = list(project.get("dependencies", []))
             for extra in project.get("optional-dependencies", {}).values():
                 entries += extra
+            for group in data.get("dependency-groups", {}).values():  # PEP 735 (uv, pdm)
+                entries += [e for e in group if isinstance(e, str)]
             for entry in entries:
                 name = re.split(r"[<>=!~\[;\s]", entry.strip(), maxsplit=1)[0]
                 if name:
                     deps.setdefault("pip", set()).add(name.lower())
+            poetry = data.get("tool", {}).get("poetry", {})
+            tables = [poetry.get("dependencies", {}), poetry.get("dev-dependencies", {}),
+                      *(g.get("dependencies", {}) for g in poetry.get("group", {}).values())]
+            for table in tables:
+                deps.setdefault("pip", set()).update(n.lower() for n in table if n.lower() != "python")
         except (OSError, tomllib.TOMLDecodeError):
             pass
 
