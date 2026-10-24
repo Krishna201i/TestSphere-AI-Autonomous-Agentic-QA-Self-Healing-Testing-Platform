@@ -242,3 +242,24 @@ def test_local_path_default_is_safe_on_cloud_hosts(monkeypatch, env, expected) -
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     assert _default_allow_local_paths() is expected
+
+
+def test_real_world_route_and_dependency_styles(tmp_path):
+    """Found testing the RealWorld example apps, microblog and Flask itself."""
+    from ingestion import analyze_repo
+
+    (tmp_path / "pyproject.toml").write_text('[tool.poetry.dependencies]\npython = "^3.9"\nfastapi = "^0.79"\n'
+                                             '[tool.poetry.group.dev.dependencies]\npytest = "^7"\n', encoding="utf-8")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "urls.py").write_text(
+        "from django.conf.urls import url\nrouter.register(r'articles', ArticleViewSet)\n"
+        "urlpatterns = [url(r'^articles/(?P<slug>[-\w]+)/favorite/?$', View.as_view())]\n", encoding="utf-8")
+    (tmp_path / "app" / "api.py").write_text(
+        "@bp.route('/tokens', methods=['POST'])\ndef a(): pass\n@bp.route('/tokens', methods=['DELETE'])\ndef b(): pass\n",
+        encoding="utf-8")
+    (tmp_path / "app" / "config.py").write_text('class Config:\n    """Example::\n\n        DEBUG = True\n    """\n', encoding="utf-8")
+    bp = analyze_repo(tmp_path)
+    routes = {f"{r.method} {r.path}" for r in bp.routes}
+    assert "FastAPI" in bp.frameworks
+    assert {"ANY /articles", "ANY /articles/<slug>/favorite", "POST /tokens", "DELETE /tokens"} <= routes
+    assert not [r for r in bp.risks if r.kind == "Debug mode enabled"]

@@ -285,7 +285,7 @@ h1, h2, h3, h4 { line-height: var(--lh-tight); }
 .icon-btn .badge {
   position: absolute; top: 0; right: 0;
   min-width: 16px; height: 16px; padding: 0 var(--s-1);
-  border-radius: var(--r-full); background: var(--violet); color: var(--on-accent);
+  border-radius: var(--r-full); background: var(--accent-strong); color: var(--on-accent);
   font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 16px; text-align: center;
 }
 .user {
@@ -800,7 +800,7 @@ pre.code {
 .stage-item.running { border-color: var(--accent-border); background: var(--accent-soft); }
 .stage-item.done { background: var(--surface); }
 .stage-item.failed { border-color: var(--danger-border); background: var(--danger-soft); }
-.stage-item.skipped, .stage-item.pending { opacity: 0.8; }
+.stage-item.skipped, .stage-item.pending { border-style: dashed; }
 .stage-label { font-weight: var(--fw-medium); font-size: var(--fs-base); }
 .spin { animation: spin 1s linear infinite; color: var(--violet); }
 

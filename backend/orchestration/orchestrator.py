@@ -132,7 +132,9 @@ def describe_step(step: EngineStep) -> str:
         line += f" ({len(step.value)} characters)"  # never echo what was typed (it may be a password)
     elif action == "assert_text" and step.expected:
         line += f' contains "{step.expected[:80]}"'
-    elif action in ("press", "select") and step.value:
+    elif action == "press" and step.value:
+        line = f"Press {step.value[:20]} in {target}".strip()
+    elif action == "select" and step.value:
         line += f" {step.value[:40]}"
     return line
 

@@ -189,7 +189,8 @@ def _django_settings(root: Path) -> list[Path]:
     return sorted(hits, key=lambda p: _rank(p, root))
 
 
-EXPRESS_RE = re.compile(r"^(?P<indent>[ \t]*)(?:const|let|var)\s+(?P<var>\w+)\s*=\s*express\(\s*\)\s*;?[ \t]*$", re.M)
+# const app = express();  /  const app: Express = express();  /  let app: express.Application = express()
+EXPRESS_RE = re.compile(r"^(?P<indent>[ \t]*)(?:const|let|var)\s+(?P<var>\w+)\s*(?::\s*[\w.<>]+\s*)?=\s*express\(\s*\)\s*;?[ \t]*$", re.M)
 
 
 def _express_apps(root: Path) -> list[tuple[Path, re.Match]]:
@@ -432,6 +433,23 @@ def _patch_nginx(text: str, fix: Fix) -> tuple[str, list[tuple[str, str]]]:
 
 # ── Verification and diff ──────────────────────────────────────────────────
 
+# TypeScript: strip the types with Node's built-in stripTypeScriptTypes (Node 22.13+),
+# then syntax-check the result as a JavaScript module.
+_TS_CHECK = r"""
+const m = require("node:module");
+if (!m.stripTypeScriptTypes) process.exit(3);
+const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), cp = require("node:child_process");
+let js;
+try { js = m.stripTypeScriptTypes(fs.readFileSync(process.argv[1], "utf8"), { mode: "transform" }); }
+catch (e) { console.error(e.message); process.exit(1); }
+const out = path.join(os.tmpdir(), "tscheck-" + process.pid + ".mjs");
+fs.writeFileSync(out, js);
+const r = cp.spawnSync(process.execPath, ["--check", out], { encoding: "utf8" });
+fs.unlinkSync(out);
+if (r.status) { console.error(r.stderr.split("\\n").filter(Boolean).slice(-2).join(" ")); process.exit(1); }
+"""
+
+
 def _verify(path: Path, text: str) -> tuple[bool | None, str | None]:
     if path.suffix == ".py":
         try:
@@ -439,6 +457,18 @@ def _verify(path: Path, text: str) -> tuple[bool | None, str | None]:
             return True, None
         except SyntaxError as exc:
             return False, f"Python syntax error at line {exc.lineno}: {exc.msg}"
+    if path.suffix in (".ts", ".mts", ".cts") and shutil.which("node"):
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / f"check{path.suffix}"
+            probe.write_text(text, encoding="utf-8")
+            try:
+                res = subprocess.run(["node", "-e", _TS_CHECK, str(probe)], capture_output=True, text=True, timeout=30,
+                                     env={**os.environ, "NODE_NO_WARNINGS": "1"})
+            except (OSError, subprocess.TimeoutExpired):
+                return None, "Could not run the TypeScript check"
+        if res.returncode == 3:
+            return None, "TypeScript not checked (needs Node 22.13 or newer)"
+        return (True, None) if res.returncode == 0 else (False, res.stderr.strip()[-300:] or "TypeScript syntax error")
     if path.suffix in (".js", ".mjs", ".cjs") and shutil.which("node"):
         with tempfile.TemporaryDirectory() as tmp:
             probe = Path(tmp) / f"check{path.suffix}"

@@ -58,6 +58,10 @@ async def analyze_url_endpoint(req: AnalyzeURLRequest, _user: User = Depends(lim
     """Perform live DOM element extraction, security/a11y audit, and QA synthesis on any URL."""
     if not req.url.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A URL is required.")
+    try:
+        URLAnalyzerService.normalize_url(req.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return await URLAnalyzerService.analyze_live_website(
         url=req.url,
         prompt=req.prompt,
