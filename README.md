@@ -1,1349 +1,184 @@
-# TestSphere-AI: Autonomous Agentic QA & Self-Healing Testing Platform
+# TestSphere AI — Autonomous QA & Self-Healing Testing Platform
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
-[![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
 [![CI](https://github.com/Krishna201i/TestSphere-AI-Autonomous-Agentic-QA-Self-Healing-Testing-Platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Krishna201i/TestSphere-AI-Autonomous-Agentic-QA-Self-Healing-Testing-Platform/actions/workflows/ci.yml)
-[![Engine](https://img.shields.io/badge/Engine-Playwright-orange.svg)]()
-[![Backend](https://img.shields.io/badge/Backend-FastAPI-teal.svg)]()
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Engine](https://img.shields.io/badge/Engine-Playwright-orange.svg)](https://playwright.dev/)
+[![Backend](https://img.shields.io/badge/Backend-FastAPI-teal.svg)](https://fastapi.tiangolo.com/)
+[![Frontend](https://img.shields.io/badge/Dashboard-React-61dafb.svg)](https://react.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**TestSphere-AI** is an intelligent, multi-agent autonomous testing platform designed to plan, generate, execute, analyze, and self-heal end-to-end web application tests.
+TestSphere AI tests a web application end to end on its own. Give it a URL, and optionally a goal in plain
+words and a Git repository. It reads the code, plans browser tests, runs them in Chromium, repairs broken
+locators while the test runs, scans the site for security weaknesses, and turns fixable findings into a patch
+or a pull request for your repository. Each fix is retested, a verified version can be deployed with automatic
+rollback, and the whole loop runs again on a schedule or on every push.
 
 ---
 
-## ✅ Current Status (October 2026)
+## The testing loop
 
-| Area | State | What works |
-| --- | --- | --- |
-| AI QA Agent | Live | Plans tests from a live page, runs them in Playwright, records results |
-| Locator self-healing | Live | `engine/healer.py`: stored fallbacks, then fingerprint scoring; refuses tag changes and ambiguous matches |
-| LLM | Live (opt-in) | `LLM_PROVIDER=api` for any OpenAI-compatible API (OpenAI, Gemini, Groq, OpenRouter, Ollama Cloud); `LLM_PROVIDER=local` for a model on your own machine (Ollama, vLLM, LM Studio); `mock` stays the offline default |
-| Attacker Agent | Live (passive) | `security/`: scope-checked passive scan (headers, cookies, CORS, TLS, forms); no attack payloads |
-| Remediation | Partial | Fix proposals for header/cookie findings, human approval, retest; source-code patches not built |
-| Validation | Live | Security retests and test re-execution; findings auto-resolve or reopen as regressions |
-| Audit trail | Live | Scans, approvals, retests, QA runs and targets stored server-side (`/api/audit`) |
-| Database | Live | Firebase Cloud Firestore behind a `Store` interface (`backend/database/store.py`); local JSON file for offline dev |
-| Healing memory | Live | Persisted in the database across restarts |
-| Codebase ingestion (5.1) | Live | `ingestion/`: public Git URL or local folder → blueprint (languages, frameworks, dependencies, test suites, HTTP routes, committed secrets); static only |
-| Sign-in & data isolation | Live | Firebase Authentication; every document carries `owner_uid` and other users' ids answer 404 |
-| Abuse protection | Live | SSRF guard on server requests and on everything the test browser fetches (`backend/netguard.py`, `engine/egress.py`); per-user run limit (429); concurrent-browser cap |
-| CI | Live | `.github/workflows/ci.yml`: locked deps, tests, lint, `pip-audit`, frontend build, `npm audit` |
-| Deployment & rollback (5.7) | Not built | |
+```
+ 1 Codebase ingestion ─▶ 2A AI QA agent ─▶ 2B Attacker agent ─▶ 3 Unified report
+          ▲                                                            │
+          │                                                            ▼
+ 6 Verified deploy ◀──────── 5 Validation engine ◀──────────── 4 AI remediation
+    (health checks,          (retest; a failed retest           (fix proposals, patches,
+     smoke tests, rollback)   goes back to 4)                    pull requests, human approval)
+```
 
-**Self-healing benchmark** (`python -m engine.heal_benchmark`): 277 broken-locator cases — 4 pages × every test target × 15 mutation operators. TestSphere heals **95.2%** of the cases where healing is right with **0 false heals**, and refuses **100%** of the cases where the target is gone or became a different element. A static fallback chain (first unique fallback, like `locator.or(...)`) heals 96.1% but **17.4%** of its heals land on the wrong element, and it refuses only 40.0%. Ground truth is element identity; see [docs/healing-benchmark.md](docs/healing-benchmark.md). The original 6-mutant benchmark is still `python -m engine.benchmark`.
+| Stage | What it does |
+| --- | --- |
+| **1. Codebase ingestion** | Clones a public repository (or reads a local folder in development) and builds a blueprint: languages, frameworks, dependencies, existing test suites, HTTP routes, committed secrets and debug flags. Nothing in the repository is executed. |
+| **2A. AI QA agent** | Analyzes the live page (rendering JavaScript apps in a real browser), turns the written goal into steps using the values it contains, plans smoke, scenario, content and linked-page tests, and runs them in Playwright. |
+| **Self-healing** | When a locator breaks, the engine tries stored fallbacks, then a fingerprint scan of the live DOM, scoring attributes, text, position and structure. It refuses look-alikes and elements whose kind changed. |
+| **2B. Attacker agent** | Passive, scope-checked security scan: headers, cookies, CORS, TLS, forms, information disclosure. One GET per page and no payloads, limited to hosts the server allows. |
+| **3. Unified report** | Test results, regressions since the previous run, flaky tests and security findings in one report, with screenshots, DOM snapshots and Playwright traces for every test. |
+| **4. AI remediation** | Fix proposals a human approves, and fix patches against the app's own code (FastAPI, Flask, Django, Express, nginx), syntax-checked and opened as a GitHub pull request in one click. |
+| **5. Validation engine** | Re-runs the original check after a fix; findings resolve or reopen as regressions. |
+| **6. Verified deploy** | Calls the deploy hook (Render, Vercel, Netlify), waits for the new version to be healthy, runs smoke tests, and rolls back automatically if either fails. |
 
-**Load** (`python scripts/loadtest.py`, see [docs/load-test.md](docs/load-test.md)): the dashboard API serves ~600–700 requests/s from 1 to 100 concurrent clients (p95 250 ms at 100, no errors); 8 pipeline runs started together finish in 27 s with the server and Chromium peaking at ~460 MB.
+Around the loop: scheduled runs and GitHub push webhooks, commit statuses on GitHub, Slack alerts, JUnit XML
+export, quarantine for known-bad tests, an audit trail of every action, sign-in with per-user data isolation,
+and a dashboard that shows the loop live.
 
 ---
 
-## 📚 Technical Documentation Index
+## Results
 
-For in-depth architectural and developer documentation, explore our detailed guides:
-
-- 📖 **[Backend Architecture & API Specification](docs/backend-architecture.md)**: Firestore collections and the `Store` interface, FastAPI REST routes, service transaction boundaries, and SSE streaming.
-- 🎭 **[Browser Execution Engine Guide](docs/engine-architecture.md)**: Playwright lifecycle, `BrowserSession`, multi-tier `LocatorResolver`, and forensic screenshot/DOM artifact extraction.
-- 🔄 **[Self-Healing & Autonomous Orchestration](docs/self-healing-orchestration.md)**: Closed-loop self-healing lifecycle, failure categorization, candidate generation, and dynamic schema bridging.
-- 🔌 **[End-to-End Integration Guide](docs/integration-guide.md)**: Multi-agent coordination, offline mock vs cloud LLM providers, and real-time frontend streaming.
-- 🚢 **[Deployment & Operations Guide](docs/deployment-operations.md)**: Environment variables, Render/Vercel deployment, the [`Dockerfile`](Dockerfile), and CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
-- 🧠 **[Member 1 AI Agent Architecture](docs/member1-architecture.md)**: Deep dive into LLM prompt engineering, schema validation, and planner contracts.
-
----
-
-## 👥 Architecture & Division of Labor
-
-- **Member 1: AI Agent & Intelligence Layer**:
-  - LLM integration & provider-independent client abstraction (`LLMClientSession`, `LLMClient`)
-  - Test Planner Agent (test generation, controlled actions/assertions, prioritization, validation)
-  - Failure Analyzer Agent (classification & root cause analysis)
-  - Self-Healing Agent (selector ranking & confidence scoring)
-  - Healing Memory & historical learning
-  - Agent Orchestration & pipeline controller
-
-- **Member 2: Browser Execution Engine**:
-  - Playwright browser automation (Chromium)
-  - DOM snapshot & screenshot extraction
-  - Deterministic step execution engine (`PlaywrightRunner`)
-  - Selector healing execution & validation
-
-- **Member 3: Platform Backend & Multi-Agent Orchestration — Prashansha Maheshwari**:
-  - **Live Real-World Website Analyzer & DOM Synthesis Engine**: Engineered [`URLAnalyzerService`](backend/services/url_analyzer.py) to inspect any target website URL live over HTTP/HTTPS, extracting real DOM interactive elements (inputs, buttons, forms, links, headings), auditing SSL security & accessibility compliance, and synthesizing real Playwright test suites dynamically.
-  - **Full-Stack Orchestration Bridge**: Architected and developed [`PlatformWorkflowOrchestrator`](backend/orchestration/orchestrator.py), seamlessly binding Member 1's cognitive AI agents and Member 2's browser automation into an automated, self-healing test execution pipeline.
-  - **Production Database Migration & Clean State**: Connected Supabase PostgreSQL via resilient IPv4 pooler configuration, completely purged legacy dummy/mock records, and disabled auto-seeding to ensure only 100% genuine real-world testing analytics are captured. *(PostgreSQL was later replaced by Firebase Cloud Firestore.)*
-  - **Instant Live QA Dashboard Experience**: Integrated a sleek **Real Live Website QA Analyzer** hero bar into the dashboard frontend, providing 1-click live testing with quick presets (`The Internet (Login)`, `Playwright TodoMVC`, `Hacker News`, `Example Domain`), real DOM selector trees, and real-time execution streaming.
-  - **Bidirectional Schema Converters**: Designed [`converters.py`](backend/orchestration/converters.py) enabling zero-loss data interchange between Member 1 planner schemas and Member 2 Playwright engine representations.
-  - **REST APIs & Real-Time SSE Telemetry**: Engineered high-throughput FastAPI endpoints ([`backend/api/`](backend/api/)) and Server-Sent Events (SSE) streaming for real-time test step monitoring, execution progress, and live healing event notifications.
-  - **Relational Persistence Layer**: Implemented declarative SQLAlchemy models ([`backend/models/`](backend/models/)) and atomic CRUD service architecture ([`backend/services/`](backend/services/)) supporting both SQLite and PostgreSQL. *(Later replaced by the `Store` interface over Firestore, [`backend/database/store.py`](backend/database/store.py).)*
-  - **Backend Test Suite**: Authored 83 passing unit and integration tests covering database transactions, service boundaries, and REST/SSE API endpoints.
-  - **System Consolidation & Conflict Resolution**: Merged and integrated all member branches into a cohesive production codebase, resolved git merge conflicts, eliminated obsolete duplicate artifacts, and updated [`.gitignore`](.gitignore).
-  - **Technical Documentation & Governance**: Authored comprehensive technical documentation covering backend architecture, engine internals, self-healing lifecycle, integration guide, deployment/DevOps operations, and contributing guidelines.
+| Measurement | Result |
+| --- | --- |
+| **Self-healing benchmark** — 277 broken-locator cases (4 pages × every target × 15 mutations), [details](docs/healing-benchmark.md) | Heals **95.2%** of the cases where healing is right with **0 false heals**, and refuses **100%** of the cases where it is wrong. A static fallback chain heals 96.1% but **17.4%** of its heals hit the wrong element. |
+| **Live sites** — the-internet.herokuapp.com, saucedemo.com, practicetestautomation.com, TodoMVC | 4 of 4 run the written goal (log in, add an item) and pass |
+| **Real repositories** — FastAPI, Express and Django RealWorld apps, microblog, Flask | 5 of 5 get a fix patch that applies to a fresh clone and compiles |
+| **Security and robustness** — SSRF, access control, input limits, webhook signatures, rate limits | 52 of 52 checks pass |
+| **Load** — one API worker, [details](docs/load-test.md) | ~600–700 requests/s from 1 to 100 concurrent clients (p95 250 ms, no errors); 8 pipeline runs at once finish in 27 s at ~460 MB |
+| **Accessibility** | WCAG 2.1 AA (axe) on every dashboard page, light and dark |
+| **Automated tests** | 1,550+ backend, engine and end-to-end tests, plus frontend unit tests, in CI |
 
 ---
 
-## 🌟 Core Contributors
+## Architecture
 
-| Contributor | Role & Domain | Key Contributions & Impact |
-| :--- | :--- | :--- |
-| **Prashansha Maheshwari** | **Member 3: Platform Backend & Orchestration** | FastAPI backend, Supabase PostgreSQL pooler, `URLAnalyzerService` live DOM discovery & health auditing, `PlatformWorkflowOrchestrator`, bidirectional schema converters, SSE live streaming, Instant Live QA dashboard, dummy data purge, architecture documentation, repo consolidation |
-| **Vinamra Bhatnagar** | **Member 1: AI Agent & Intelligence Layer** | LLM client abstraction, Test Planner Agent, Failure Analyzer Agent, Self-Healing candidate generator & scoring, memory store |
-| **Krishna Singh** | **Member 2: Browser Execution Engine** | Playwright browser automation, DOM snapshot/screenshot capture, `PlaywrightRunner`, smart locators, failure detector |
+```
+frontend/  React dashboard ──────────────▶ backend/  FastAPI
+                                             │  api/            REST endpoints
+                                             │  pipeline/       pipeline runner, scheduler, verified deploy
+                                             │  orchestration/  ties the agents to the engine
+                                             │  database/       Store interface: Firestore, local JSON, memory
+                                             │  artifacts.py    screenshots, DOM snapshots, traces (disk or GCS)
+                                             │  github.py, notify.py, netguard.py, http_hardening.py
+                                             ▼
+        agents/   planner, failure analyzer, healing decisions, memory, LLM client
+        engine/   Playwright runner, locator healing, egress guard, benchmarks
+        security/ passive scanner, remediation proposals, fix patcher
+        ingestion/ repository blueprint
+```
+
+| Folder | Contents |
+| --- | --- |
+| [`agents/`](agents/) | Test Planner, Failure Analyzer, healing decision engine, healing memory, agent orchestrator and recovery policy, provider-independent LLM client (mock, local, OpenAI-compatible API) |
+| [`engine/`](engine/) | Playwright execution engine, locator healer, outbound request guard for the browser, healing benchmarks |
+| [`backend/`](backend/) | FastAPI API, automated pipeline and scheduler, verified deploy, artifact store, integrations (GitHub, Slack), sign-in and data isolation, request hardening |
+| [`frontend/`](frontend/) | React dashboard with its design system, live pipeline loop, run pages, reports, security, profile and privacy pages |
+| [`security/`](security/) | Passive security scanner, remediation proposals, fix patch generator |
+| [`ingestion/`](ingestion/) | Repository cloning and static analysis |
+| [`tests/`](tests/) | Unit, integration, engine and end-to-end tests |
+| [`scripts/`](scripts/) | Load test |
+| [`docs/`](docs/) | Architecture, operations and benchmark reports |
 
 ---
 
-## 🏛️ AI Agent Pipeline & Architecture
+## Team
 
-```
-ApplicationContext
-        │
-        ▼
-┌───────────────────────────┐
-│     Test Planner Agent    │  ──> Generates structured TestCase & TestPlan models
-└─────────────┬─────────────┘
-              │
-              ▼
-         TestPlan / list[TestCase]
-              │
-              ▼
-┌───────────────────────────┐
-│ Member 2 Execution Engine │  ──> Executes tests with Playwright
-└─────────────┬─────────────┘
-              │
-        ┌─────┴─────┐
-        │           │
-      PASS        FAIL
-        │           │
-        ▼           ▼
-     Report    TestFailure
-                    │
-                    ▼
-       ┌───────────────────────────┐
-       │   Failure Analysis Agent  │  ──> Categorizes failure & root cause
-       └────────────┬──────────────┘
-                    │
-                    ▼
-             FailureAnalysis
-          (healable? confidence?)
-                    │
-              ┌─────┴─────┐
-              │           │
-         [healable]  [not healable]
-              │           │
-              ▼           ▼
-    ┌──────────────────┐ Report
-    │Self-Healing Agent│ ──> Generates candidate selectors with DOM evidence
-    └─────────┬────────┘
-              │
-              ▼
-       HealingCandidate
-              │
-              ▼
-    ┌──────────────────┐
-    │Member 2 Validate │ ──> Tests proposed selector in browser
-    └─────────┬────────┘
-              │
-        ┌─────┴─────┐
-        │           │
-     SUCCESS     FAILURE
-        │           │
-        ▼           ▼
-    ┌───────────┐ Report
-    │  Memory   │ ──> Records outcome in HealingMemory
-    └───────────┘
-```
+| Member | Area | Main folders | Branch |
+| --- | --- | --- | --- |
+| **Vinamra Bhatnagar** | Member 1 — AI agents & intelligence | `agents/` | [`vinamra-branch`](../../tree/vinamra-branch) |
+| **Krishna Singh** | Member 2 — Browser engine, self-healing & security testing | `engine/`, `security/`, `ingestion/`, `scripts/` | [`krishna-branch`](../../tree/krishna-branch) |
+| **Prashansha Maheshwari** | Member 3 — Platform backend, pipeline & dashboard | `backend/`, `frontend/`, `docs/` | [`prashansha-branch`](../../tree/prashansha-branch) |
+
+Each member branch contains the full project; its README describes that member's part in detail.
+Work is merged into `main` through pull requests that pass CI.
 
 ---
 
-## 🧠 Test Planner Agent — Generation Pipeline (Day 4 + Day 5)
-
-The **Test Planner Agent** converts structured application information into meaningful, executable test plans via a complete end-to-end generation pipeline.
-
-```
-ApplicationContext
-        │
-        ▼
-┌───────────────────────────┐
-│    Input Validation       │  ──> Validates app name, URL, pages, elements
-└─────────────┬─────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│       LLMTestPlanner      │  ──> Prompt construction + LLM invocation
-│  • System Prompt          │
-│  • Action/Assertion Vocab │
-│  • Context Serialization  │
-└─────────────┬─────────────┘
-              │ (generate_json)
-              ▼
-┌───────────────────────────┐
-│     LLMClientSession      │  ──> Provider-independent client (retry + validation)
-└─────────────┬─────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│      MockLLMProvider      │  ──> Deterministic mock (9 scenarios)
-└─────────────┬─────────────┘
-              │
-              ▼
-        Raw JSON Response
-              │
-              ▼
-┌───────────────────────────┐
-│    Response Parsing       │  ──> JSON → TestPlan via Pydantic model_validate
-└─────────────┬─────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│  Business-Rule Validation │  ──> Action requirements, assertion contracts
-└─────────────┬─────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│   Duplicate Detection     │  ──> Signature-based deduplication
-└─────────────┬─────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│ Element Ref Validation    │  ──> Rejects hallucinated element targets
-└─────────────┬─────────────┘
-              │
-              ▼
-   Valid TestPlan / Cases
-```
-
-### Key Capabilities (Day 4 + Day 5):
-- **Rich Context Schemas**: `ElementContext` (tags, attributes, classes, accessibility roles, selectors, visibility/interactability), `PageContext` (title, elements, forms, navigation elements), and `ApplicationContext`.
-- **Controlled Action Vocabulary (`TestAction`)**: 8 strictly supported browser actions (`navigate`, `click`, `fill`, `select`, `check`, `uncheck`, `press`, `wait`) with mapped parameter requirements (target/value).
-- **Controlled Assertion Vocabulary (`AssertionType`)**: 7 verifiable assertion types (`element_visible`, `element_not_visible`, `element_contains_text`, `element_has_text`, `url_contains`, `url_equals`, `value_equals`).
-- **Standardized Categories & Priorities**: 7 test categories (`functional`, `negative`, `boundary`, `smoke`, `regression`, `edge_case`, `accessibility`) and 4 priorities (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`).
-- **Two-Layer Validation**: Pydantic structural validation + domain business rules in `agents/planner/validation.py` (checks required targets/values per action, non-duplicate step numbering, duplicate test IDs, and assertion contracts).
-- **Prompt Architecture**: Modular, reusable prompt building blocks in `agents/planner/prompts.py` (system instructions, vocabulary tables, category/priority definitions, JSON output constraints).
-- **Deterministic Mock Scenarios**: 9 mock LLM response fixtures in `agents/planner/mock_scenarios.py` covering valid plans, empty plans, malformed JSON, unsupported actions, missing fields, invalid categories/priorities, hallucinated elements, and duplicate test cases.
-- **Full Generation Pipeline (Day 5)**: `LLMTestPlanner.generate_tests()` and `generate_test_plan()` — complete flow from ApplicationContext through prompt construction, LLM invocation, response parsing, validation, duplicate detection, and element reference checking.
-- **Hallucinated Element Detection**: `validate_element_references()` checks step targets against selectors derivable from the ApplicationContext (IDs, names, tags, data-testid, text, placeholders).
-- **Duplicate Test Case Detection**: `detect_duplicate_test_cases()` uses signature-based matching (name + category + action:target sequence) to remove identical or near-identical test cases.
-- **Provider-Independent**: Swapping `MockLLMProvider` for a real `LocalLLMProvider` requires zero changes to the planner code.
-
----
-
-## 🤖 LLM Client Architecture (Day 2 & Day 3 Foundation)
-
-All AI agents interact with models strictly through the provider-independent `LLMClientSession` and `LLMClient` interfaces:
-
-```
-                ┌───────────────────┐
-                │     AI AGENTS     │
-                │ Planner / Healer  │
-                └─────────┬─────────┘
-                          │ (generate, generate_json, complete)
-                          ▼
-                ┌───────────────────┐
-                │  LLMClientSession │  ──> Request validation, normalization,
-                └─────────┬─────────┘      retry logic, timeout & error translation
-                          │
-                          ▼
-                ┌───────────────────┐
-                │     LLMClient     │  ──> Abstract provider interface
-                └─────────┬─────────┘
-                          │
-                  ┌───────┴────────┐
-                  ▼                ▼
-          MockLLMProvider   Future Providers (Local / API)
-                  │                │
-             Deterministic     Ollama / Cloud Models
-             Mock Registry
-```
-
-### Key LLM Client Features:
-- **Provider Independence**: Switch between `mock` (default, offline) and `api` (any OpenAI-compatible chat API: OpenAI, Anthropic, Gemini, Groq, OpenRouter) via `LLM_PROVIDER`; `local` is reserved.
-- **Request Validation**: Enforces prompt presence, valid sampling parameters (`temperature` 0.0–2.0, `max_tokens` > 0), and supported response formats.
-- **Response Normalization**: Uniform standard `LLMResponse` models with populated provider/model metadata and token usage stats.
-- **Resilient Retry Logic**: Automatically retries transient errors (`LLMProviderError`, `LLMTimeoutError`, `LLMConnectionError`, `LLMRateLimitError`) up to configured `LLM_MAX_RETRIES`.
-- **Error Hierarchy**: 10 granular exception types rooted in `LLMError` with `is_retryable` property (including `LLMParsingError` and `LLMSchemaValidationError`).
-- **Mock Response Registry**: Flexible offline mocking by prompt pattern matching, custom error injection, and transient failure sequence testing.
-- **Zero Secrets Logged / Committed**: Strict safeguards ensure credentials and raw API keys are never logged or committed.
-
----
-
-## 🛡️ LLM Response Validation & Hardening (Day 6)
-
-Day 6 focused on hardening the LLM response processing pipeline and resolving mock scenario registry matching issues:
-
-- **Response Normalization Bug Fix**: Fixed logic bug in `LLMClientSession._normalize_response()` where `not content and not tool_calls` previously allowed empty text responses through when tool calls were absent.
-- **Strict Content Guardrails**: Enforced explicit type validation ensuring `content` is a non-empty string when no tool calls are present (rejecting `None`, empty string, whitespace-only, numbers, dicts, or lists).
-- **Error Finish Reason Handling**: Enforced that responses with `finish_reason="error"` are rejected immediately with `LLMResponseError`.
-- **Granular Exception Hierarchy**: Added `LLMParsingError` (for malformed/unparseable JSON) and `LLMSchemaValidationError` (for Pydantic model validation failures), both cleanly inheriting from `LLMResponseError`.
-- **ResponseParser Modernization**: `ResponseParser.parse_json()` now raises `LLMParsingError` with raw content diagnostics, and `ResponseParser.parse_model()` now raises `LLMSchemaValidationError` with target schema metadata.
-- **Case-Insensitive Mock Matching**: `MockLLMProvider` pattern matching now normalizes prompts and registry keys via `.lower()` comparison so matching is resilient to casing discrepancies.
-- **Planner Mock Scenario Alignment**: Aligned the default planner mock scenario key (`"Generate up to"`) with the real prompt prefix generated by `LLMTestPlanner.generate_tests()`, and added `register_default_planner_scenario(client)` for clean test setup.
-- **41 New Regression Tests**: Added `tests/test_day6_response_validation.py` covering all edge cases, bringing the test suite to 380 passing tests.
-
----
-
-## 🦜 LangChain Integration for Test Planner (Day 7)
-
-Day 7 introduces LangChain into the Test Planner pipeline while fully preserving the existing architecture, provider independence, and 100% offline determinism:
-
-```
-ApplicationContext
-        │
-        ▼
-┌─────────────────────────────────┐
-│   TestPlannerPromptTemplate     │  ──> LangChain ChatPromptTemplate management
-│   (System + Human Messages)     │      with modular section partialing
-└───────────────┬─────────────────┘
-                │ Formatted Messages
-                ▼
-┌─────────────────────────────────┐
-│   LangChainPlanningAdapter      │  ──> Bridges LangChain templates with LLMClientSession;
-│                                 │      handles message conversion & generation parameters
-└───────────────┬─────────────────┘
-                │
-                ▼
-┌─────────────────────────────────┐
-│      LLMClientSession           │  ──> Provider-independent execution (MockLLMProvider)
-└───────────────┬─────────────────┘
-                │ Raw String / JSON
-                ▼
-┌─────────────────────────────────┐
-│   StructuredOutputProcessor     │  ──> Markdown code-fence stripping, type coercion,
-│                                 │      Pydantic schema validation (TestPlan / TestCase)
-└───────────────┬─────────────────┘
-                │ Validated Pydantic Models
-                ▼
-┌─────────────────────────────────┐
-│    Business-Rule Validation     │  ──> Domain rule enforcement (actions, assertions)
-└───────────────┬─────────────────┘
-                │
-                ▼
-┌─────────────────────────────────┐
-│   Duplicate Detection & Element │  ──> Signature deduplication & hallucination filtering
-│         Ref Validation          │
-└───────────────┬─────────────────┘
-                │
-                ▼
-     Final Validated TestPlan
-```
-
-### Key Components & Capabilities:
-- **`TestPlannerPromptTemplate` (`agents/planner/langchain_prompts.py`)**:
-  - Leverages LangChain's `ChatPromptTemplate`, `SystemMessagePromptTemplate`, and `HumanMessagePromptTemplate`.
-  - Encapsulates system instructions, controlled action/assertion vocabularies, schema rules, and contextual formatting.
-  - Supports custom prompt overrides, serialization helpers, and direct string/message generation.
-- **`LangChainPlanningAdapter` (`agents/planner/langchain_adapter.py`)**:
-  - Bridges LangChain prompt management with the project's internal `LLMClientSession`.
-  - Converts LangChain messages into formatted LLM prompts with appropriate generation parameters (`temperature`, `max_tokens`, `response_format`).
-  - Implements fail-safe fallbacks: cleanly returns raw content or structured dicts even on formatting edge cases.
-- **`StructuredOutputProcessor` (`agents/planner/structured_output.py`)**:
-  - Robust post-processing for LLM outputs: strips markdown code fences (````json ... ````), extracts JSON payloads from mixed text, coerces string step numbers and enum casing.
-  - Validates outputs against Pydantic schemas (`TestPlan`, `TestCase`, `TestStep`, `Assertion`) with clear diagnostics and `StructuredOutputError`.
-- **`LangChainTestPlanner` (`agents/planner/planner.py`)**:
-  - Direct extension of the generation pipeline powered by LangChain orchestration.
-  - Supports `generate_tests()`, `generate_test_plan()`, deduplication, and element reference validation.
-  - Completely backwards-compatible: existing `LLMTestPlanner` remains untouched as a drop-in alternative.
-- **100% Offline & Zero API Keys**:
-  - Fully compatible with `MockLLMProvider` and existing mock scenario fixtures.
-  - Zero external cloud calls required for local execution and automated testing.
-- **95 Comprehensive Tests**:
-  - Added `tests/test_day7_langchain_integration.py` testing prompt templates, adapter behavior, structured output parsing/coercion, end-to-end planning, mock scenarios, error handling, and regression parity.
-  - Overall test suite expanded from 380 to **475 passing tests**.
-
----
-
-## 🧠 Historical Memory & Context Management Layer (Day 8)
-
-Day 8 introduces the foundation for historical test execution tracking, failure pattern querying, UI element snapshot evolution, and context comparison, establishing the memory subsystem for self-healing and adaptive test planning:
-
-```
-Test Execution / UI Run / Self-Healing Event
-                      │
-                      ▼
-┌───────────────────────────────────────────┐
-│              MemoryStore (ABC)            │  ──> Storage-independent memory abstraction
-│  (store/query executions, failures, etc.) │      defining contract for all backends
-└─────────────────────┬─────────────────────┘
-                      │
-                      ▼
-┌───────────────────────────────────────────┐
-│              InMemoryStore                │  ──> High-performance dict-backed store:
-│  • Execution history (by test/app/status) │      - Isolated deep copies on store/retrieve
-│  • Failure query index                    │      - Pagination (limit & offset)
-│  • Element snapshot tracking by page      │      - Element snapshot history & timelines
-│  • Healing history & pattern lookups      │      - Selector-based healing rate queries
-└─────────────────────┬─────────────────────┘
-                      │
-                      ▼
-┌───────────────────────────────────────────┐
-│             ContextComparator             │  ──> UI Context Diff Engine:
-│  • compare_contexts(prev, current)        │      - Detects ADDED, REMOVED, MODIFIED
-│  • compare_element_snapshots(e1, e2)      │      - Multi-attribute tracking & field diffs
-│  • ChangeType & FieldChange detail        │      - Structural tag/selector change detection
-└───────────────────────────────────────────┘
-```
-
-### Key Components & Capabilities:
-- **`MemoryStore` Interface (`agents/memory/memory_interface.py`)**:
-  - Storage-independent Abstract Base Class defining contracts for storing/querying test executions, failure histories, element snapshots, and healing attempts.
-  - Future-ready for SQLite, PostgreSQL, MongoDB, or vector database backends without changing downstream agent interfaces.
-- **`InMemoryStore` (`agents/memory/in_memory_store.py`)**:
-  - Complete concrete implementation with in-memory indexes for fast retrieval.
-  - Safe mutation handling using deep copying to prevent shared mutable state leaks.
-  - Comprehensive query capabilities: filtering by `test_name`, `app_name`, `status`, pagination (`limit`, `offset`), failure filtering, element versioning, and selector-based healing success rates.
-- **`ContextComparator` (`agents/memory/context_comparator.py`)**:
-  - Deterministic UI element diff engine comparing element snapshots across test runs or page context transitions.
-  - Classifies changes as `ADDED`, `REMOVED`, `MODIFIED`, or `UNCHANGED`.
-  - Pinpoints specific field-level attribute variations (`tag_name`, `selector`, `attributes`, `text_content`, `is_interactive`) with `FieldChange` records.
-- **Pydantic Memory Schemas (`agents/memory/memory_schemas.py`)**:
-  - Strictly typed contracts: `TestExecutionRecord`, `FailureInfo`, `ElementRecord`, `HealingRecord`, `FieldChange`, and `ContextComparisonResult`.
-  - Schema-level validations: ISO timestamps, positive durations, probability ranges (`0.0 <= success_rate <= 1.0`), and non-empty selector constraints.
-- **New Core Enums (`agents/schemas/enums.py`)**:
-  - `ExecutionStatus`: `PASSED`, `FAILED`, `ERROR`, `SKIPPED`, `RUNNING`.
-  - `ChangeType`: `ADDED`, `REMOVED`, `MODIFIED`, `UNCHANGED`.
-- **57 Comprehensive Tests**:
-  - Added `tests/test_day8_memory.py` covering model validations, pagination, filtering, snapshot versioning, healing rate tracking, context comparison diffs, and immutability.
-  - Overall test suite expanded from 475 to **532 passing tests** (100% offline, 0 failures).
-
----
-
-## 🔍 Failure Analysis Agent (Day 9)
-
-Day 9 introduces the **Failure Analysis Agent**, diagnosing test execution failures and identifying their root cause across five distinct signals without performing self-healing directly:
-
-```
-                  ┌──────────────────────────────────────────────┐
-                  │                Failure Context               │
-                  │  (test_name, step, selector, error message)  │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-        ┌────────────────────────────────┼───────────────────────────────┐
-        ▼                                ▼                               ▼
-┌───────────────┐              ┌───────────────────┐           ┌───────────────────┐
-│ Memory Store  │              │  Element Context  │           │Structured Evidence│
-│  & Execution  │              │(previous snapshot │           │ (console logs,    │
-│    History    │              │ vs. current DOM)  │           │ network errors,   │
-│  (flakiness,  │              │(tag, attrs, text, │           │  screenshot URL)  │
-│  recurrence)  │              │ similarity drift) │           │                   │
-└───────┬───────┘              └─────────┬─────────┘           └─────────┬─────────┘
-        │                                │                               │
-        └────────────────────────────────┼───────────────────────────────┘
-                                         ▼
-        ┌────────────────────────────────────────────────────────────────┐
-        │            RuleBasedFailureAnalyzer / Multi-Signal Engine      │
-        │  • Error pattern heuristic matching & category classification │
-        │  • Context comparator & DOM attribute drift analysis          │
-        │  • Execution history recurrence & flakiness evaluation        │
-        │  • Structured evidence correlation (network/console/status)   │
-        │  • Self-healing candidate qualification & strategy generation │
-        └────────────────────────────────┬───────────────────────────────┘
-                                         │
-                                         ▼
-        ┌────────────────────────────────────────────────────────────────┐
-        │                     FailureAnalysisResult                      │
-        │  • failure_type & failure_category (SELECTOR_ISSUE, etc.)      │
-        │  • root_cause & detailed diagnostic explanation                │
-        │  • confidence & confidence_level (HIGH, MEDIUM, LOW)           │
-        │  • is_retryable & eligible_for_self_healing                    │
-        │  • suggested_strategies (candidate selectors & heuristics)     │
-        └────────────────────────────────────────────────────────────────┘
-```
-
-### Key Components & Capabilities:
-- **`FailureAnalysisAgent` & `RuleBasedFailureAnalyzer` (`agents/analyzer/analyzer.py`)**:
-  - Abstract base agent interface (`FailureAnalysisAgent`) defining `analyze_failure()` with full multi-signal context support (`execution_history`, `previous_element_context`, `current_element_context`, `structured_evidence`), along with backward-compatible single-argument `analyze()`.
-  - Concrete rule-based heuristic diagnostic engine (`RuleBasedFailureAnalyzer`) operating fully offline with zero mandatory LLM token overhead.
-  - Multi-signal diagnosis: error pattern heuristics, historical memory querying, DOM element drift comparison, evidence correlation, and confidence scoring.
-- **Strict Self-Healing Boundary**:
-  - The analyzer's sole responsibility is **diagnosis**, classifying root causes and qualifying whether a failure is eligible for self-healing (`eligible_for_self_healing = True/False`).
-  - It proposes healing strategies (`suggested_strategies`) but explicitly leaves selector mutation and execution to the future Self-Healing Agent (Day 10) and Execution Engine (Member 2).
-- **Pydantic Failure Schemas (`agents/analyzer/schemas.py`)**:
-  - `FailureContext`: Test name, step index/description, failed selector, error message, stack trace, timestamp, and optional page/app context.
-  - `PreviousExecutionSummary`: Total runs, pass/fail counts, failure rate, consecutive failures, and last pass/fail timestamps.
-  - `ElementContextSnapshot`: Structured snapshot of element attributes, tag, text, and selector before/after failure.
-  - `FailureEvidence`: Screenshots, console logs, network error logs, HTTP response codes, and page title.
-  - `FailureAnalysisResult`: Structured diagnosis with `root_cause`, `failure_type`, `failure_category`, calibrated numeric `confidence`, `confidence_level`, `is_retryable`, `eligible_for_self_healing`, `suggested_strategies`, and evidence references.
-- **Core Enums & Contracts (`agents/schemas/enums.py`)**:
-  - `FailureCategory`: `SELECTOR_ISSUE`, `TIMING_ISSUE`, `APPLICATION_BUG`, `ENVIRONMENT_ISSUE`, `TEST_DATA_ISSUE`, `UNKNOWN`.
-  - `ConfidenceLevel`: `HIGH`, `MEDIUM`, `LOW`.
-  - `FailureType.SELECTOR_CHANGED`: Added to existing failure types (`ELEMENT_NOT_FOUND`, `TIMEOUT`, `ASSERTION_FAILED`, etc.).
-- **Seamless Memory & Context Integration**:
-  - Direct integration with Day 8 `MemoryStore` (`InMemoryStore`) and `ContextComparator` to automatically query historical runs and compute DOM element diffs.
-- **Full Backward Compatibility**:
-  - `TestFailure = FailureContext` and `FailureAnalysis = FailureAnalysisResult` aliases preserve backwards compatibility with all earlier modules and tests.
-- **61 Comprehensive Unit Tests (`tests/test_day9_failure_analyzer.py`)**:
-  - Thorough testing covering selector drift, timeouts, assertions, network crashes, multi-signal evidence, confidence level calculation, memory store integration, and immutability.
-  - Overall test suite expanded from 532 to **593 passing tests** (100% offline, 0 failures).
-
----
-
-## 🩹 Self-Healing Decision & Candidate Generation Foundation (Day 10)
-
-Day 10 establishes the foundation of the **Self-Healing Decision Layer** — the intelligence engine bridging the Failure Analyzer (Day 9) with Member 2's Test Execution Engine. It evaluates failure context, searches both current DOM elements and historical healing records, scores candidates deterministically across multiple weighted dimensions, enforces safety guardrails, and outputs structured `HealingRecommendation` contracts.
-
-```
-Failed Test Execution
-         │
-         ▼
-┌─────────────────────────────────┐
-│     Failure Analyzer (Day 9)    │  ──> FailureAnalysisResult (root cause, failure category)
-└────────────────┬────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────┐
-│  Healing Decision Engine (Day 10) │
-│  ┌───────────────────────────┐  │
-│  │ 1. Safety Rules Guardrail │  │  ──> Blocks ASSERTION_FAILED, NETWORK_ERROR, etc.
-│  └─────────────┬─────────────┘  │
-│                ▼                │
-│  ┌───────────────────────────┐  │
-│  │ 2. Candidate Generation   │  │  ──> Sources: Current DOM elements + Historical Healing records
-│  └─────────────┬─────────────┘  │
-│                ▼                │
-│  ┌───────────────────────────┐  │
-│  │ 3. Multi-Signal Scoring   │  │  ──> Deterministic weights (text, role, page, type, history)
-│  └─────────────┬─────────────┘  │
-│                ▼                │
-│  ┌───────────────────────────┐  │
-│  │ 4. Ranking & Thresholds   │  │  ──> HIGH (≥0.80), MEDIUM (≥0.50), LOW (<0.50), MIN (0.30)
-│  └─────────────┬─────────────┘  │
-│                ▼                │
-│  ┌───────────────────────────┐  │
-│  │ 5. Optional LLM Disambig  │  │  ──> Invoked only if top candidate scores are tied / close
-│  └─────────────┬─────────────┘  │
-└────────────────┬────────────────┘
-                 │
-                 ▼
-       HealingRecommendation
-                 │
-                 ▼
-┌─────────────────────────────────┐
-│ recommendation_to_healing_      │  ──> Bridges Member 1 recommendation to Member 2 contract
-│          candidate()            │
-└────────────────┬────────────────┘
-                 │
-                 ▼
-          HealingCandidate
-                 │
-                 ▼
-┌─────────────────────────────────┐
-│   Member 2 Execution Engine     │  ──> Browser validation in Playwright (runs proposed selector)
-└────────────────┬────────────────┘
-                 │
-                 ▼
-            HealingResult
-                 │
-                 ▼
-┌─────────────────────────────────┐
-│ healing_result_to_memory_       │  ──> Formats validated outcome for persistent memory storage
-│          update()               │
-└────────────────┬────────────────┘
-                 │
-                 ▼
-     MemoryStore.store_healing_
-               record()
-```
-
-### Key Components & Capabilities:
-- **Strict Architecture Boundaries**:
-  - Member 1's role is strictly **decision-making, candidate generation, and scoring**.
-  - Does **NOT** execute browser actions or directly modify selectors in Playwright (Member 2's domain).
-  - All recommendations enforce `requires_validation = True`.
-- **Multi-Source Candidate Generation (`CandidateGenerator`)**:
-  - **Current UI Elements**: Compares visible elements on the current page against failed element snapshots using text, semantic role, element type, page URL/title, and name similarity.
-  - **Historical Healing Records**: Queries `MemoryStore.get_healing_history()` to locate previously verified selector replacements for identical failed targets.
-- **Weighted Multi-Signal Candidate Scoring (`CandidateScorer`)**:
-  - Deterministic evaluation using configurable `ScoringWeights`:
-    - **Visible Text Match** (`0.30`): Strong signal for UI button/link labels.
-    - **Semantic / ARIA Role** (`0.25`): Ensures structural element parity (`button`, `textbox`, etc.).
-    - **Page Context** (`0.15`): Matches current page URL or title.
-    - **Historical Similarity** (`0.15`): Bonus boost for proven historical fixes.
-    - **Element Type** (`0.10`): Compares HTML tag names (`input`, `a`, `button`).
-    - **Name Attribute** (`0.05`): Matches form input `name` attributes.
-  - *Calibrated Design*: A complete match on observable DOM attributes achieves `0.85` (HIGH confidence) without requiring historical records.
-- **Confidence Thresholds & Safety Rules**:
-  - Evaluates candidates against calibrated levels: `HIGH` (≥ 0.80), `MEDIUM` (≥ 0.50), `LOW` (< 0.50). Candidates below `0.30` are rejected.
-  - **Safety Guardrails**: Automatically blocks healing (`DO_NOT_HEAL`) for `ASSERTION_FAILED` (business logic failures), `NETWORK_ERROR` (infrastructure), and `APPLICATION_ERROR` (backend bugs).
-- **Action Mapping Matrix (`HealingAction`)**:
-  - `TRY_REPLACEMENT_SELECTOR`: Clear top candidate meets confidence threshold.
-  - `SEARCH_CURRENT_UI`: Candidates exist but confidence is low; broader UI search recommended.
-  - `REQUIRE_FURTHER_ANALYSIS`: No viable candidates or unclassifiable failure.
-  - `DO_NOT_HEAL`: Non-healable failure category or confidence below minimum threshold.
-- **Selective LLM Disambiguation**:
-  - LLM is only queried if multiple high-ranking candidates tie or score within `0.1` of each other, preserving fast deterministic performance for clear-cut matches.
-- **Member 1 ↔ Member 2 Contract Bridge (`agents/healer/healing_result_mapper.py`)**:
-  - `recommendation_to_healing_candidate()` converts `HealingRecommendation` into the `HealingCandidate` schema consumed by Member 2.
-  - `healing_result_to_memory_update()` translates Member 2's post-execution `HealingResult` into a `HealingRecord` to update `MemoryStore`.
-- **50 Comprehensive Tests (`tests/test_day10_healing_decision.py`)**:
-  - Validates schemas, context aggregation, candidate generation, scoring weights, ranking, confidence calibration, safety rules, LLM disambiguation, and Member 2 bridge mappings.
-  - Test suite expanded from 593 to **643 passing tests** (100% offline, 0 failures, 0 regressions).
-
----
-
-## 🧠 AI-Assisted Healing Decision & Candidate Ranking (Day 11)
-
-Building on Day 10's foundation, **Day 11** advances Member 1's intelligence layer with **stable attribute evidence**, **ambiguity detection**, **AI-assisted candidate evaluation (`LLMHealingEvaluator`)** with strict **grounding validation**, and a complete **HealingDecision lifecycle**.
-
-```
-Failed Test
-     │
-Failure Analyzer (Day 9)
-     │
-FailureAnalysis + Historical Context
-     │
-Candidate Generator (Day 10 + Day 11)
-     │ (DOM + History + Stable Attributes: data-testid, aria-label, etc.)
-Candidates with Observable Evidence
-     │
-Candidate Scorer (Deterministic Multi-Signal Scoring)
-     │
-Candidate Ranking (Highest Confidence First)
-     │
-Ambiguity Detection (Gap ≤ ambiguity_threshold?)
-    ├── NO  ──> Select Top Candidate ──> Classify Decision
-    └── YES ──> Is LLM Available?
-                 ├── YES ──> LLMHealingEvaluator
-                 │            ├── Structured Prompt (Observable Evidence Only)
-                 │            ├── Response Normalization & Schema Validation
-                 │            └── Grounding Validation (Selector in Context?)
-                 │                 ├── VALID   ──> Resolved Candidate
-                 │                 └── INVALID ──> Escalate / Fallback
-                 └── NO  ──> REQUIRE_FURTHER_ANALYSIS
-     │
-Final HealingRecommendation (with HealingDecision)
-     │
-Member 1 ↔ Member 2 Contract Bridge
-     │
-Member 2 (Browser Execution & Validation)
-     │
-prepare_healing_result()
-     │
-HealingResult ──> MemoryStore Update
-```
-
-### Key Capabilities (Day 11):
-- **Stable Attribute Evidence & Similarity**:
-  - Automatically identifies and compares resilient HTML attributes (`data-testid`, `data-test-id`, `data-qa`, `data-cy`, `aria-label`, `aria-labelledby`, `class`).
-  - Emits observable evidence: `Matching stable attributes: data-testid`.
-  - Configurable `stable_attribute_weight` dimension in `ScoringWeights`.
-- **Candidate Ranking**:
-  - Sorts all candidates deterministically by confidence score.
-  - Preserves separation between recommendation generation and execution (Member 1 recommends, Member 2 executes).
-- **Ambiguity Detection**:
-  - Detects when the score gap between top candidates is $\le$ `ambiguity_threshold` (default `0.05`).
-  - Prevents making arbitrary choices when candidates are too close; routes to `REQUIRE_FURTHER_ANALYSIS` or optional LLM evaluation.
-- **LLM Healing Evaluator with Strict Grounding Validation (`LLMHealingEvaluator`)**:
-  - Accepts only structured observable evidence (failure type, target selector, candidate list, visible text, roles, attributes).
-  - Prompts model for structured JSON: `{"selected_candidate": "...", "confidence": 0.95, "reason": "..."}`.
-  - **Zero Hallucinations**: Deterministic grounding check verifies the selected selector exists in the provided candidates; rejects invented or out-of-context selectors.
-  - No chain-of-thought stored; outputs are clean and independently auditable.
-- **High-Level Healing Decision Lifecycle (`HealingDecision`)**:
-  - `RECOMMEND_HEALING`: Clear winner with high confidence ($\ge 0.80$).
-  - `REQUIRE_VALIDATION`: Viable candidate with medium confidence ($0.50 \le \text{score} < 0.80$).
-  - `REQUIRE_FURTHER_ANALYSIS`: Ambiguous candidates or low confidence ($0.30 \le \text{score} < 0.50$).
-  - `DO_NOT_HEAL`: Non-healable failure types (`ASSERTION_FAILURE`, `NETWORK_ERROR`, `APPLICATION_ERROR`), no candidates, or score $< 0.30$.
-- **Member 2 Inter-Member Contract**:
-  - Formalized input/output contracts documented in `agents/healer/healing_result_mapper.py`.
-  - `prepare_healing_result()` convenience helper transforms Member 2's post-execution feedback into a standardized `HealingResult` ready for `MemoryStore` ingestion.
-- **45 Comprehensive Day 11 Tests (`tests/test_day11_healing_intelligence.py`)**:
-  - Unit tests for stable attributes, deterministic scoring, ranking, thresholds, ambiguity detection, decision mapping, and grounding validation.
-  - 6 end-to-end scenarios: Clear Winner, Ambiguous, Low Confidence, Invalid LLM Candidate Rejection, Valid LLM Recommendation, and No Candidates.
-  - Full pipeline integration test: Memory $\to$ Analyzer $\to$ Candidate Generator $\to$ Scorer $\to$ Decision Engine $\to$ Member 2 Bridge.
-  - Test suite expanded from 643 to **688 passing tests** (100% offline, 0 failures, 0 regressions).
-
----
-
-## 🔄 Healing Result Feedback & Memory Learning (Day 12)
-
-Building on Day 11's AI-assisted decision making, **Day 12** closes the self-healing feedback loop by introducing **Healing Result Feedback & Memory Learning**. The platform now dynamically learns from execution outcomes: Member 2's browser validation results feed directly into Member 1's historical memory, continually updating selector stability scores, tracking replacement history, and detecting recurring failure patterns.
-
-```
-Failed Test
-     │
-Failure Analyzer (Day 9)
-     │
-Candidate Generator (Day 10 + 11) ◄── Historical Evidence (Day 12)
-     │                                 (ReplacementStats, SelectorHistory,
-     │                                  Stability Scores, Success Rates)
-Candidate Scorer (Deterministic Multi-Signal + History)
-     │
-Candidate Ranking & Ambiguity Detection
-     │
-Healing Decision Engine (Day 11)
-     │
-HealingRecommendation
-     │
-Member 2 (Browser Execution & Validation)
-     │
-HealingResultFeedback (Day 12)
-  ├── validation_status (SUCCESS / FAILED / TIMEOUT / ERROR)
-  ├── execution_time_ms, attempts, error_message
-  └── dom_snapshot, screenshot_path
-     │
-HealingResultFeedbackProcessor (Day 12)
-  ├── Ingests validation outcome
-  ├── Stores structured HealingRecord in MemoryStore
-  ├── Updates selector stability & replacement frequencies
-  └── Feeds into HealingPatternDetector
-```
-
-### Key Capabilities (Day 12):
-- **Structured Validation Feedback Contract (`HealingResultFeedback`)**:
-  - Pydantic v2 data contract capturing Member 2 post-validation execution results.
-  - Fields: `healing_id`, `test_id`, `original_selector`, `healed_selector`, `validation_status` (`SUCCESS`, `FAILED`, `TIMEOUT`, `ERROR`, `SKIPPED`), `execution_time_ms`, `attempts`, `error_message`, `dom_snapshot`, `screenshot_path`, `validated_at`.
-  - Backwards-compatible `to_healing_result()` converter to produce legacy `HealingResult` objects.
-- **Feedback Ingestion & State Updating (`HealingResultFeedbackProcessor`)**:
-  - Ingests validation outcomes into `MemoryStore` as structured `HealingRecord`s.
-  - Dynamically updates selector stability tallies and replacement counts.
-  - Emits observable feedback summary events for auditability and real-time observability.
-- **Historical Evidence Retrieval (`HealingEvidenceRetriever`)**:
-  - Aggregates historical performance of proposed replacements before scoring.
-  - Queries `MemoryStore` for `ReplacementStats` (total attempts, success rate, last used timestamp).
-  - Queries `SelectorHistory` (breakage count, known replacements, overall stability score).
-  - Populates `healing_history_score` on candidate selectors to favor historically verified replacements.
-- **Healing Pattern Detection (`HealingPatternDetector`)**:
-  - Analyzes historical healing and failure records across tests to identify systemic UI fragility.
-  - Detects `REPEATED_SELECTOR_FAILURE`, `FREQUENT_BREAKAGE`, `FLAKY_SELECTOR`, and `STABLE_REPLACEMENT`.
-  - Generates actionable insights with confidence scores and recommendations for test maintenance.
-- **Closed-Loop Candidate Scoring Integration**:
-  - `ScoredCandidate` enhanced with `healing_history_score`.
-  - Configurable `healing_history_weight` in `ScoringWeights` (defaults to `0.0` for backwards compatibility, configurable for active learning).
-  - `HealingDecisionEngine` enriches candidates with historical evidence during decision making.
-- **50 Comprehensive Day 12 Tests (`tests/test_day12_healing_feedback.py`)**:
-  - Validation feedback ingestion & processor tests.
-  - Healing evidence retrieval & replacement statistics tests.
-  - Pattern detector tests (repeated failure, flaky selector, stable replacement).
-  - Closed-loop feedback cycle tests (decision $\to$ validation $\to$ feedback $\to$ memory $\to$ learned candidate scoring).
-  - Test suite expanded from 688 to **738 passing tests** (100% offline, 0 failures, 0 regressions).
-
----
-
-## 🤖 Autonomous AI Agent Orchestrator (Day 13)
-
-Building on Days 1–12, **Day 13** connects the intelligence components into an end-to-end autonomous orchestration workflow. The `AgentOrchestrator` implements an explicit finite state machine that coordinates:
-**Test Planning** $\to$ **Test Execution Result** $\to$ **Failure Analysis** $\to$ **Historical Memory** $\to$ **Self-Healing Decision** $\to$ **Validation Feedback Ingestion** $\to$ **Memory Learning**.
-
-```
-                           ┌───────────────────────────┐
-                           │      WorkflowStep.IDLE    │
-                           └─────────────┬─────────────┘
-                                         │ start_planning()
-                                         ▼
-                           ┌───────────────────────────┐
-                           │   WorkflowStep.PLANNING   │
-                           └─────────────┬─────────────┘
-                                         │ TestPlan generated
-                                         ▼
-                           ┌───────────────────────────┐
-                           │    WorkflowStep.PLANNED   │
-                           └─────────────┬─────────────┘
-                                         │ (handoff to Member 2)
-                                         ▼
-                           ┌───────────────────────────┐
-                           │   WorkflowStep.EXECUTING  │
-                           └─────────────┬─────────────┘
-                                         │
-                    ┌────────────────────┴────────────────────┐
-     submit_execution_result(PASSED)            submit_execution_result(FAILED)
-                    │                                         │
-                    ▼                                         ▼
-      ┌───────────────────────────┐             ┌───────────────────────────┐
-      │   WorkflowStep.COMPLETED  │             │   WorkflowStep.ANALYZING  │
-      └───────────────────────────┘             └─────────────┬─────────────┘
-                                                              │ Root cause diagnosed
-                                                              ▼
-                                                ┌───────────────────────────┐
-                                                │   WorkflowStep.ANALYZED   │
-                                                └─────────────┬─────────────┘
-                                                              │
-                                       ┌──────────────────────┴──────────────────────┐
-                             Non-healable failure                           Healable failure
-                                       │                                             │
-                                       ▼                                             ▼
-                         ┌───────────────────────────┐                 ┌───────────────────────────┐
-                         │    WorkflowStep.FAILED    │                 │    WorkflowStep.HEALING   │
-                         └───────────────────────────┘                 └─────────────┬─────────────┘
-                                                                                     │ Recommendation made
-                                                                                     ▼
-                                                                       ┌───────────────────────────┐
-                                                                       │     WorkflowStep.HEALED   │
-                                                                       │  (or NO_HEALING_AVAILABLE)│
-                                                                       └─────────────┬─────────────┘
-                                                                                     │ (handoff to Member 2)
-                                                                                     ▼
-                                                                       ┌───────────────────────────┐
-                                                                       │   WorkflowStep.VALIDATING │
-                                                                       └─────────────┬─────────────┘
-                                                                                     │ submit_healing_result()
-                                                                                     ▼
-                                                                       ┌───────────────────────────┐
-                                                                       │ WorkflowStep.FEEDBACK_REC │
-                                                                       └─────────────┬─────────────┘
-                                                                                     │
-                                                      ┌──────────────────────────────┴──────────────────────────────┐
-                                            Validation SUCCESS                                             Validation FAILED
-                                                      │                                                             │
-                                                      ▼                                                             ▼
-                                        ┌───────────────────────────┐                                 ┌───────────────────────────┐
-                                        │   WorkflowStep.COMPLETED  │                                 │ Retries < max_healing_att?│
-                                        └───────────────────────────┘                                 └──────┬─────────────┬──────┘
-                                                                                                       YES   │             │ NO
-                                                                                                             ▼             ▼
-                                                                                                      [Re-enter HEALING] [FAILED]
-```
-
-### Key Capabilities (Day 13):
-
-- **Explicit Finite State Machine (`WorkflowStep` & `VALID_TRANSITIONS`)**:
-  - 13 strongly-typed lifecycle steps: `IDLE`, `PLANNING`, `PLANNED`, `EXECUTING`, `ANALYZING`, `ANALYZED`, `HEALING`, `HEALED`, `VALIDATING`, `FEEDBACK_RECEIVED`, `COMPLETED`, `FAILED`, `NO_HEALING_AVAILABLE`.
-  - Compile-time and runtime validation of transitions through `VALID_TRANSITIONS`. Invalid transitions are rejected with descriptive `ValueError`s.
-- **Comprehensive Workflow Schemas (`agents.orchestration.workflow_schemas`)**:
-  - `AgentState`: 26 typed fields maintaining end-to-end execution context (`session_id`, `step`, `plan`, `execution_result`, `analysis_result`, `healing_recommendation`, `validation_feedback`, `healing_attempts`, `events`, `metadata`, etc.).
-  - `ExecutionResult`: Member 2 execution handoff contract with `ExecutionResultStatus` (`PASSED`, `FAILED`, `ERROR`, `TIMEOUT`, `SKIPPED`), step results, duration, error messages, and DOM context snapshot.
-  - `WorkflowEvent`: Structured event logging with `WorkflowEventType`, timestamp, from/to steps, details, and message.
-  - `OrchestratorConfig`: Configurable settings for `max_healing_attempts` (default: 3), `auto_learn_on_feedback`, `history_weight`, `strict_mode`, and `store_execution_records`.
-- **Autonomous Lifecycle Coordination (`AgentOrchestrator`)**:
-  - `start_planning(app_context)`: Triggers `TestPlannerAgent`, stores generated `TestPlan` in `AgentState`, and transitions to `PLANNED`.
-  - `submit_execution_result(result, app_context)`: Ingests Member 2 execution outcomes. If `PASSED`, transitions to `COMPLETED`. If `FAILED`, invokes `FailureAnalysisAgent` (root cause, confidence, evidence), transitions through `ANALYZING` $\to$ `ANALYZED`, and automatically triggers `HealingDecisionEngine` if eligible.
-  - `submit_healing_result(feedback, app_context)`: Ingests Member 2 healing validation feedback. Automatically invokes `HealingResultFeedbackProcessor` to update `MemoryStore` stability and replacement stats. On `SUCCESS`, transitions to `COMPLETED`. On failure with remaining budget, safely loops back to `HEALING` or transitions to `FAILED`.
-  - `get_state()`: Provides inspection of current state, transition history, and audit log.
-- **Safety Constraints & Resilience**:
-  - Configurable `max_healing_attempts` prevents infinite healing loops.
-  - Strict input validation: non-healable failures (`BUG`, `ENVIRONMENT_ISSUE`) terminate cleanly in `FAILED`.
-  - Missing DOM or recommendations safely transition to `NO_HEALING_AVAILABLE`.
-  - Safe error recovery without crashing the host process.
-- **61 Comprehensive Day 13 Tests (`tests/test_day13_agent_orchestrator.py`)**:
-  - State machine transitions & transition validation.
-  - Test planning flow & error handling.
-  - Execution result handling (pass, fail, healable vs non-healable).
-  - End-to-end healing lifecycle (analyze $\to$ heal $\to$ validate $\to$ learn).
-  - Retry handling and max attempts limits.
-  - Memory recording & feedback processor integration.
-  - Edge cases, safety guards, and contract integrity.
-  - Test suite expanded from 738 to **799 passing tests** (100% offline, 0 failures, 0 regressions).
-
----
-
-## 🎯 Autonomous Recovery Policy & Explainable Decisions (Day 14)
-
-The **Autonomous Recovery Policy** layer introduces governance, deterministic decision-making, and auditability to the self-healing and recovery process. It ensures the AI agent does not blindly attempt healing for every failure, prevents infinite loops, handles transient errors gracefully, and provides clear, evidence-backed explanations for every decision.
-
-```
-                  Failure Detected
-                         │
-                         ▼
-             ┌───────────────────────┐
-             │ FailureAnalyzerAgent  │
-             └───────────┬───────────┘
-                         │ FailureAnalysis
-                         ▼
-             ┌───────────────────────┐
-             │    RecoveryPolicy     │ ── Evaluates failure type, attempt count,
-             │                       │    retry count, and candidate evidence
-             └───────────┬───────────┘
-                         │
-        ┌────────────────┼────────────────┬────────────────┐
-        │                │                │                │
-        ▼                ▼                ▼                ▼
-   TRY_HEALING         RETRY            ABORT         DO_NOT_HEAL
- (healable type,   (transient:       (attempts       (assertion fail,
-  conf >= 0.80,    TIMEOUT, NAV,     >= max or       low confidence,
-  Member 2 val)    retries < max)    exhausted)      ambiguous, etc.)
-```
-
-### Key Capabilities (Day 14):
-
-- **Recovery Actions (`RecoveryAction`)**:
-  - `TRY_HEALING`: Execute self-healing with the top-ranked candidate selector (requires Member 2 browser validation).
-  - `RETRY`: Re-execute the step/test case for transient failures (`TIMEOUT`, `NAVIGATION_FAILURE`, `ELEMENT_NOT_INTERACTABLE`) up to `max_retries`.
-  - `ESCALATE`: Escalate to human operator or higher-tier diagnostic agent when automated recovery is infeasible.
-  - `ABORT`: Halt execution cleanly when `max_healing_attempts` or `max_retries` is exceeded, or when all candidates are exhausted.
-  - `DO_NOT_HEAL`: Skip healing when the failure type is explicitly non-healable (e.g. `ASSERTION_FAILURE`, `APPLICATION_ERROR`), when confidence is below threshold, or when top candidates are ambiguous.
-  - `REQUIRE_FURTHER_ANALYSIS`: Defer recovery when diagnostic confidence is low or root cause is unknown.
-- **Explainable Decision Model (`RecoveryDecision`)**:
-  - Fully typed Pydantic contract capturing `workflow_id`, `test_case_id`, `failure_type`, `decision`, `confidence`, `selected_candidate`, `reason`, `evidence`, `attempt_number`, `retry_count`, `requires_validation`, and `next_state`.
-  - Structured, human-readable reason and observable evidence list for complete auditability.
-- **Configurable Recovery Governance (`RecoveryPolicyConfig` & `FailureTypePolicy`)**:
-  - `max_healing_attempts` (default: 3) and `max_retries` (default: 2) enforce strict execution bounds.
-  - `min_healing_confidence` (default: 0.80) and `min_candidate_score` (default: 0.30) enforce high standards before attempting changes.
-  - `ambiguity_margin` (default: 0.05) detects when multiple candidate selectors have nearly identical scores and flags for human or further analysis.
-  - `history_boost_weight` (default: 0.15) modulates candidate confidence based on historical replacement success rates from `HealingEvidenceRetriever`.
-  - Per-failure-type policy matrix (`_DEFAULT_FAILURE_POLICIES`) dictating whether a failure is healable, retryable, and its retry limit.
-- **Comprehensive Policy Evaluation (`RecoveryPolicy`)**:
-  - `evaluate()`: Initial multi-stage evaluation pipeline (attempt limits, failure-type policy, transient retry check, candidate filtering, ambiguity detection, historical weighting, threshold check).
-  - `evaluate_continuation()`: Post-validation continuation check when Member 2 reports a healing failure, intelligently selecting the next best unattempted candidate or cleanly aborting.
-- **Workflow & Orchestrator Integration**:
-  - Extended `WorkflowStep` with `RETRYING` state and valid transitions (`ANALYZING_FAILURE -> RETRYING -> EXECUTION_PENDING`).
-  - Extended `WorkflowEventType` with `RECOVERY_DECISION_CREATED` and `RETRY_INITIATED`.
-  - Integrated with `AgentOrchestrator` (`_recovery_policy`, `AgentState.recovery_decision`, `AgentState.retry_count`, `AgentState.max_retries`).
-  - Exported through `agents.schemas.contracts` for shared Member 1 $\leftrightarrow$ Member 2 $\leftrightarrow$ Member 3 access.
-- **83 Comprehensive Day 14 Tests (`tests/test_day14_recovery_policy.py`)**:
-  - Unit tests for all failure types, retry escalation, duplicate candidate suppression, ambiguity handling, historical evidence boosts, explainability, safety invariants, and determinism.
-  - Total test suite expanded to **882 passing tests** (100% offline, 0 failures, 0 regressions).
-
----
-
-## 🔗 Complete Autonomous Intelligence Pipeline Integration & Validation (Day 15)
-
-Day 15 completes the unification, end-to-end integration, stabilization, and formal validation of all Member 1 components into a single coherent, deterministic autonomous intelligence pipeline.
-
-```
-Application Context
-        ↓
-Test Planning (Planner Agent)
-        ↓
-Test Plan (TestCases & Steps)
-        ↓
-Execution Result (Member 2 Mock / Bridge)
-        ↓
-Failure Analysis (Failure Analyzer Agent)
-        ↓
-Historical Memory (MemoryStore & Patterns)
-        ↓
-Candidate Generation (Candidate Generator)
-        ↓
-Candidate Scoring (Candidate Scorer)
-        ↓
-Candidate Ranking (Ranked Candidate List)
-        ↓
-Recovery Policy (Autonomous Recovery Decision)
-        ↓
-Healing Recommendation / Decision (Member 2 Contract Bridge)
-```
-
-### Key Day 15 Achievements:
-- **Full Autonomous Roundtrip Verification**:
-  - Validated seamless data flow across the complete lifecycle: Planning $\to$ Failure Analysis $\to$ Historical Memory $\to$ Candidate Generation $\to$ Scoring $\to$ Ranking $\to$ Recovery Policy $\to$ Healing Recommendation.
-  - Multi-candidate sequential fallback: automatically attempts next best candidate when a proposed candidate fails execution validation without re-analyzing root cause.
-- **Member 1 ↔ Member 2 Contract Bridge (`agents/schemas/member2_contract.py`)**:
-  - `serialize_for_member2()`: Formats Member 1 healing recommendations into actionable payloads for the execution engine.
-  - `parse_member2_execution_result()`: Ingests Member 2 execution results with automatic uppercase enum alignment (`PASS`, `FAIL`, `ERROR`).
-  - `parse_member2_feedback()`: Parses execution validation feedback to update historical memory replacement stats.
-- **Member 1 ↔ Member 3 Observability Bridge (`agents/schemas/member3_contract.py`)**:
-  - `DashboardWorkflowSummary`: Aggregates step metrics, healing counts, durations, and structured event history.
-  - `format_sse_event()`: Generates standard Server-Sent Events streams (`event: STEP_COMPLETED`, etc.) for live dashboard consumption.
-  - `format_websocket_message()`: Formats JSON payloads for real-time bidirectional WebSocket telemetry.
-- **Strict Offline & Safety Invariants**:
-  - Zero live browser automation (Playwright/Selenium prohibited in Member 1 unit/integration suites).
-  - 100% offline, zero external API keys or network dependencies.
-  - Safe adversarial handling: malformed selectors, script injection attempts, and oversized inputs are rejected cleanly.
-- **Latency & Performance Benchmark**:
-  - Roundtrip execution completed in **$1.52\text{ ms}$** on average, well beneath the $< 500\text{ ms}$ latency budget ($328\times$ faster).
-- **38 Comprehensive Day 15 Tests (`tests/test_day15_pipeline_integration.py`)**:
-  - Complete coverage across all 15 validation matrix scenarios, cross-member contracts, multi-candidate fallback, event stream observability, and performance benchmarks.
-  - Entire repository suite now at **920 passing tests, 0 failures, 0 regressions**.
-
----
-
-## 📂 Project Structure (`agents/`)
-
-```
-.
-├── agents/
-│   ├── analyzer/              # Failure Analysis Agent & Schemas (Day 9)
-│   │   ├── analyzer.py        # FailureAnalysisAgent ABC + RuleBasedFailureAnalyzer
-│   │   └── schemas.py         # FailureContext, FailureAnalysisResult, FailureEvidence, etc.
-│   ├── healer/                # Self-Healing Decision Layer (Day 10 + Day 11 + Day 12)
-│   │   ├── candidate_generator.py # Candidate generation from DOM & historical memory + stable attrs
-│   │   ├── candidate_scorer.py# Weighted candidate scoring, ranking & confidence thresholds
-│   │   ├── healing_decision.py# HealingDecisionEngine orchestrator & ambiguity detection
-│   │   ├── healing_feedback.py# HealingResultFeedback & processor for Member 2 feedback (Day 12)
-│   │   ├── healing_result_mapper.py # Member 1 ↔ Member 2 contract bridge & prepare_healing_result()
-│   │   ├── healing_schemas.py # ScoredCandidate, HealingRecommendation, HealingContext, LLMEvaluationResult
-│   │   ├── llm_healing_evaluator.py # AI-assisted candidate evaluation with strict grounding validation (Day 11)
-│   │   ├── healer.py          # Abstract SelfHealingAgent
-│   │   └── schemas.py         # HealingCandidate, HealingResult
-│   ├── llm/                   # LLM Client Abstraction & Infrastructure
-│   │   ├── client.py          # Abstract LLMClient + Concrete LLMClientSession
-│   │   ├── config.py          # LLMConfig (env-based configuration, defaults to 'mock')
-│   │   ├── exceptions.py      # LLM exception hierarchy (10 types + is_retryable)
-│   │   ├── factory.py         # Provider factory (get_llm_provider, create_llm_client)
-│   │   ├── parser.py          # ResponseParser (text, JSON, Pydantic model validation)
-│   │   ├── schemas.py         # LLMRequest, LLMResponse, LLMUsage models + validators
-│   │   └── providers/
-│   │       └── mock.py        # MockLLMProvider with simulations & response registry
-│   ├── memory/                # Historical Memory & Context Management (Day 8 + Day 12)
-│   │   ├── context_comparator.py # Element diff engine (added, removed, modified elements)
-│   │   ├── healing_evidence.py# HealingEvidenceRetriever & ReplacementStats (Day 12)
-│   │   ├── healing_history.py # Abstract HealingMemory interface (legacy compatibility)
-│   │   ├── in_memory_store.py # InMemoryStore with filtering, snapshots & query helpers
-│   │   ├── memory_interface.py# Storage-independent MemoryStore ABC
-│   │   ├── memory_schemas.py  # TestExecutionRecord, FailureInfo, ElementRecord, HealingRecord
-│   │   └── pattern_detector.py# HealingPatternDetector for recurring selector patterns (Day 12)
-│   ├── orchestration/         # Autonomous Agent Orchestration & Recovery Policy (Day 13 + Day 14)
-│   │   ├── agent_controller.py# Abstract AgentController
-│   │   ├── agent_orchestrator.py# AgentOrchestrator state machine coordinating Plan → Execute → Analyze → Heal → Validate
-│   │   ├── recovery_policy.py # Autonomous Recovery Policy & Explainable Decisions (Day 14)
-│   │   └── workflow_schemas.py# WorkflowStep, AgentState, ExecutionResult, WorkflowEvent, OrchestratorConfig
-│   ├── planner/               # Test Planner Agent & Generation Pipeline (Day 4 + Day 5 + Day 7)
-│   │   ├── langchain_adapter.py # LangChain adapter bridging templates to LLMClientSession
-│   │   ├── langchain_prompts.py # LangChain ChatPromptTemplate management for test planning
-│   │   ├── mock_scenarios.py  # 9 mock LLM response fixtures for deterministic testing
-│   │   ├── planner.py         # Abstract TestPlannerAgent + LLMTestPlanner + LangChainTestPlanner
-│   │   ├── prompts.py         # Prompt architecture & reusable prompt templates
-│   │   ├── schemas.py         # ElementContext, PageContext, ApplicationContext, TestCase, TestStep, Assertion, TestPlan
-│   │   ├── structured_output.py # JSON extraction, coercion & schema validation for LLM outputs
-│   │   └── validation.py      # Business-rule validation + element refs + duplicate detection
-│   └── schemas/               # Shared Enums & Data Contracts
-│       ├── contracts.py       # Re-exported single source of truth (including memory schemas)
-│       ├── enums.py           # FailureType, HealingStatus, TestPriority, TestCategory, TestAction, AssertionType, ExecutionStatus, ChangeType, FailureCategory, ConfidenceLevel, HealingAction, CandidateSource, HealingDecision, ValidationStatus, HealingPatternType
-│       ├── member2_contract.py# Member 1 ↔ Member 2 execution bridge & serialization/parsing (Day 15)
-│       └── member3_contract.py# Member 1 ↔ Member 3 dashboard SSE/WebSocket telemetry bridge (Day 15)
-├── docs/
-│   └── member1-architecture.md# Comprehensive architectural specification (v0.12.0)
-├── tests/
-│   ├── test_config.py             # Config loading & immutability tests
-│   ├── test_day6_response_validation.py # Day 6 response validation & hardening (41 tests)
-│   ├── test_day7_langchain_integration.py # Day 7 LangChain integration tests (95 tests)
-│   ├── test_day8_memory.py        # Day 8 historical memory & context comparator tests (57 tests)
-│   ├── test_day9_failure_analyzer.py # Day 9 failure analyzer agent & diagnostic tests (61 tests)
-│   ├── test_day10_healing_decision.py # Day 10 self-healing decision & candidate generator tests (50 tests)
-│   ├── test_day11_healing_intelligence.py # Day 11 AI-assisted healing decision & candidate ranking tests (45 tests)
-│   ├── test_day12_healing_feedback.py # Day 12 healing result feedback & memory learning tests (50 tests)
-│   ├── test_day13_agent_orchestrator.py # Day 13 AI agent orchestrator & workflow coordination tests (61 tests)
-│   ├── test_day14_recovery_policy.py # Day 14 autonomous recovery policy & explainable decisions (83 tests)
-│   ├── test_day15_pipeline_integration.py # Day 15 complete pipeline integration & validation matrix (38 tests)
-│   ├── test_fixtures.py           # Reusable test factories & sample data (Day 5)
-│   ├── test_imports.py            # Module import validation tests
-│   ├── test_llm_client.py         # Day 2 LLM foundation & mock provider tests
-│   ├── test_llm_client_session.py # Day 3 LLM client session & integration tests
-│   ├── test_planner_agent.py      # LLMTestPlanner agent & prompt tests
-│   ├── test_planner_pipeline.py   # Day 5 full generation pipeline tests (50 tests)
-│   ├── test_planner_schemas.py    # Day 4 ElementContext, PageContext, TestPlan schema tests
-│   ├── test_planner_validation.py # Day 4 action & assertion business rule validation tests
-│   └── test_schemas.py            # Pydantic schema validation tests
-├── .env.example               # Template for environment variables
-├── .gitignore                 # Secret & artifact protection
-└── pyproject.toml             # Python packaging & dependency configuration
-```
-
----
-
-## 🛡️ Core Healing Principles
-
-1. **DOM Evidence Required**: The AI must never invent selectors without evidence from the actual DOM.
-2. **No Self-Declaration**: The AI must never declare healing successful by itself.
-3. **Execution Engine Validates**: Member 2's execution engine validates every proposed candidate.
-4. **Safe Fallbacks**: The AI can return `NO_SAFE_HEALING_FOUND` when confidence is insufficient.
-5. **Confidence Scoring**: Every analysis and healing candidate includes a calibrated confidence score (`0.0` to `1.0`).
-6. **Conservative Auto-Healing**: Low-confidence suggestions will not automatically modify test suites.
-7. **Strictly Typed & Validated**: All inter-agent data flow is strictly typed with Pydantic v2 schemas.
-8. **Zero Secret Leaks**: API keys are managed purely through environment variables and never checked into Git.
-
----
-
-## 🚀 Getting Started
-
-### 1. Installation
+## Getting started
 
 ```bash
 git clone https://github.com/Krishna201i/TestSphere-AI-Autonomous-Agentic-QA-Self-Healing-Testing-Platform.git
 cd TestSphere-AI-Autonomous-Agentic-QA-Self-Healing-Testing-Platform
 
-# Python package with development dependencies, plus the Playwright browser
+# Python package with development tools, and the browser
 pip install -e ".[dev]"
 python -m playwright install chromium
 
 # Dashboard
 cd frontend && npm install && cd ..
-```
 
-### 2. Environment Setup
-
-```bash
+# Settings: works offline by default (LLM_PROVIDER=mock, local JSON database, sign-in off)
 cp .env.example .env
-# Edit .env if needed (defaults to fully offline LLM_PROVIDER=mock)
 ```
 
-### 3. Run Tests (100% Offline)
+Run the platform:
 
 ```bash
-python -m pytest tests/ -q
+python -m uvicorn backend.main:app --port 8000   # API on http://127.0.0.1:8000
+cd frontend && npm run dev                        # dashboard on http://localhost:3000
 ```
 
-The storage contract tests also run against the real Firestore emulator (needs Java):
+Run the tests:
 
 ```bash
-curl -o firestore-emulator.jar https://storage.googleapis.com/firebase-preview-drop/emulator/cloud-firestore-emulator-v1.19.7.jar
-java -jar firestore-emulator.jar --host=127.0.0.1 --port=8085 &
-FIRESTORE_EMULATOR_HOST=127.0.0.1:8085 python -m pytest tests/backend/test_store.py -q
+python -m pytest -q                 # backend, agents, engine; end-to-end tests need: cd frontend && npm run build
+cd frontend && npm test             # dashboard unit tests and design-token lint
 ```
 
-### 4. Run the Platform
+Measure and scan:
 
 ```bash
-# Backend API on http://127.0.0.1:8000
-python -m uvicorn backend.main:app --port 8000
-
-# Dashboard on http://localhost:3000 (proxies /api to the backend)
-cd frontend && npm run dev
-```
-
-### 5. Measure Self-Healing and Scan for Weaknesses
-
-```bash
-# Break the demo app's locators in 6 ways and compare healing off vs on
-python -m engine.benchmark
-
-# Passive security scan (loopback is always in scope; --allow HOST for others you own)
-python -m security http://127.0.0.1:8000/
+python -m engine.heal_benchmark --quick    # self-healing benchmark (drop --quick for all 277 cases)
+python scripts/loadtest.py                 # load test
+python -m security http://127.0.0.1:8000/  # passive security scan (loopback is always in scope)
 ```
 
 ---
 
-## 🗺️ Roadmap
+## Configuration and deployment
 
-- [x] **Day 1**: Architecture design, Pydantic contracts, agent interfaces, configuration setup, and documentation.
-- [x] **Day 2**: Provider-independent LLM abstraction foundation, `MockLLMProvider`, configuration, exception hierarchy, and response parsing.
-- [x] **Day 3**: Reusable `LLMClientSession` layer with request validation, response normalization, retry mechanism, timeout handling, error translation, and mock response registry.
-- [x] **Day 4**: Test Planner Agent foundation: `ElementContext`, `PageContext`, `TestPlan`, controlled action/assertion vocabularies, two-layer validation, prompt architecture, and mock test scenarios.
-- [x] **Day 5**: Full generation pipeline (`LLMTestPlanner.generate_tests()` / `generate_test_plan()`), duplicate test case detection, and hallucinated element reference validation.
-- [x] **Day 6**: LLM response validation hardening & mock scenario alignment: fixed normalization logic, added explicit `LLMParsingError` and `LLMSchemaValidationError`, case-insensitive mock registry matching, default planner scenario registration helper, and 41 regression tests (380 tests total).
-- [x] **Day 7**: LangChain integration for Test Planner: prompt template management (`ChatPromptTemplate`), structured output handling with field coercion & validation (`StructuredOutputProcessor`), adapter bridging LangChain and `LLMClientSession` (`LangChainPlanningAdapter`), backwards-compatible `LangChainTestPlanner`, and 95 tests (475 tests total).
-- [x] **Day 8**: Historical Memory and Context Management Layer: storage-independent `MemoryStore` interface, `InMemoryStore` implementation with filtering/pagination/element snapshots/healing lookups, Pydantic memory schemas (`TestExecutionRecord`, `FailureInfo`, `ElementRecord`, `HealingRecord`, `FieldChange`, `ContextComparisonResult`), `ContextComparator` element diff engine, and 57 tests (532 tests total).
-- [x] **Day 9**: Failure Analyzer Agent: multi-signal root cause diagnosis, Pydantic failure schemas (`FailureContext`, `FailureAnalysisResult`, `FailureEvidence`, `ElementContextSnapshot`), `FailureCategory` & `ConfidenceLevel` enums, self-healing eligibility evaluation, `MemoryStore` historical context correlation, backwards-compatible schemas/agent signatures, and 61 tests (593 tests total).
-- [x] **Day 10**: Self-Healing Decision Layer & Candidate Generation foundation: candidate generation (DOM + history), weighted multi-signal scoring, confidence thresholds, safety rules, action mapping, optional LLM disambiguation, Member 1 ↔ Member 2 contract bridge, and 50 tests (643 tests total).
-- [x] **Day 11**: AI-Assisted Healing Decision & Candidate Ranking: `LLMHealingEvaluator` with strict DOM grounding, ambiguity detection, stable attribute evidence, confidence-calibrated decision engine, and 45 tests (688 tests total).
-- [x] **Day 12**: Healing Result Feedback & Memory Learning: validation feedback ingestion (`HealingResultFeedback`, `HealingResultFeedbackProcessor`), historical evidence retrieval (`HealingEvidenceRetriever`), pattern detection (`HealingPatternDetector`), feedback loop enrichment in `HealingDecisionEngine`, and 50 tests (738 tests total).
-- [x] **Day 13**: Autonomous AI Agent Orchestrator: end-to-end workflow state machine (`AgentOrchestrator`, `WorkflowStep`, `AgentState`), coordination across Planner, Failure Analyzer, Healer, Memory, and Validation, safety constraints (max attempts, terminal states), structured event audit trail, and 61 tests (799 tests total).
-- [x] **Day 14**: Autonomous Recovery Policy & Explainable Agent Decisions: deterministic recovery actions (`RecoveryAction`), explainable decision model (`RecoveryDecision`), configurable governance (`RecoveryPolicyConfig`, `FailureTypePolicy`), multi-stage policy evaluator (`RecoveryPolicy`), `WorkflowStep.RETRYING`, audit events (`RECOVERY_DECISION_CREATED`, `RETRY_INITIATED`), orchestrator integration, and 83 tests (882 tests total).
-- [x] **Day 15**: Complete Autonomous Intelligence Pipeline Integration, Stabilization, Validation, and Documentation: end-to-end integration across all Member 1 modules (Planner, Analyzer, Healer, Memory, Orchestration, LLM), cross-member contract bridges for Member 2 (execution) & Member 3 (dashboard telemetry), comprehensive 15-scenario validation matrix, $< 500\text{ms}$ latency benchmark, and 38 tests (**920 passed tests total**, 0 failures, 100% offline).
-- [x] **Member 1 Implementation Complete (100%)**: All 11 core AI intelligence subsystems, state machine orchestration, multi-signal reasoning, explainable recovery policies, and cross-member contract bridges are fully implemented, verified with 920 passing tests, and ready for integration with Member 2 (Execution Engine) and Member 3 (Platform / Dashboard).
+Production runs on Render with Firebase (Authentication and Firestore). The most important settings:
+
+| Setting | Purpose |
+| --- | --- |
+| `FIREBASE_CREDENTIALS`, `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN` | Database and sign-in |
+| `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_BASE_URL` | AI model (`mock`, `local` such as Ollama, or any OpenAI-compatible `api`) |
+| `SECURITY_SCAN_ALLOWED_HOSTS` | Hosts the passive scanner may contact (only hosts you own or may test) |
+| `ARTIFACT_STORE=gcs`, `ARTIFACT_BUCKET` | Keep screenshots and traces in Cloud Storage |
+| `TOKEN_ENCRYPTION_KEY` | Encrypts connected GitHub tokens (required when hosted) |
+| `PIPELINE_EXECUTION=worker` | Run pipelines in a separate worker service |
+| `DASHBOARD_URL` | Links in Slack alerts and GitHub commit statuses |
+
+Every setting, the Dockerfile, the worker, Firestore rules and indexes, and CI are described in the
+[Deployment & Operations Guide](docs/deployment-operations.md).
 
 ---
 
-## 🏁 Member 1 Completion Summary & Inter-Member Handoff
+## Documentation
 
-Member 1 (`vinamra-branch`) has **fully completed 100% of the assigned scope** for the AI Agent & Intelligence Layer of TestSphere-AI. All 11 core subsystems are implemented in pure Python/Pydantic v2 with zero stubs, zero mocks required in production, 100% offline determinism, and 920 passing tests.
+- [Backend architecture & API](docs/backend-architecture.md)
+- [Browser execution engine](docs/engine-architecture.md)
+- [Self-healing & orchestration](docs/self-healing-orchestration.md)
+- [AI agent architecture](docs/member1-architecture.md)
+- [Integration guide](docs/integration-guide.md)
+- [Deployment & operations](docs/deployment-operations.md)
+- [Healing benchmark](docs/healing-benchmark.md) · [Load test](docs/load-test.md)
+- [Contributing](CONTRIBUTING.md)
 
-### 📊 Subsystems Implementation Matrix (11 / 11 Complete)
+## Security and privacy
 
-| # | Subsystem | Core Module(s) | Primary Test Suite | Status | Key Deliverable |
-|---|---|---|---|:---:|---|
-| **1** | **LLM Abstraction Layer** | `agents/llm/` | `tests/test_llm_client*.py` | ✅ Complete | Provider-independent client (`LLMClientSession`), retry policies, 10-type error hierarchy, mock provider |
-| **2** | **Test Planner Agent** | `agents/planner/` | `tests/test_planner_*.py`, `tests/test_day7_*.py` | ✅ Complete | Controlled action/assertion vocabulary, prompt templates, business-rule validation, LangChain adapter |
-| **3** | **Failure Analysis Agent** | `agents/analyzer/` | `tests/test_day9_failure_analyzer.py` | ✅ Complete | Multi-signal root cause diagnosis, failure categorization, confidence scoring, healing eligibility |
-| **4** | **Historical Memory & Diff Engine** | `agents/memory/` | `tests/test_day8_memory.py` | ✅ Complete | Storage-agnostic `MemoryStore`, `InMemoryStore`, `ContextComparator` DOM diff engine |
-| **5** | **Healing Candidate Generation** | `agents/healer/candidate_generator.py` | `tests/test_day10_healing_decision.py` | ✅ Complete | Dual-source candidates (current DOM + historical memory), stable attribute extraction |
-| **6** | **Candidate Scoring & Ranking** | `agents/healer/candidate_scorer.py` | `tests/test_day10_healing_decision.py`, `tests/test_day11_*.py` | ✅ Complete | Calibrated multi-signal weighted scoring (text, role, page, tag, name, history, stable attributes) |
-| **7** | **Healing Decision Engine** | `agents/healer/healing_decision.py`, `llm_healing_evaluator.py` | `tests/test_day11_healing_intelligence.py` | ✅ Complete | Strict grounding validation, ambiguity gap detection, safety rule guardrails (`DO_NOT_HEAL`) |
-| **8** | **Autonomous Recovery Policy** | `agents/orchestration/recovery_policy.py` | `tests/test_day14_recovery_policy.py` | ✅ Complete | Deterministic recovery actions (`TRY_HEALING`, `RETRY`, `ABORT`, `DO_NOT_HEAL`), audit explainability |
-| **9** | **Agent Orchestrator State Machine** | `agents/orchestration/agent_orchestrator.py` | `tests/test_day13_agent_orchestrator.py` | ✅ Complete | 14-state lifecycle state machine coordinating Plan → Execute → Analyze → Heal → Validate → Complete |
-| **10** | **Feedback Learning & Patterns** | `agents/healer/healing_feedback.py`, `agents/memory/pattern_detector.py` | `tests/test_day12_healing_feedback.py` | ✅ Complete | Closed-loop memory learning from validation feedback, recurring fragility and flaky selector detection |
-| **11** | **Explainability & Observability** | `agents/schemas/member2_contract.py`, `member3_contract.py` | `tests/test_day15_pipeline_integration.py` | ✅ Complete | Structured evidence audit trails, Member 2 execution bridges, Member 3 SSE & WebSocket telemetry |
+- The scanner is passive and scope-limited; testing a site needs its owner's permission.
+- Every outbound request, including everything the test browser loads, goes through an SSRF guard.
+- Each user sees only their own data. The privacy notice in the dashboard explains what is stored, and
+  *Delete account* erases it together with the sign-in account.
 
----
+## License
 
-### 🧪 Verification & Quality Benchmarks
-
-- **Test Suite Results**: **920 passed** (0 failed, 0 errors, 0 regressions) in `0.73s`.
-- **Environment Invariants**: 100% offline, zero external API keys, zero network dependencies.
-- **Codebase Cleanliness**: Zero `TODO`, `FIXME`, `NotImplementedError`, or placeholder `pass` stubs across all 40+ source files.
-- **Latency Benchmark**: Average full autonomous pipeline roundtrip completed in **$1.52\text{ ms}$** (strict SLA budget: $< 500\text{ ms}$, operating $> 300\times$ faster).
-
----
-
-### 🤝 Inter-Member Integration Contracts
-
-Member 1 provides strongly-typed Pydantic v2 contract bridges to connect with Member 2 and Member 3 seamlessly:
-
-#### 1. Integration with Member 2 (Execution Engine — Playwright / Browser Automation)
-- **File**: `agents/schemas/member2_contract.py`
-- **Outgoing Payload**: `serialize_for_member2(recommendation)` generates a `HealingCandidate` payload containing the proposed replacement selector, candidate ranking, and confidence level for Playwright validation.
-- **Incoming Execution Result**: `parse_member2_execution_result(data)` safely parses browser execution outcomes into `ExecutionResult`, automatically normalizing case and status codes.
-- **Incoming Validation Feedback**: `parse_member2_feedback(data)` transforms post-execution validation results into `HealingResultFeedback` to close the learning loop in `MemoryStore`.
-
-#### 2. Integration with Member 3 (Platform & Infrastructure — API / Dashboard)
-- **File**: `agents/schemas/member3_contract.py`
-- **Dashboard Summary**: `DashboardWorkflowSummary` generates a comprehensive overview of test steps, execution timing, failure causes, and recovery metrics.
-- **SSE Streaming**: `format_sse_event(event)` formats workflow lifecycle events into standard Server-Sent Events (`text/event-stream`) for live UI updates.
-- **WebSocket Streaming**: `format_websocket_message(event)` serializes real-time state machine transitions for bidirectional WebSocket communication.
-
----
-
-### 🚀 Integration Quickstart for Member 2 & 3
-
-```python
-from agents.orchestration.agent_orchestrator import AgentOrchestrator
-from agents.planner.schemas import ApplicationContext
-from agents.schemas.member2_contract import serialize_for_member2, parse_member2_execution_result, parse_member2_feedback
-from agents.schemas.member3_contract import format_sse_event, DashboardWorkflowSummary
-
-# 1. Initialize Autonomous Orchestrator
-orchestrator = AgentOrchestrator()
-
-# 2. Start Test Planning
-plan = orchestrator.start_planning(app_context=ApplicationContext(app_name="App", base_url="https://example.com"))
-
-# 3. Hand off test plan to Member 2 for Playwright execution
-# ... Member 2 executes tests in browser ...
-
-# 4. Ingest execution result from Member 2
-exec_result = parse_member2_execution_result({
-    "test_name": "Login Flow",
-    "status": "FAILED",
-    "failed_step_index": 2,
-    "failed_selector": "#old-submit-btn",
-    "error_message": "Element not found: #old-submit-btn"
-})
-analysis, recommendation = orchestrator.submit_execution_result(exec_result, app_context)
-
-# 5. Hand off healing candidate to Member 2 if healing is recommended
-if recommendation and recommendation.action.value == "TRY_REPLACEMENT_SELECTOR":
-    member2_payload = serialize_for_member2(recommendation)
-    # ... Member 2 validates replacement selector in browser ...
-
-# 6. Submit validation feedback back to close learning loop
-feedback = parse_member2_feedback({
-    "healing_id": recommendation.healing_id,
-    "test_id": "test_1",
-    "original_selector": "#old-submit-btn",
-    "healed_selector": member2_payload["target_selector"],
-    "validation_status": "SUCCESS",
-    "execution_time_ms": 120
-})
-state = orchestrator.submit_healing_result(feedback, app_context)
-
-# 7. Stream events to Member 3 Dashboard
-for event in orchestrator.get_state().events:
-    sse_chunk = format_sse_event(event)
-```
-
----
-
-## 🏛️ Member 3: Platform Backend, Persistence & Multi-Agent Orchestration — Prashansha Maheshwari
-
-**Member 3 (`prashansha-branch`)** has engineered the platform foundation, relational persistence layer, inter-member workflow orchestration, real-time Server-Sent Events (SSE) telemetry stream, and cross-branch repository consolidation.
-
-### 📊 Subsystems Implementation Matrix (10 / 10 Complete)
-
-| # | Subsystem | Core Module(s) | Primary Test Suite | Status | Key Deliverable |
-|---|---|---|---|:---:|---|
-| **1** | **FastAPI Platform Architecture** | `backend/main.py`, `backend/config.py` | `tests/backend/test_health.py` | ✅ Complete | Asynchronous FastAPI service, CORS middleware, centralized configuration, health check probes |
-| **2** | **Persistence Layer** | `backend/models/`, `backend/database/` | `tests/backend/test_store.py` | ✅ Complete | `Store` interface with Firestore (production), JSON-file (offline dev) and in-memory (tests) backends. Originally SQLAlchemy 2.0 with SQLite & Supabase PostgreSQL, since replaced |
-| **3** | **Contract Boundary & Validation** | `backend/api/schemas.py` | `tests/backend/test_*.py` | ✅ Complete | Strict Pydantic v2 schemas for all request/response DTOs, URL normalization, and execution states |
-| **4** | **Domain Service Layer** | `backend/services/` | `tests/backend/test_*_service.py` | ✅ Complete | Atomic transaction management, business logic boundaries, custom exception hierarchy (`EntityNotFoundError`, etc.) |
-| **5** | **REST API Router Suite** | `backend/api/` | `tests/backend/test_*_api.py` | ✅ Complete | Full CRUD endpoints for workspaces, apps, test definitions, execution runs, and diagnostic logs |
-| **6** | **Cross-Layer Schema Converters** | `backend/orchestration/converters.py` | `tests/backend/test_workflow_orchestrator.py` | ✅ Complete | Zero-loss data translation bridging Member 1 AI Agent schemas and Member 2 Playwright engine structures |
-| **7** | **Platform Workflow Orchestrator** | `backend/orchestration/orchestrator.py` | `tests/backend/test_workflow_orchestrator.py` | ✅ Complete | End-to-end autonomous QA runner uniting Agent Planning, Playwright Execution, and Self-Healing |
-| **8** | **Real-Time SSE Telemetry Stream** | `backend/api/workflow.py` | `tests/backend/test_workflow_api.py` | ✅ Complete | Live event stream (`text/event-stream`) broadcasting step progression, screenshots, and locator healing events |
-| **9** | **Live Real-World Website Analyzer** | `backend/services/url_analyzer.py` | `tests/backend/test_workflow_api.py` | ✅ Complete | Live network inspection, interactive DOM element extraction (inputs, buttons, forms), SSL & A11y health scoring, autonomous test synthesis |
-| **10** | **Instant Live QA Dashboard Experience** | `frontend/src/` | `npm run build` | ✅ Complete | React + Vite cybernetic dashboard featuring Real Website QA Analyzer hero bar, Discovered DOM selector trees, real metrics & zero dummy data |
-
----
-
-### 📅 Day-by-Day Implementation Roadmap (Member 3)
-
-#### 🚀 Day 1: Platform Architecture, FastAPI Application & Infrastructure Setup
-- Architected the three-tier decoupled platform model separating AI cognition, headless browser execution, and backend persistence.
-- Initialized FastAPI ASGI server ([`backend/main.py`](backend/main.py)) with production middleware, exception handlers, and lifecycle hooks.
-- Implemented environment-driven configuration management ([`backend/config.py`](backend/config.py)) supporting dynamic database connection strings, CORS origins, and runtime debug toggles.
-- Added service readiness and liveness health check endpoints (`/api/health`).
-
-#### 🗄️ Day 2: Relational Persistence Layer & SQLAlchemy Declarative Models
-- Set up thread-safe SQLAlchemy engine and scoped session factories ([`backend/database/session.py`](backend/database/session.py)).
-- Authored declarative relational schema models:
-  - `Project` ([`backend/models/project.py`](backend/models/project.py)): Multi-tenant workspace separation and test suite grouping.
-  - `Application` ([`backend/models/application.py`](backend/models/application.py)): Target web application configurations, base URLs, and authentication metadata.
-  - `TestCase` ([`backend/models/test_case.py`](backend/models/test_case.py)): Test case catalog, category tagging (`SMOKE`, `REGRESSION`, `CRITICAL_PATH`), priority levels, and serialized step sequences.
-  - `TestExecution` ([`backend/models/test_execution.py`](backend/models/test_execution.py)): Execution run tracking, step timing telemetry, screenshot links, and self-healing mutation records.
-
-#### 🛡️ Day 3: Contract Boundary & Pydantic v2 Request/Response Schemas
-- Defined Pydantic v2 validation contracts ([`backend/api/schemas.py`](backend/api/schemas.py)) enforcing strict data boundaries across all API endpoints:
-  - `ProjectCreate`, `ProjectUpdate`, `ProjectResponse`
-  - `ApplicationCreate`, `ApplicationUpdate`, `ApplicationResponse`
-  - `TestCaseCreate`, `TestCaseUpdate`, `TestCaseResponse`, `TestStepSchema`
-  - `TestExecutionCreate`, `TestExecutionResponse`, `StepExecutionResult`
-  - `WorkflowExecuteRequest`, `WorkflowExecuteResponse`
-- Implemented schema sanitization and field constraints ensuring invalid payloads are rejected before database queries occur.
-
-#### 💼 Day 4: Project & Application Service Layer
-- Developed isolated service components ([`backend/services/project_service.py`](backend/services/project_service.py), [`backend/services/application_service.py`](backend/services/application_service.py)).
-- Enforced transaction boundaries with auto-rollback on failure, preventing database inconsistency.
-- Established centralized domain exception hierarchy ([`backend/services/exceptions.py`](backend/services/exceptions.py)):
-  - `EntityNotFoundError` (mapped to HTTP 404)
-  - `ValidationError` (mapped to HTTP 422)
-  - `ConflictError` (mapped to HTTP 409)
-
-#### 🧪 Day 5: Test Case & Step Management Services
-- Implemented `TestCaseService` ([`backend/services/test_case_service.py`](backend/services/test_case_service.py)):
-  - Step sequencing validation and target element integrity checks.
-  - Test case filtering by project ID, category, priority, and active state.
-  - Batch creation and automated update workflows for AI-synthesized test cases.
-
-#### ⏱️ Day 6: Test Execution Telemetry & Historical Persistence
-- Implemented `TestExecutionService` ([`backend/services/test_execution_service.py`](backend/services/test_execution_service.py)):
-  - State machine lifecycle transitions: `PENDING` $\to$ `RUNNING` $\to$ `PASSED` / `FAILED` / `HEALED` / `ERROR`.
-  - Detailed step-by-step telemetry logging including start time, end time, elapsed milliseconds, and error messages.
-  - Forensic artifact association: linking screenshot paths and DOM snapshots to historical execution logs.
-
-#### 🌐 Day 7: Comprehensive REST API Router Suite
-- Built complete REST API router endpoints ([`backend/api/`](backend/api/)):
-  - `GET`, `POST`, `PUT`, `DELETE` `/api/projects`: Complete workspace management.
-  - `GET`, `POST`, `PUT`, `DELETE` `/api/applications`: Target application cataloging.
-  - `GET`, `POST`, `PUT`, `DELETE` `/api/test-cases`: Full test definition lifecycle.
-  - `GET`, `POST` `/api/test-executions`: Execution triggering and detailed run audit inspection.
-
-#### 🌉 Day 8: Cross-Layer Domain Schema Converters
-- Engineered [`backend/orchestration/converters.py`](backend/orchestration/converters.py) to eliminate schema coupling between Member 1 and Member 2:
-  - `test_case_to_engine_plan()`: Translates Member 1's `TestCase` and `TestStep` into Member 2's `TestPlan`, `Step`, and `Target`.
-  - `engine_result_to_execution_result()`: Translates Member 2's browser `TestResult` back into Member 1's `ExecutionResult` and database models.
-  - Action mapping: converts semantic test actions (`CLICK`, `FILL`, `NAVIGATE`, `ASSERT_VISIBLE`, etc.) into engine-executable primitives.
-
-#### 🎛️ Day 9: End-to-End Platform Workflow Orchestrator
-- Architected and implemented [`PlatformWorkflowOrchestrator`](backend/orchestration/orchestrator.py):
-  - Bridges the cognitive AI intelligence layer with the browser automation layer.
-  - Orchestrates the full lifecycle: Plan Generation $\to$ Browser Execution $\to$ Failure Detection $\to$ AI Root Cause Diagnosis $\to$ Candidate Generation & Scoring $\to$ Browser Healing Validation $\to$ Database Persistence.
-  - Features asynchronous execution runners that gracefully update database states at each stage.
-
-#### 📡 Day 10: Real-Time Server-Sent Events (SSE) Streaming Engine
-- Built real-time reactive streaming endpoint `GET /api/workflow/stream/{execution_id}` ([`backend/api/workflow.py`](backend/api/workflow.py)):
-  - Formats live execution lifecycle events into standard W3C Server-Sent Events (`text/event-stream`).
-  - Broadcasts `step_start`, `step_complete`, `step_failed`, `healing_started`, and `healing_resolved` events in real time.
-  - Emits screenshot paths and healed selector updates directly to connected frontend dashboards without polling.
-
-#### 🩹 Day 11: Closed-Loop Self-Healing Execution Bridge
-- Implemented automated healing validation and feedback loop:
-  - Takes candidates produced by Member 1's `CandidateGenerator` and runs browser re-verification passes.
-  - Feeds validation results back to Member 1's `InMemoryStore` via `HealingResultFeedbackProcessor`.
-  - Automatically updates the persistent database `TestCase` with healed selectors, permanently curing test flakiness.
-
-#### 🧪 Day 12: Backend Test Suite & Isolation Harness
-- Authored comprehensive test suite in [`tests/backend/`](tests/backend/):
-  - 83 unit and integration tests across database sessions, services, APIs, and orchestration logic.
-  - Isolated in-memory SQLite database fixtures (`test_db`) ensuring fast, deterministic, zero-side-effect test runs. *(Now an in-memory `MemoryStore` per test, `tests/conftest.py`.)*
-  - Verified 100% test pass rate across database CRUD, REST APIs, converter transformations, and orchestrator pipelines.
-
-#### 🔀 Day 13: Repository Consolidation, Merge Conflict Resolution & Artifact Cleanup
-- Successfully merged and integrated all three team branches (`origin/main`, `origin/vinamra-branch`, and `origin/prashansha-branch`).
-- Resolved complex merge conflicts across `README.md`, `pyproject.toml`, and test initialization modules.
-- Removed over 4,400 lines of obsolete duplicate code (`artifacts/agents/`), stale test screenshots, and scratch files.
-- Modernized [`.gitignore`](.gitignore) with artifact and database exclusions to keep Git history clean.
-
-#### 🐳 Day 14: Containerization & DevOps Infrastructure (planned)
-- Drafted a `Dockerfile`, a `docker-compose.yml` and a GitHub Actions matrix; none were committed at the time. A [`Dockerfile`](Dockerfile) (API + dashboard + Chromium, non-root, health check) was added later; there is still no `docker-compose.yml`.
-- CI now runs from [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on Python 3.11 (locked dependencies, full test suite, lint, `pip-audit`, frontend build and `npm audit`).
-
-#### 📚 Day 15: Technical Documentation & Platform Governance Suite
-- Created 5 comprehensive technical architectural specifications in [`docs/`](docs/):
-  - [`docs/backend-architecture.md`](docs/backend-architecture.md): FastAPI service layer & database models.
-  - [`docs/engine-architecture.md`](docs/engine-architecture.md): Playwright browser engine & locator resolution.
-  - [`docs/self-healing-orchestration.md`](docs/self-healing-orchestration.md): Autonomous self-healing lifecycle & state machine.
-  - [`docs/integration-guide.md`](docs/integration-guide.md): Developer guide, offline mock vs cloud LLM configurations.
-  - [`docs/deployment-operations.md`](docs/deployment-operations.md): Environment variables, Render deployment, example Docker/Kubernetes configurations, and operations manual.
-  - [`CONTRIBUTING.md`](CONTRIBUTING.md): Code style, testing guidelines, and PR workflow.
-
-#### 🌐 Day 16: Live Real-World Website Analyzer & DOM Synthesis Engine
-- Engineered [`URLAnalyzerService`](backend/services/url_analyzer.py) enabling zero-config testing of any URL:
-  - Fetches target HTML live over HTTP/HTTPS with realistic browser User-Agent and real latency (TTFB) measurement.
-  - Discovers actual interactive DOM elements: inputs (type, name, ID, placeholder, selector), buttons (text, class, type, selector), forms (action, method, ID), links, and headings.
-  - Audits site security (HTTPS, HSTS, X-Frame-Options, CSP), accessibility compliance (unlabeled inputs, missing alt tags), and performance ratings.
-  - Autonomously synthesizes executable Playwright test plans tailored to the discovered DOM elements.
-
-#### ☁️ Day 17: Supabase PostgreSQL Migration & IPv4 Pooler Hardening *(superseded: storage moved to Firebase Cloud Firestore)*
-- Integrated cloud Supabase PostgreSQL persistence via dedicated IPv4 transaction pooler (`aws-0-*.pooler.supabase.com:5432`).
-- Fixed cloud connection issues on Render and deployed container environments with fallback to live HTTP-DOM verification when browser binaries are missing.
-- Hardened Playwright navigation with `wait_until="domcontentloaded"` and 15s timeout to prevent cold-start timeouts.
-
-#### ⚡ Day 18: Instant Real Live QA Hero Dashboard & Complete Dummy Data Purge
-- Added the **Instant Real Live Website QA Analyzer** hero bar directly to the top of the frontend dashboard:
-  - Enter any live URL, customize optional QA objectives, and run tests with 1 click.
-  - Quick test presets (`The Internet (Login)`, `Playwright TodoMVC`, `Hacker News`, `Example Domain`).
-  - Real-time DOM element count badges, quality audit chips, and interactive selector inspection.
-- **100% Real Data Guarantee**: Completely purged all legacy mock/dummy data and simulated fallback runs from the frontend components and database. Disabled automatic dummy seeding (`seed_database_if_empty` made a no-op) so the entire platform operates exclusively on live target analytics.
+[MIT](LICENSE)
