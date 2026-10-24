@@ -30,7 +30,9 @@
 | CI | Live | `.github/workflows/ci.yml`: locked deps, tests, lint, `pip-audit`, frontend build, `npm audit` |
 | Deployment & rollback (5.7) | Not built | |
 
-**Self-healing benchmark** (`python -m engine.heal_benchmark`; 4 pages × every test target × 15 mutation operators, 277 cases; `--quick` runs 52). On the quick corpus TestSphere heals **92.3%** of the cases where healing is right with **0 false heals**, and refuses **100%** of the cases where the target is gone or became a different element. A static fallback chain (first unique fallback, like `locator.or(...)`) heals as many but **16.3%** of its heals land on the wrong element and it refuses only 46.2%. Ground truth is element identity; details in [docs/healing-benchmark-quick.md](docs/healing-benchmark-quick.md). The original 6-mutant benchmark is still `python -m engine.benchmark`.
+**Self-healing benchmark** (`python -m engine.heal_benchmark`): 277 broken-locator cases — 4 pages × every test target × 15 mutation operators. TestSphere heals **95.2%** of the cases where healing is right with **0 false heals**, and refuses **100%** of the cases where the target is gone or became a different element. A static fallback chain (first unique fallback, like `locator.or(...)`) heals 96.1% but **17.4%** of its heals land on the wrong element, and it refuses only 40.0%. Ground truth is element identity; see [docs/healing-benchmark.md](docs/healing-benchmark.md). The original 6-mutant benchmark is still `python -m engine.benchmark`.
+
+**Load** (`python scripts/loadtest.py`, see [docs/load-test.md](docs/load-test.md)): the dashboard API serves ~600–700 requests/s from 1 to 100 concurrent clients (p95 250 ms at 100, no errors); 8 pipeline runs started together finish in 27 s with the server and Chromium peaking at ~460 MB.
 
 ---
 

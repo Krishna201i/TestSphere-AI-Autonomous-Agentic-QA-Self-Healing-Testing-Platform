@@ -204,6 +204,8 @@ def score_fingerprint(
 
     if stored.tag and live.tag and stored.tag != live.tag:
         return 0.0, signals
+    if _input_kind(stored) != _input_kind(live):
+        return 0.0, signals  # e.g. a checkbox that became a radio: a different control
 
     score = (
         W_ATTRIBUTE * signals.attribute
@@ -268,6 +270,17 @@ def _report(
         confidence=selected.score if selected else 0.0,
         strategy_used=strategy,
     )
+
+
+# Input types that behave alike; a change between groups is a different control
+_TEXT_LIKE = {"", "text", "email", "password", "search", "tel", "url", "number"}
+
+
+def _input_kind(fp: ElementFingerprint) -> str | None:
+    if fp.tag != "input":
+        return None
+    kind = (fp.attributes.get("type") or "").lower()
+    return "text" if kind in _TEXT_LIKE else kind
 
 
 def _identity_matches(stored: ElementFingerprint, live: ElementFingerprint,

@@ -246,7 +246,7 @@ def _moved(page, m, el):
 def _decoy(el: El, tag: str) -> El:
     d = copy.deepcopy(el)
     d.attrs.pop("data-t", None)
-    for a in ("id", "name", "data-testid"):
+    for a in ("id", "name", "data-testid", "href"):  # a look-alike link goes somewhere else
         if a in d.attrs:
             d.attrs[a] = _suffix(d.attrs[a], tag)
     if "placeholder" in d.attrs:

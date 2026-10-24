@@ -8,23 +8,23 @@ A heal is **correct** only if the healed locator resolves to the very element th
 | :--- | ---: | ---: | ---: | ---: |
 | No healing | 0.0% | 0.0% (0) | 100.0% | 0.0 s |
 | Fallback chain (first unique fallback) | 96.1% | 17.4% (42) | 40.0% | 2.0 s |
-| **TestSphere healer** | 0.0% | 0.0% (0) | 100.0% | 0.0 s |
+| **TestSphere healer** | 95.2% | 0.0% (0) | 100.0% | 2.0 s |
 
 ## By mutation
 
 | Mutation | Should heal | Cases | Fallback chain | TestSphere |
 | :--- | :---: | ---: | :--- | :--- |
-| testid-renamed | yes | 21 | 21/21 healed | 0/21 healed |
-| testid-removed | yes | 21 | 21/21 healed | 0/21 healed |
-| id-renamed | yes | 21 | 20/21 healed | 0/21 healed |
-| name-renamed | yes | 16 | 16/16 healed | 0/16 healed |
-| class-renamed | yes | 19 | 19/19 healed | 0/19 healed |
-| ids-renamed | yes | 16 | 16/16 healed | 0/16 healed |
-| text-changed | yes | 9 | 9/9 healed | 0/9 healed |
-| wrapped | yes | 21 | 21/21 healed | 0/21 healed |
-| moved | yes | 21 | 21/21 healed | 0/21 healed |
-| look-alike-added | yes | 21 | 21/21 healed | 0/21 healed |
-| everything-renamed | yes | 21 | 14/21 healed | 0/21 healed |
+| testid-renamed | yes | 21 | 21/21 healed | 21/21 healed |
+| testid-removed | yes | 21 | 21/21 healed | 21/21 healed |
+| id-renamed | yes | 21 | 20/21 healed | 21/21 healed |
+| name-renamed | yes | 16 | 16/16 healed | 16/16 healed |
+| class-renamed | yes | 19 | 19/19 healed | 19/19 healed |
+| ids-renamed | yes | 16 | 16/16 healed | 16/16 healed |
+| text-changed | yes | 9 | 9/9 healed | 9/9 healed |
+| wrapped | yes | 21 | 21/21 healed | 21/21 healed |
+| moved | yes | 21 | 21/21 healed | 21/21 healed |
+| look-alike-added | yes | 21 | 21/21 healed | 21/21 healed |
+| everything-renamed | yes | 21 | 14/21 healed | 11/21 healed |
 | removed | no | 21 | 19/21 refused, 2 false | 21/21 refused |
 | replaced-by-look-alike | no | 21 | 1/21 refused, 20 false | 21/21 refused |
 | tag-changed | no | 17 | 0/17 refused, 17 false | 17/17 refused |
