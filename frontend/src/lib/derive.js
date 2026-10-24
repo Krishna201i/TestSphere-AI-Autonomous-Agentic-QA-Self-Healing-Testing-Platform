@@ -97,11 +97,30 @@ export const LOOP_STAGES = [
     about: 'Proposes fixes for a human to approve, and turns header, CORS and cookie findings into a patch against your repository.' },
   { id: 'validate', num: '5', title: 'Validation Engine', short: 'Verify', runKeys: [], built: 'built', page: 'validation',
     about: 'Re-runs the original check after a fix. A failed retest goes back to remediation.' },
-  { id: 'deploy', num: '6', title: 'Verified Deploy', short: 'Deploy', runKeys: [], built: 'planned', page: 'validation',
-    about: 'Deploy, health-check and roll back the app under test. Planned, not built yet.' },
+  { id: 'deploy', num: '6', title: 'Verified Deploy', short: 'Deploy', runKeys: [], built: 'built', page: 'validation',
+    about: 'Calls your deploy hook, waits until the new version is healthy, runs the smoke tests, and rolls back if either fails.' },
 ];
 
 const RUN_ACTIVE = ['queued', 'running'];
+export const DEPLOY_ACTIVE = ['queued', 'deploying', 'verifying', 'rolling_back'];
+export const DEPLOY_LABEL = {
+  queued: 'Queued', deploying: 'Deploying', verifying: 'Verifying', rolling_back: 'Rolling back', verified: 'Verified',
+  failed: 'Failed', rolled_back: 'Rolled back', rollback_failed: 'Rollback failed', error: 'Error',
+};
+
+/** Loop state of stage 6 from the newest deployment. */
+export function deployState(deployments = [], projects = []) {
+  const d = deployments[0];
+  if (!d) {
+    const configured = projects.some((p) => p.deploy_hook_url);
+    return { state: 'idle', note: configured ? 'Ready to deploy' : 'Add a deploy hook' };
+  }
+  const short = d.commit ? ` · ${d.commit.slice(0, 7)}` : '';
+  if (DEPLOY_ACTIVE.includes(d.status)) return { state: 'running', note: `${DEPLOY_LABEL[d.status]}${short}` };
+  if (d.status === 'verified') return { state: 'done', note: `Verified${short}` };
+  if (d.status === 'rolled_back') return { state: 'waiting', note: 'Rolled back' };
+  return { state: 'failed', note: DEPLOY_LABEL[d.status] || d.status };
+}
 
 /** One state for several pipeline-run stages: running beats failed beats done. */
 export function mergeStageStatus(statuses) {
@@ -149,6 +168,7 @@ export function loopModel(ws) {
       else if (awaitingRetest) { state = 'waiting'; note = `${awaitingRetest} to retest`; }
       else if (verified) { state = 'done'; note = `${verified} verified`; }
     }
+    if (st.id === 'deploy') ({ state, note } = deployState(ws.deployments, ws.projects));
     if (st.built === 'planned') state = 'planned';
     if (!note && state === 'failed') note = parts.find((p) => p.status === 'failed')?.detail?.split('\n')[0] || null;
     if (!active && state === 'pending') state = 'idle';

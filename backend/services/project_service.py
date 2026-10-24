@@ -13,11 +13,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from backend.database.store import Record, Store
-from backend.models import APPLICATIONS, PIPELINE_RUNS, PROJECTS
+from backend.models import APPLICATIONS, DEPLOYMENTS, PIPELINE_RUNS, PROJECTS
 from backend.services.exceptions import ProjectNotFoundError
 
 # Fields a client may set on a project besides name/description
-PIPELINE_FIELDS = ("app_url", "repo_url", "prompt", "schedule_minutes", "slack_webhook_url", "notify_on")
+PIPELINE_FIELDS = ("app_url", "repo_url", "prompt", "schedule_minutes", "slack_webhook_url", "notify_on",
+                   "deploy_hook_url", "rollback_hook_url", "health_url", "deploy_on_pass")
 
 
 def new_webhook_secret() -> str:
@@ -84,4 +85,5 @@ class ProjectService:
         for app in db.find(APPLICATIONS, project_id=project_id):
             ApplicationService.delete_application(db, app["id"])
         db.delete_where(PIPELINE_RUNS, project_id=project_id)
+        db.delete_where(DEPLOYMENTS, project_id=project_id)
         db.delete(PROJECTS, project_id)

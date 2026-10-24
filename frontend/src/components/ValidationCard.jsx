@@ -1,8 +1,8 @@
 import React from 'react';
-import { Activity, CircleDashed } from 'lucide-react';
+import { Activity, Rocket } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { AnimatedNumber, Sparkline } from './charts';
-import { executionStats, healthStats, retestStats, timeAgo } from '../lib/derive';
+import { deployState, executionStats, healthStats, retestStats, timeAgo } from '../lib/derive';
 
 const asPct = (v) => `${Math.round(v * 100)}%`;
 
@@ -84,6 +84,19 @@ export function LatestRuns({ onNavigate, limit = 4 }) {
   );
 }
 
+function DeployFoot({ onNavigate }) {
+  const { deployments, projects } = useWorkspace();
+  const { state, note } = deployState(deployments, projects);
+  return (
+    <div className="card-foot">
+      <span className={`row small ${state === 'done' ? 'ok-text' : state === 'failed' ? 'bad-text' : 'muted'}`}>
+        <Rocket size={14} aria-hidden="true" /> Deploy: {note}
+      </span>
+      <button type="button" className="link-btn small" onClick={() => onNavigate('validation')}>Deployments</button>
+    </div>
+  );
+}
+
 export default function ValidationCard({ onNavigate }) {
   return (
     <section className="card" aria-labelledby="validation-title">
@@ -93,9 +106,7 @@ export default function ValidationCard({ onNavigate }) {
       <ResultTiles />
       <LatestRuns onNavigate={onNavigate} />
       <HealthBox />
-      <div className="card-foot">
-        <span className="row small muted"><CircleDashed size={14} aria-hidden="true" /> Deploy and rollback for your app: planned</span>
-      </div>
+      <DeployFoot onNavigate={onNavigate} />
     </section>
   );
 }

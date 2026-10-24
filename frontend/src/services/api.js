@@ -127,6 +127,9 @@ export const updateProject = (id, payload) => request(`/api/projects/${id}`, { m
 export const rotateWebhookSecret = (id) => request(`/api/projects/${id}/webhook-secret`, { method: 'POST' });
 export const runProjectPipeline = (projectId, ingest = false) =>
   request('/api/pipelines/run', { method: 'POST', body: { project_id: projectId, ingest } });
+/** Verified deploy: hook -> health -> smoke tests -> rollback on failure. */
+export const deployProject = (projectId) => request(`/api/pipelines/projects/${projectId}/deploy`, { method: 'POST' });
+export const getDeployments = (limit = 20) => request(`/api/pipelines/deployments?limit=${limit}`);
 export const quickPipeline = (payload) => request('/api/pipelines/quick', { method: 'POST', body: payload });
 export const getPipelineRuns = (limit = 30) => request(`/api/pipelines/runs?limit=${limit}`);
 export const getPipelineRun = (id) => request(`/api/pipelines/runs/${id}`);

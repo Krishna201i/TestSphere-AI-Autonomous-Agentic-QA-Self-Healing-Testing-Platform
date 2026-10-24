@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { executionStats, loopModel, mergeStageStatus, pct } from '../lib/derive';
+import { deployState, executionStats, loopModel, mergeStageStatus, pct } from '../lib/derive';
 
 const run = (status) => ({ status });
 
@@ -70,7 +70,7 @@ describe('loopModel', () => {
     expect(state(m, 'attack')).toBe('idle');
   });
 
-  it('asks for approval and retests, and keeps deploy planned', () => {
+  it('asks for approval and retests, and asks for a deploy hook', () => {
     const findings = [
       { key: 'a', remediation: { kind: 'header' } },
       { key: 'b', remediation: { kind: 'header' } },
@@ -79,7 +79,8 @@ describe('loopModel', () => {
     expect(state(m, 'remediate')).toBe('waiting');
     expect(m.stages.find((s) => s.id === 'remediate').note).toBe('1 fix to approve');
     expect(state(m, 'validate')).toBe('waiting');
-    expect(state(m, 'deploy')).toBe('planned');
+    expect(state(m, 'deploy')).toBe('idle');
+    expect(m.stages.find((s) => s.id === 'deploy').note).toBe('Add a deploy hook');
     expect(m.attention.map((s) => s.id)).toEqual(['remediate', 'validate']);
   });
 
@@ -104,5 +105,15 @@ describe('usePersistentState', () => {
     first.unmount();
     const second = renderHook(() => usePersistentState('t.filter', 'all'));
     expect(second.result.current[0]).toBe('FAILED');
+  });
+});
+
+describe('deployState', () => {
+  it('follows the newest deployment', () => {
+    expect(deployState([], [{ deploy_hook_url: 'https://api.render.com/deploy/x' }])).toEqual({ state: 'idle', note: 'Ready to deploy' });
+    expect(deployState([{ status: 'verifying', commit: 'abcdef123' }])).toEqual({ state: 'running', note: 'Verifying · abcdef1' });
+    expect(deployState([{ status: 'verified', commit: null }]).state).toBe('done');
+    expect(deployState([{ status: 'rolled_back' }])).toEqual({ state: 'waiting', note: 'Rolled back' });
+    expect(deployState([{ status: 'rollback_failed' }])).toEqual({ state: 'failed', note: 'Rollback failed' });
   });
 });

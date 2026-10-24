@@ -188,6 +188,17 @@ class Settings(BaseSettings):
         default_factory=lambda: os.getenv("ARTIFACT_TRACES", "true").lower() in ("true", "1"))
     ARTIFACT_RETENTION_DAYS: int = Field(default_factory=lambda: int(os.getenv("ARTIFACT_RETENTION_DAYS", "30")))
 
+    # Verified deploy (loop stage 6): deploy hooks may only go to these hosts
+    # (Render, Vercel and Netlify are always allowed), and a deployment must be
+    # healthy DEPLOY_HEALTHY_CHECKS times in a row within DEPLOY_TIMEOUT_SECONDS.
+    # Without a visible change on the health URL, the new version is assumed
+    # live after DEPLOY_SETTLE_SECONDS.
+    DEPLOY_HOOK_HOSTS: str = Field(default_factory=lambda: os.getenv("DEPLOY_HOOK_HOSTS", ""))
+    DEPLOY_TIMEOUT_SECONDS: int = Field(default_factory=lambda: int(os.getenv("DEPLOY_TIMEOUT_SECONDS", "600")))
+    DEPLOY_SETTLE_SECONDS: int = Field(default_factory=lambda: int(os.getenv("DEPLOY_SETTLE_SECONDS", "90")))
+    DEPLOY_POLL_SECONDS: int = Field(default_factory=lambda: int(os.getenv("DEPLOY_POLL_SECONDS", "10")))
+    DEPLOY_HEALTHY_CHECKS: int = Field(default_factory=lambda: int(os.getenv("DEPLOY_HEALTHY_CHECKS", "3")))
+
     # The dashboard's public address, for links in notifications (Slack).
     # On Render it defaults to the service's own URL.
     DASHBOARD_URL: str = Field(default_factory=lambda: os.getenv("DASHBOARD_URL") or os.getenv("RENDER_EXTERNAL_URL", ""))

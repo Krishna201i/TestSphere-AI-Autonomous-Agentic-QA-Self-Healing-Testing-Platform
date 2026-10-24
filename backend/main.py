@@ -74,6 +74,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         if interrupted := recover_interrupted(get_store()):
             logger.warning("Marked %d pipeline run(s) interrupted by the restart.", interrupted)
+        from backend.pipeline.deploy import recover_interrupted as recover_deployments
+
+        if interrupted := recover_deployments(get_store()):
+            logger.warning("Marked %d deployment(s) interrupted by the restart.", interrupted)
     except Exception as exc:  # noqa: BLE001 - startup check: log and keep serving
         logger.warning("Could not check for interrupted pipeline runs: %s", exc)
     scheduler_task = None

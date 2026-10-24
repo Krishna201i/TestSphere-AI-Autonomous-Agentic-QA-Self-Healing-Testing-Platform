@@ -200,10 +200,25 @@ async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None
             state.save(status="error", error=f"Internal error: {exc}", finished_at=now_iso())
         finished = db.get(PIPELINE_RUNS, run_id)
         try:
-            await notify_run(db.get(PROJECTS, project["id"]) or project, finished)
+            current = db.get(PROJECTS, project["id"]) or project
+            await notify_run(current, finished)
+            _deploy_if_green(db, current, finished)
         except StoreUnavailableError:
             pass
         return finished
+
+
+def _deploy_if_green(db: Store, project: Record, run: Record) -> None:
+    """Close the loop: a clean run of a project with deploy_on_pass ships it (stage 6)."""
+    from backend.pipeline import deploy
+
+    if not (project.get("deploy_on_pass") and project.get("deploy_hook_url")):
+        return
+    if run.get("status") != "passed" or run.get("regressions"):
+        return
+    if deploy.active_deployment(db, project["id"]):
+        return
+    deploy.start_deployment(db, project, actor=run.get("actor") or "pipeline", trigger="pipeline", run_id=run["id"])
 
 
 async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner: Any) -> None:
