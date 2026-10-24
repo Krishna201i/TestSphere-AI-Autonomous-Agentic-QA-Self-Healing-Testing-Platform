@@ -199,6 +199,10 @@ class Settings(BaseSettings):
     DEPLOY_POLL_SECONDS: int = Field(default_factory=lambda: int(os.getenv("DEPLOY_POLL_SECONDS", "10")))
     DEPLOY_HEALTHY_CHECKS: int = Field(default_factory=lambda: int(os.getenv("DEPLOY_HEALTHY_CHECKS", "3")))
 
+    # Fernet key that encrypts stored integration tokens (GitHub).  Required
+    # on hosted servers; local development generates data/.token_key.
+    TOKEN_ENCRYPTION_KEY: str = Field(default_factory=lambda: os.getenv("TOKEN_ENCRYPTION_KEY", ""))
+
     # The dashboard's public address, for links in notifications (Slack).
     # On Render it defaults to the service's own URL.
     DASHBOARD_URL: str = Field(default_factory=lambda: os.getenv("DASHBOARD_URL") or os.getenv("RENDER_EXTERNAL_URL", ""))

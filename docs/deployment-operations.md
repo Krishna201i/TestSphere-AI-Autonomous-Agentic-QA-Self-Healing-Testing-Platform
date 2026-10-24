@@ -111,6 +111,17 @@ API process, also with `PIPELINE_EXECUTION=worker`.
 | `DEPLOY_SETTLE_SECONDS` | `90` | When the health URL looks the same before and after, wait this long before trusting it |
 | `DEPLOY_POLL_SECONDS` / `DEPLOY_HEALTHY_CHECKS` | `10` / `3` | Health check interval and how many healthy answers in a row count |
 
+**GitHub** (Profile → Integrations): each user connects GitHub with a fine-grained personal access token
+limited to chosen repositories, with *Contents*, *Pull requests* and *Commit statuses* set to Read and write.
+The token is checked with GitHub, encrypted with `TOKEN_ENCRYPTION_KEY` and never returned to the browser.
+Then **Open pull request** on a fix patch creates a branch `testsphere/fix-<id>` from the commit the patch was
+built against, with one commit of the patched files, and a pull request to the default branch. Runs started
+by a GitHub push set a `TestSphere` commit status (success / failure / error) linking to the run page.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `TOKEN_ENCRYPTION_KEY` | generated in `data/.token_key` locally; **required when hosted** | Fernet key for stored integration tokens. Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Changing it disconnects every user's GitHub |
+
 Slack alerts are set per project in Autopilot → project → Settings: paste a Slack incoming-webhook URL
 (Slack → Apps → *Incoming Webhooks*; only `https://hooks.slack.com/services/...` is accepted) and choose
 "when a run fails or regresses" or "after every run". Each run page also offers a **JUnit XML** download

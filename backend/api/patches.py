@@ -27,6 +27,7 @@ from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
 from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Record, Store
+from backend.github import parse_repo
 from backend.models import FIX_PATCHES, PROJECTS
 from backend.ratelimit import limit_runs
 from backend.services import security_service as findings_store
@@ -78,7 +79,7 @@ def _workspace() -> Path:
 
 def _commit(root: Path) -> str | None:
     try:
-        res = subprocess.run(["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+        res = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
                              capture_output=True, text=True, timeout=10)
         return res.stdout.strip() or None if res.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired):
@@ -92,7 +93,8 @@ def _generate(repo: str, findings: list[dict[str, Any]], site_url: str) -> dict[
         return {
             "commit": _commit(root),
             "frameworks": result.frameworks,
-            "files": [vars(f) for f in result.files],
+            "files": [{k: v for k, v in vars(f).items() if k != "content"} for f in result.files],
+            "contents": {f.path: f.content for f in result.files},  # stays on the server
             "applied": [vars(a) for a in result.applied],
             "manual": [vars(m) for m in result.manual],
             "patch": result.patch,
@@ -103,8 +105,10 @@ def _generate(repo: str, findings: list[dict[str, Any]], site_url: str) -> dict[
 
 
 def _public(row: Record) -> dict[str, Any]:
-    return {k: row.get(k) for k in ("id", "target_url", "repo", "commit", "frameworks", "files", "applied",
-                                     "manual", "patch", "finding_keys", "actor", "created_at")}
+    out = {k: row.get(k) for k in ("id", "target_url", "repo", "commit", "frameworks", "files", "applied",
+                                    "manual", "patch", "finding_keys", "actor", "created_at", "pull_request")}
+    out["github"] = parse_repo(row.get("repo")) is not None and bool(row.get("contents"))
+    return out
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -166,3 +170,73 @@ def download_patch(patch_id: int, db: Store = Depends(get_db), user: User = Depe
     return Response(content=row.get("patch") or "", media_type="text/x-diff",
                     headers={"Content-Disposition": f'attachment; filename="testsphere-fix-{patch_id}.patch"',
                              "X-Content-Type-Options": "nosniff"})
+
+
+class PullRequestRequest(BaseModel):
+    title: str | None = Field(None, max_length=200)
+
+
+def _check_text(file: dict[str, Any]) -> str:
+    if file.get("verified") is True:
+        return "still parses"
+    if file.get("verified") is False:
+        return f"syntax error: {file.get('check_note') or 'see the file'}"
+    return "not syntax-checked"
+
+
+def _pr_body(row: Record) -> str:
+    lines = ["Security fixes proposed by **TestSphere AI** for issues its passive scan found on "
+             f"{row['target_url']}.", "", "### What changes"]
+    lines += [f"- `{a['check_id']}`: {a['how']} (`{a['file']}`)" for a in row.get("applied") or []]
+    manual = row.get("manual") or []
+    if manual:
+        lines += ["", "### Still needs a change by hand"] + [f"- `{m['check_id']}`: {m['reason']}" for m in manual]
+    checks = [f"- `{f['path']}`: {_check_text(f)}" for f in row.get("files") or []]
+    lines += ["", "### Checked", *checks, "", "Deploy, then retest the findings in TestSphere (Security → Validation) "
+              "to confirm the fix on the live site."]
+    return "\n".join(lines)
+
+
+@router.post("/{patch_id}/pull-request", status_code=status.HTTP_201_CREATED)
+async def open_pull_request(
+    patch_id: int,
+    payload: PullRequestRequest | None = None,
+    db: Store = Depends(get_db),
+    user: User = Depends(limit_runs),
+) -> dict[str, Any]:
+    """Open a pull request with this patch on the repository it was built from."""
+    from backend.api.integrations import github_token
+    from backend.github import GitHubClient, GitHubError
+
+    row = ensure_owned(user, db.get(FIX_PATCHES, patch_id), "Fix patch")
+    if row.get("pull_request"):
+        return row["pull_request"]
+    repo = parse_repo(row.get("repo"))
+    if not repo:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Pull requests can only be opened on https://github.com repositories.")
+    contents = row.get("contents") or {}
+    if not contents or not row.get("commit"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="This patch changes no files, or was made before pull requests were supported. "
+                                   "Generate it again.")
+    token = github_token(db, user.uid)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Connect GitHub first (Profile → Integrations).")
+    title = (payload.title if payload and payload.title else None) or \
+        f"Security headers and cookie fixes from TestSphere ({', '.join(sorted({a['check_id'] for a in row.get('applied') or []}))})"[:200]
+
+    def open_pr() -> dict[str, Any]:
+        with GitHubClient(token) as gh:
+            return gh.open_fix_pr(*repo, base_sha=row["commit"], files=sorted(contents.items()),
+                                  branch=f"testsphere/fix-{patch_id}", title=title, body=_pr_body(row))
+
+    try:
+        pr = await asyncio.to_thread(open_pr)
+    except GitHubError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    db.update(FIX_PATCHES, patch_id, pull_request=pr)
+    record_audit(db, actor=actor_for(user, "dev_active"), kind="patch", ref=str(patch_id), owner_uid=user.uid,
+                 message=f"Pull request #{pr['number']} opened on {'/'.join(repo)} for fix patch #{patch_id}")
+    return pr
