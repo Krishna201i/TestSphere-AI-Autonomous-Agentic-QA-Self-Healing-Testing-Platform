@@ -232,7 +232,7 @@ export default function Reports({ onNavigate }) {
   const q = query.trim().toLowerCase();
   const results = data.results.filter((t) => {
     const label = t.healed && t.status === 'PASSED' ? 'HEALED' : t.status;
-    return (statusFilter === 'all' || label === statusFilter)
+    return (statusFilter === 'all' || label === statusFilter || (statusFilter === 'FLAKY' && t.flaky))
       && (!q || `${t.name} ${t.run.project_name} ${t.error || ''}`.toLowerCase().includes(q));
   });
 
@@ -399,7 +399,7 @@ export default function Reports({ onNavigate }) {
                 <input value={query} onChange={(e) => { setQuery(e.target.value); setShown(PAGE_SIZE); }} placeholder="Search tests, projects, errors..." aria-label="Search results" />
               </div>
               <div className="tabs" role="tablist" aria-label="Filter by result">
-                {['all', 'PASSED', 'HEALED', 'FAILED'].map((s) => (
+                {['all', 'PASSED', 'HEALED', 'FAILED', 'FLAKY'].map((s) => (
                   <button key={s} type="button" role="tab" aria-selected={statusFilter === s} className={`tab ${statusFilter === s ? 'active' : ''}`} onClick={() => { setStatusFilter(s); setShown(PAGE_SIZE); }}>{s === 'all' ? 'all' : s.toLowerCase()}</button>
                 ))}
               </div>
@@ -411,10 +411,10 @@ export default function Reports({ onNavigate }) {
                   <tbody>
                     {results.slice(0, shown).map((t) => (
                       <tr key={`${t.run.id}-${t.execution_id}`}>
-                        <td className="small">#{t.run.id}<div className="muted">{t.run.trigger}</div></td>
+                        <td className="small"><button type="button" className="link-btn" onClick={() => onNavigate('runs', { tab: `${t.run.id}/${t.execution_id}` })}>#{t.run.id}</button><div className="muted">{t.run.trigger}</div></td>
                         <td className="cell-wrap small">{t.run.project_name}</td>
                         <td className="cell-wrap">{t.name}<div className="small muted">{t.category || 'saved'}</div></td>
-                        <td><span className={`status ${t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}`}>{t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}</span></td>
+                        <td><span className="row"><span className={`status ${t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}`}>{t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}</span>{t.flaky && <span className="status FLAKY">Flaky</span>}{t.quarantined && <span className="pill gray">Quarantined</span>}</span></td>
                         <td className="small cell-wrap">{t.error ? t.error.split('\n')[0] : '—'}</td>
                         <td className="small muted">{timeAgo(t.run.finished_at || t.run.started_at)}</td>
                       </tr>

@@ -71,9 +71,11 @@ export function LatestRuns({ onNavigate, limit = 4 }) {
         <ul className="run-list">
           {runs.map((r) => (
             <li key={r.id}>
-              <span className={`status run-${r.status}`}>{r.status}</span>
-              <span className="rl-name">#{r.id} {r.project_name}{r.summary ? <span className="muted"> · {r.summary.passed}/{r.summary.total} passed</span> : null}</span>
-              <span className="muted xsmall nowrap">{timeAgo(r.finished_at || r.started_at || r.created_at)}</span>
+              <button type="button" className="run-link" onClick={() => onNavigate('runs', { tab: String(r.id) })}>
+                <span className={`status run-${r.status}`}>{r.status}</span>
+                <span className="rl-name">#{r.id} {r.project_name}{r.summary ? <span className="muted"> · {r.summary.passed}/{r.summary.total} passed</span> : null}</span>
+                <span className="muted xsmall nowrap">{timeAgo(r.finished_at || r.started_at || r.created_at)}</span>
+              </button>
             </li>
           ))}
         </ul>

@@ -6,6 +6,7 @@ Does not modify or duplicate any shared contracts.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -155,6 +156,7 @@ class TestCaseUpdate(BaseModel):
     category: str | None = None
     priority: str | None = None
     version: int | None = Field(None, ge=1)
+    quarantined: bool | None = Field(None, description="Still runs, but its failures no longer fail the run")
 
 
 class TestCaseResponse(BaseModel):
@@ -168,6 +170,7 @@ class TestCaseResponse(BaseModel):
     category: str | None = None
     priority: str | None = None
     version: int
+    quarantined: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -213,3 +216,34 @@ class TestExecutionResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ExecutionStepHealing(BaseModel):
+    original_locator: str
+    selected_locator: str | None = None
+    strategy: str = ""
+    confidence: float = 0.0
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ExecutionStep(BaseModel):
+    """One engine step as recorded for the run view."""
+
+    step_id: str
+    description: str | None = None
+    status: str
+    duration_ms: int = 0
+    locator: str | None = None
+    error: str | None = None
+    healing: ExecutionStepHealing | None = None
+    console: list[str] = Field(default_factory=list)
+    network_errors: list[str] = Field(default_factory=list)
+    screenshot: str | None = None
+    dom: str | None = None
+
+
+class TestExecutionDetail(TestExecutionResponse):
+    """An execution with its step results and artifact keys."""
+
+    steps: list[ExecutionStep] = Field(default_factory=list)
+    trace: str | None = None

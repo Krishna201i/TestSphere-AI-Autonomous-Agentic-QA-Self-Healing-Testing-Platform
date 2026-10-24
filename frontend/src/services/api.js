@@ -36,7 +36,7 @@ export function configureAuth({ getToken, unauthorized }) {
  *   refused  — 403 (e.g. target outside the authorized scope)
  *   http     — anything else; `message` is the server's detail
  */
-async function request(path, { method = 'GET', body } = {}) {
+async function request(path, { method = 'GET', body, raw = false } = {}) {
   let res;
   const headers = {};
   if (body) headers['Content-Type'] = 'application/json';
@@ -67,6 +67,7 @@ async function request(path, { method = 'GET', body } = {}) {
     err.kind = kind;
     throw err;
   }
+  if (raw) return res.blob();
   return res.status === 204 ? null : res.json();
 }
 
@@ -92,9 +93,15 @@ export const createProject = (payload) => request('/api/projects', { method: 'PO
 export const getApplications = () => request('/api/applications');
 export const createApplication = (payload) => request('/api/applications', { method: 'POST', body: payload });
 export const getTestCases = () => request('/api/test-cases');
+export const updateTestCase = (id, payload) => request(`/api/test-cases/${id}`, { method: 'PUT', body: payload });
 // Only the newest `limit` executions (oldest first); totals come from getExecutionStats
 export const getTestExecutions = (limit = RECENT_EXECUTIONS) => request(`/api/test-executions?limit=${limit}`);
 export const getExecutionStats = () => request('/api/test-executions/stats');
+/** One execution with its step results and artifact keys. */
+export const getTestExecution = (id) => request(`/api/test-executions/${id}`);
+/** A screenshot, DOM snapshot or trace as a Blob (sent with the sign-in token). */
+export const getArtifact = (executionId, key) =>
+  request(`/api/test-executions/${executionId}/artifact?key=${encodeURIComponent(key)}`, { raw: true });
 export const RECENT_EXECUTIONS = 200;
 
 export const planAndExecute = (payload) =>

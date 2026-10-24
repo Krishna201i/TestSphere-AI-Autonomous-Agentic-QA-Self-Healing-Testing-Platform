@@ -114,6 +114,11 @@ async def run_test(
                         result.error,
                     )
                     break
+            # A passing run still shows what the browser ended on
+            last = step_results[-1] if step_results else None
+            if last and last.status != StepStatus.FAILED and not last.screenshot_path:
+                shot = await write_screenshot(page, plan.test_id, last.step_id, artifacts_dir)
+                step_results[-1] = last.model_copy(update={"screenshot_path": shot})
     except Exception as exc:  # noqa: BLE001 - the engine reports failures in its result and never raises
         log.error("[%s] Browser session error: %s", plan.test_id, exc)
         step_results.append(
