@@ -1,22 +1,56 @@
 import React, { useState } from 'react';
-import { LogIn, RefreshCw, Stethoscope, UserPlus } from 'lucide-react';
+import { CheckCircle2, LogIn, RefreshCw, ShieldCheck, Stethoscope, UserPlus, Wand2 } from 'lucide-react';
 import { authMessage, useAuth } from '../state/Auth';
 import { Logo } from '../components/TopNav';
 import { API_BASE_LABEL } from '../services/api';
 
+function Brand() {
+  return (
+    <div className="auth-brand">
+      <Logo size={32} />
+      <span className="brand-name">TestSphere <b>AI</b></span>
+    </div>
+  );
+}
+
+/** The product side of the sign-in screen: what TestSphere does, as a small loop. */
+function MiniLoop() {
+  const labels = [['Ingest', 60, 40], ['Test', 220, 40], ['Report', 380, 40], ['Fix', 380, 160], ['Verify', 220, 160], ['Deploy', 60, 160]];
+  return (
+    <svg className="mini-loop" viewBox="0 0 440 200" aria-hidden="true">
+      <rect className="ml-track" x="40" y="40" width="360" height="120" rx="60" />
+      <rect className="ml-progress" x="40" y="40" width="360" height="120" rx="60" />
+      {labels.map(([label, x, y]) => (
+        <g key={label}>
+          <circle className="ml-node" cx={x} cy={y} r="7" />
+          <text className="ml-text" x={x} y={y < 100 ? y - 16 : y + 26} textAnchor="middle">{label}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 function AuthShell({ children }) {
   return (
     <div className="auth-screen">
-      <div className="auth-card card">
-        <div className="auth-brand">
-          <Logo size={44} />
-          <div>
-            <div className="brand-name">TESTSPHERE AI</div>
-            <div className="small muted">Autonomous QA &amp; self-healing testing</div>
-          </div>
+      <main className="auth-main">
+        <div className="auth-panel">
+          <Brand />
+          {children}
         </div>
-        {children}
-      </div>
+      </main>
+      <aside className="auth-aside" aria-label="About TestSphere AI">
+        <div>
+          <h2>Tests that repair themselves, in a loop that keeps checking.</h2>
+          <p>Point TestSphere at a URL. It plans and runs browser tests, scans for security issues, proposes fixes and retests them.</p>
+        </div>
+        <MiniLoop />
+        <ul className="auth-points">
+          <li><Wand2 size={18} aria-hidden="true" /> Broken selectors are healed automatically, with the old and new locator recorded.</li>
+          <li><ShieldCheck size={18} aria-hidden="true" /> Security checks are passive and limited to hosts you allow.</li>
+          <li><CheckCircle2 size={18} aria-hidden="true" /> Nothing counts as fixed until a retest passes.</li>
+        </ul>
+      </aside>
     </div>
   );
 }
@@ -36,14 +70,24 @@ function GoogleMark() {
 export function AuthGate() {
   const auth = useAuth();
   if (auth.status === 'loading') {
-    return <AuthShell><div className="empty">Connecting to the backend…</div></AuthShell>;
+    return (
+      <div className="auth-center">
+        <div className="auth-panel">
+          <Brand />
+          <div className="empty" role="status">Connecting to the backend…</div>
+        </div>
+      </div>
+    );
   }
   if (auth.status === 'offline' || auth.status === 'misconfigured') {
     return (
       <AuthShell>
-        <h2 className="auth-title">{auth.status === 'offline' ? 'Backend unreachable' : 'Sign-in is not configured'}</h2>
+        <div className="auth-heading">
+          <h1>{auth.status === 'offline' ? 'Backend unreachable' : 'Sign-in is not configured'}</h1>
+          <p>{auth.status === 'offline' ? 'The dashboard cannot reach its API.' : 'This server has sign-in turned on but is missing its settings.'}</p>
+        </div>
         <div className="subbox small cell-wrap">{auth.error}</div>
-        {auth.status === 'offline' && <p className="hint" style={{ margin: 0 }}>API: <span className="mono">{API_BASE_LABEL}</span></p>}
+        {auth.status === 'offline' && <p className="hint m-0">API: <span className="mono">{API_BASE_LABEL}</span></p>}
         <button type="button" className="btn" onClick={auth.retry}><RefreshCw size={16} /> Try again</button>
       </AuthShell>
     );
@@ -65,18 +109,24 @@ function Diagnostics() {
     }
   }
   return (
-    <div className="auth-diag">
+    <>
       <button type="button" className="link-btn" onClick={run} disabled={busy}>
-        <Stethoscope size={14} style={{ verticalAlign: '-2px' }} /> {busy ? 'Checking…' : 'Trouble signing in? Run a connection check'}
+        <Stethoscope size={14} aria-hidden="true" /> {busy ? 'Checking…' : 'Connection check'}
       </button>
       {rows && (
-        <dl className="kv small">
+        <dl className="kv small auth-diag">
           {rows.map(([k, v]) => <React.Fragment key={k}><dt>{k}</dt><dd className="cell-wrap">{v}</dd></React.Fragment>)}
         </dl>
       )}
-    </div>
+    </>
   );
 }
+
+const HEADINGS = {
+  signin: ['Sign in', 'Welcome back. Sign in to your workspace.'],
+  signup: ['Create your account', 'Start testing a site in a few minutes.'],
+  reset: ['Reset your password', 'We will email you a link to choose a new one.'],
+};
 
 function Login() {
   const { signIn, signUp, signInWithGoogle, resetPassword, notice: sessionNotice, clearNotice } = useAuth();
@@ -120,16 +170,23 @@ function Login() {
     setNotice(null);
   }
 
+  const [title, subtitle] = HEADINGS[mode];
   return (
     <AuthShell>
-      {mode !== 'reset' && (
-        <div className="tabs auth-tabs" role="tablist" aria-label="Sign in or create an account">
-          <button type="button" role="tab" aria-selected={mode === 'signin'} className={`tab ${mode === 'signin' ? 'active' : ''}`} onClick={() => switchTo('signin')}>Sign in</button>
-          <button type="button" role="tab" aria-selected={mode === 'signup'} className={`tab ${mode === 'signup' ? 'active' : ''}`} onClick={() => switchTo('signup')}>Create account</button>
-        </div>
-      )}
-      {mode === 'reset' && <h2 className="auth-title">Reset your password</h2>}
+      <div className="auth-heading">
+        <h1>{title}</h1>
+        <p>{subtitle}</p>
+      </div>
       {sessionNotice && <div className="subbox small cell-wrap bad-text" role="alert">{sessionNotice}</div>}
+
+      {mode !== 'reset' && (
+        <>
+          <button type="button" className="btn btn-block" disabled={busy} onClick={() => attempt(signInWithGoogle)}>
+            <GoogleMark /> Continue with Google
+          </button>
+          <div className="auth-or"><span>or with email</span></div>
+        </>
+      )}
 
       <form className="auth-form" onSubmit={onSubmit}>
         {mode === 'signup' && (
@@ -144,37 +201,33 @@ function Login() {
         </label>
         {mode !== 'reset' && (
           <label className="field">
-            Password
+            <span className="row-between">
+              Password
+              {mode === 'signin' && <button type="button" className="link-btn small" onClick={() => switchTo('reset')}>Forgot password?</button>}
+            </span>
             <input className="input" type="password" value={form.password} onChange={set('password')} required minLength={mode === 'signup' ? 6 : undefined}
               autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} placeholder={mode === 'signup' ? 'At least 6 characters' : ''} />
           </label>
         )}
         {error && <div className="error-text" role="alert">{error}</div>}
         {notice && <div className="ok-text small" role="status">{notice}</div>}
-        <button type="submit" className="btn btn-primary" disabled={busy}>
+        <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
           {mode === 'signin' && <><LogIn size={16} /> {busy ? 'Signing in…' : 'Sign in'}</>}
           {mode === 'signup' && <><UserPlus size={16} /> {busy ? 'Creating account…' : 'Create account'}</>}
           {mode === 'reset' && (busy ? 'Sending…' : 'Send reset link')}
         </button>
       </form>
 
-      {mode !== 'reset' ? (
-        <>
-          <div className="auth-or"><span>or</span></div>
-          <button type="button" className="btn" disabled={busy} onClick={() => attempt(signInWithGoogle)}>
-            <GoogleMark /> Continue with Google
-          </button>
-          {mode === 'signin' && (
-            <button type="button" className="link-btn" onClick={() => switchTo('reset')}>Forgot your password?</button>
-          )}
-        </>
-      ) : (
-        <button type="button" className="link-btn" onClick={() => switchTo('signin')}>Back to sign in</button>
-      )}
-      <Diagnostics />
-      <button type="button" className="link-btn small" onClick={() => { window.location.hash = '/privacy'; }}>
-        How we handle your data
-      </button>
+      <p className="small m-0 self-center">
+        {mode === 'signin' && <>New to TestSphere? <button type="button" className="link-btn" onClick={() => switchTo('signup')}>Create an account</button></>}
+        {mode === 'signup' && <>Already have an account? <button type="button" className="link-btn" onClick={() => switchTo('signin')}>Sign in</button></>}
+        {mode === 'reset' && <button type="button" className="link-btn" onClick={() => switchTo('signin')}>Back to sign in</button>}
+      </p>
+
+      <div className="auth-foot">
+        <Diagnostics />
+        <button type="button" className="link-btn" onClick={() => { window.location.hash = '/privacy'; }}>How we handle your data</button>
+      </div>
     </AuthShell>
   );
 }

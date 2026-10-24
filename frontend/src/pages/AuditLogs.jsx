@@ -55,10 +55,10 @@ export default function AuditLogs({ params }) {
       </div>
 
       <section className="card">
-        <div className="form-row" style={{ alignItems: 'center' }}>
-          <div className="search" style={{ flex: 1, minWidth: 220 }}>
+        <div className="form-row center">
+          <div className="search">
             <Search size={18} />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search telemetry, findings, or logs..." aria-label="Search logs" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search logs" aria-label="Search logs" />
           </div>
           <div className="tabs" role="tablist" aria-label="Filter by type">
             {KINDS.map((k) => (

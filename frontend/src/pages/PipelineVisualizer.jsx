@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
 import { Play } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
-import { pipelineStages, timeAgo, toDate, urlError } from '../lib/derive';
+import { loopModel, timeAgo, toDate, urlError } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
-import { WorkflowPanel } from './CommandCenter';
+import LoopPanel from '../components/PipelineLoop';
 import CodebaseIngestion from '../components/CodebaseIngestion';
 
-const STATUS_LABEL = { live: 'Live', partial: 'Partially built', planned: 'Planned' };
+const BUILT_LABEL = { built: 'Built', partial: 'Partly built', planned: 'Planned' };
+const BUILT_TONE = { built: 'green', partial: 'orange', planned: 'gray' };
+const STATE_LABEL = {
+  running: 'Running', done: 'Done', failed: 'Failed', waiting: 'Needs you', skipped: 'Skipped', pending: 'Queued', idle: 'Ready', planned: 'Not built',
+};
 const STEP_STATUS = { passed: 'PASSED', failed: 'FAILED', healed: 'HEALED' };
 
 function RunQA() {
@@ -32,27 +36,26 @@ function RunQA() {
 
   return (
     <section className="card">
-      <div className="card-head"><h3>Run the QA pipeline</h3><span className="pill blue">2A · Functional Tests</span></div>
+      <div className="card-head"><h3>Run one QA test</h3><span className="pill blue">2A · AI QA Agent</span></div>
+      <p className="card-sub">Plans and runs a single test on a page. For the whole loop, with security and reports, use Autopilot.</p>
       <form className="form-row" onSubmit={onRun}>
-        <label className="field" style={{ flex: 3 }}>
+        <label className="field wide">
           Target URL
           <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://your-app.example/" required />
         </label>
-        <label className="field" style={{ flex: 3 }}>
+        <label className="field wide">
           What to test (optional)
           <input className="input" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g. log in and reach the dashboard" />
         </label>
-        <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-          <button className="btn btn-primary" type="submit" disabled={Boolean(running)}>
-            <Play size={16} /> {running ? 'Running…' : 'Plan & execute'}
-          </button>
-        </div>
+        <button className="btn btn-primary" type="submit" disabled={Boolean(running)}>
+          <Play size={16} /> {running ? 'Running…' : 'Plan and run'}
+        </button>
       </form>
       {applications.length > 0 && (
-        <div className="form-row small" style={{ alignItems: 'center' }}>
-          <span className="muted">Registered targets:</span>
+        <div className="row small">
+          <span className="muted">Saved targets:</span>
           {applications.slice(0, 6).map((a) => (
-            <button key={a.id} type="button" className="tab" onClick={() => setUrl(a.base_url)}>{a.name}</button>
+            <button key={a.id} type="button" className="chip" onClick={() => setUrl(a.base_url)}>{a.name}</button>
           ))}
         </div>
       )}
@@ -75,7 +78,7 @@ function LastRun() {
       {lastRun.error_message && <div className="subbox mono small cell-wrap">{lastRun.error_message}</div>}
       <div className="grid-2">
         <div>
-          <h4 style={{ margin: '0 0 6px' }}>Engine steps</h4>
+          <h4 className="section-title">Engine steps</h4>
           {steps.length === 0 ? <div className="empty">No step results returned.</div> : (
             <div className="table-wrap">
               <table className="table">
@@ -95,7 +98,7 @@ function LastRun() {
           )}
         </div>
         <div>
-          <h4 style={{ margin: '0 0 6px' }}>Agent events</h4>
+          <h4 className="section-title">Agent events</h4>
           {(lastRun.events || []).length === 0 ? <div className="empty">No agent events.</div> : (
             <ul className="timeline">
               {lastRun.events.map((ev, i) => (
@@ -136,8 +139,8 @@ function Targets() {
 
   return (
     <section className="card">
-      <div className="card-head"><h3>Targets</h3><span className="pill gray">Live URLs</span></div>
-      <p className="hint" style={{ margin: 0 }}>Running applications to test (base URLs). Analyze their source in Codebase Ingestion above.</p>
+      <div className="card-head"><h3>Targets</h3><span className="muted small">{applications.length}</span></div>
+      <p className="card-sub">Running apps to test, by base URL. Analyze their source in Codebase Ingestion above.</p>
       {applications.length === 0 ? <div className="empty">No targets yet.</div> : (
         <div className="table-wrap">
           <table className="table">
@@ -178,7 +181,7 @@ function TestCases() {
                   <tr key={tc.id}>
                     <td className="cell-wrap">{tc.name}<div className="small muted">{tc.external_id || `#${tc.id}`}</div></td>
                     <td>{ex ? <span className={`status ${ex.status}`}>{ex.status}</span> : <span className="muted small">never run</span>}</td>
-                    <td style={{ textAlign: 'right' }}>
+                    <td className="text-right">
                       <button type="button" className="btn btn-sm" disabled={Boolean(running)}
                         onClick={() => runPipeline({ test_case_id: tc.id }, tc.name).catch(() => {})}>
                         <Play size={13} /> Run
@@ -197,22 +200,23 @@ function TestCases() {
 
 export default function PipelineVisualizer({ onNavigate }) {
   const ws = useWorkspace();
-  const { stages, active } = pipelineStages(ws);
+  const { stages, running } = loopModel(ws);
   return (
     <div className="page">
-      <WorkflowPanel onNavigate={onNavigate} title="Pipeline Visualizer" />
+      <LoopPanel onNavigate={onNavigate} title="Pipeline Visualizer" />
 
       <section className="card">
-        <div className="card-head"><h3>Stage status</h3><span className="muted small">what is built today</span></div>
+        <div className="card-head"><h3>Stages</h3><span className="muted small">what each stage does and how much is built</span></div>
         <div className="table-wrap">
           <table className="table">
+            <thead><tr><th>Stage</th><th>Now</th><th>Built</th><th>What it does</th></tr></thead>
             <tbody>
               {stages.map((s) => (
-                <tr key={s.id} className={`selectable ${s.id === active ? 'selected' : ''}`} {...selectableRow(() => onNavigate(s.page), s.id === active)}>
-                  <td style={{ whiteSpace: 'nowrap' }}><b>{s.num} {s.title}</b></td>
-                  <td><span className={`pill ${s.tone}`}>{s.badge}</span></td>
-                  <td style={{ whiteSpace: 'nowrap' }}><span className={`node-state ${s.status}`} style={{ position: 'static', display: 'inline-block', width: 8, height: 8, marginRight: 6 }} />{STATUS_LABEL[s.status]}</td>
-                  <td className="cell-wrap small">{s.detail}</td>
+                <tr key={s.id} className={`selectable ${s.id === running?.id ? 'selected' : ''}`} {...selectableRow(() => onNavigate(s.page), s.id === running?.id)}>
+                  <td className="nowrap"><span className="muted">{s.num}</span> <b>{s.title}</b></td>
+                  <td className="nowrap small">{STATE_LABEL[s.state]}{s.note ? <div className="muted">{s.note}</div> : null}</td>
+                  <td><span className={`pill ${BUILT_TONE[s.built]}`}>{BUILT_LABEL[s.built]}</span></td>
+                  <td className="cell-wrap small">{s.about}</td>
                 </tr>
               ))}
             </tbody>

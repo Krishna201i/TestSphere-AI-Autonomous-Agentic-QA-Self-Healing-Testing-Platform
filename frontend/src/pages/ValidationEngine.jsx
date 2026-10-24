@@ -1,7 +1,7 @@
 import React from 'react';
 import { useWorkspace } from '../state/Workspace';
 import { executionStats, pct, retestStats, timeAgo } from '../lib/derive';
-import { HealthWaveformBox, ValidationRings } from '../components/ValidationCard';
+import { HealthBox, ResultTiles } from '../components/ValidationCard';
 
 export default function ValidationEngine({ onNavigate }) {
   const { executions, executionTotals, testCases, findings, retests, retest, retesting } = useWorkspace();
@@ -22,7 +22,7 @@ export default function ValidationEngine({ onNavigate }) {
       <div className="grid-main-side">
         <section className="card">
           <div className="card-head"><h3>Validation runs</h3></div>
-          <ValidationRings />
+          <ResultTiles />
           <dl className="kv">
             <dt>Executions</dt><dd>{ex.total} finished · {ex.passed} passed · {ex.healed} healed · {ex.failed} failed</dd>
             <dt>Pass rate</dt><dd>{pct(ex.passRate)} (healed runs count as passing)</dd>
@@ -31,12 +31,8 @@ export default function ValidationEngine({ onNavigate }) {
         </section>
         <section className="card">
           <div className="card-head"><h3>Deployment</h3><span className="pill green">6 · Health Check &amp; Rollback</span></div>
-          <div className="shield subbox">
-            <span>Rollback Shield: <span className="planned">Planned</span></span>
-            <span className="toggle" role="switch" aria-checked="false" aria-disabled="true" aria-label="Rollback Shield (planned, not available yet)" />
-          </div>
-          <p className="hint" style={{ margin: 0 }}>Deploying target apps, post-deploy health checks and rollback are module 5.7 and not built yet. Below is the platform's own backend health.</p>
-          <HealthWaveformBox />
+          <p className="card-sub">Deploying your app, health checks after a deploy and automatic rollback are planned (module 5.7). Below is TestSphere's own API health.</p>
+          <HealthBox />
         </section>
       </div>
 
@@ -44,8 +40,9 @@ export default function ValidationEngine({ onNavigate }) {
         <div className="card-head"><h3>Security retests</h3><span className="muted small">{rt.total}</span></div>
         {approvedOrTested.length === 0 ? (
           <div className="empty">
-            No retests yet. Approve a fix in the Remediation Bridge, apply it, then retest.
-            <div style={{ marginTop: 10 }}><button type="button" className="btn btn-sm" onClick={() => onNavigate('remediation')}>Open Remediation Bridge</button></div>
+            <span className="empty-title">No retests yet</span>
+            Approve a fix in Remediation, apply it on your app, then retest it here.
+            <button type="button" className="btn btn-sm" onClick={() => onNavigate('remediation')}>Open Remediation</button>
           </div>
         ) : (
           <div className="table-wrap">
@@ -57,7 +54,7 @@ export default function ValidationEngine({ onNavigate }) {
                     <td className="cell-wrap">{f.title}<div className="mono small muted">{f.check_id} · {f.component}</div></td>
                     <td><span className={`status ${retests[f.key].result}`}>{retests[f.key].result}</span></td>
                     <td className="small muted">{timeAgo(retests[f.key].at)}</td>
-                    <td style={{ textAlign: 'right' }}>
+                    <td className="text-right">
                       <button type="button" className="btn btn-sm" disabled={retesting === f.key} onClick={() => retest(f).catch(() => {})}>
                         {retesting === f.key ? 'Retesting…' : 'Retest'}
                       </button>

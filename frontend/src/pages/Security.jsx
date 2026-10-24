@@ -27,7 +27,7 @@ export default function Security({ onNavigate, params }) {
           {SECURITY_TABS.map((t) => (
             <button key={t.id} type="button" role="tab" aria-selected={t.id === tab.id}
               className={`tab ${t.id === tab.id ? 'active' : ''}`} onClick={() => onNavigate('security', { tab: t.id })}>
-              <span className="muted-on-tab">{t.hint} ·</span> {t.label}{counts[t.id] ? ` (${counts[t.id]})` : ''}
+              <span className="tab-hint">{t.hint} ·</span> {t.label}{counts[t.id] ? ` (${counts[t.id]})` : ''}
             </button>
           ))}
         </div>

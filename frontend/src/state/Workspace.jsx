@@ -17,6 +17,7 @@ import {
   getBlueprint,
   getExecutionStats,
   getFindings,
+  getPipelineRuns,
   getSystem,
   ingestCodebase,
   listBlueprints,
@@ -34,6 +35,9 @@ const STORAGE_KEY = 'testsphere.workspace.v2';
 const HEALTH_INTERVAL_MS = 3000;
 const HEALTH_SAMPLES = 40;
 const DATA_INTERVAL_MS = 15000;
+const RUNS_ACTIVE_MS = 2000;
+const RUNS_LIMIT = 40;
+const ACTIVE_RUN = ['queued', 'running'];
 const OPERATOR_KEY = 'testsphere.operator';
 export const DEFAULT_OPERATOR = 'dev_active';
 
@@ -89,6 +93,7 @@ export function WorkspaceProvider({ children }) {
   const [selectedKey, setSelectedKey] = useState(persisted.selectedKey || null);
   const [lastRun, setLastRun] = useState(persisted.lastRun || null);
   const [running, setRunning] = useState(null);
+  const [pipelineRuns, setPipelineRuns] = useState(null); // null until the first load
 
   useEffect(() => {
     savePersisted({ scanMeta, scanHistory, selectedKey, lastRun });
@@ -145,6 +150,29 @@ export function WorkspaceProvider({ children }) {
     const id = setInterval(refresh, DATA_INTERVAL_MS);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // ── Pipeline runs (Autopilot, the loop) ─────────────────────
+  // Followed closely while one is queued or running, otherwise at the data pace
+  const refreshRuns = useCallback(async () => {
+    try {
+      const runs = await getPipelineRuns(RUNS_LIMIT);
+      if (Array.isArray(runs)) setPipelineRuns(runs);
+    } catch {
+      setPipelineRuns((prev) => prev || []);
+    }
+  }, []);
+  const runActive = Boolean(pipelineRuns?.some((r) => ACTIVE_RUN.includes(r.status)));
+  useEffect(() => {
+    refreshRuns();
+    const id = setInterval(refreshRuns, runActive ? RUNS_ACTIVE_MS : DATA_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [refreshRuns, runActive]);
+  // A run finishing changes executions, findings and projects too
+  const wasActive = useRef(runActive);
+  useEffect(() => {
+    if (wasActive.current && !runActive) refresh();
+    wasActive.current = runActive;
+  }, [runActive, refresh]);
 
   const upsertFinding = useCallback((updated) => {
     setFindings((prev) => {
@@ -288,8 +316,8 @@ export function WorkspaceProvider({ children }) {
     health, projects, applications, testCases, executions, executionTotals, findings, refresh,
     lastScan, scanHistory, scanning, runScan,
     approvals, approve, retests, retest, retesting, selectedKey, setSelectedKey,
-    lastRun, running, runPipeline, addTarget, audit,
-  }), [health, projects, applications, testCases, executions, executionTotals, findings, refresh, lastScan, scanHistory, scanning, runScan,
+    lastRun, running, runPipeline, addTarget, audit, pipelineRuns, refreshRuns,
+  }), [pipelineRuns, refreshRuns, health, projects, applications, testCases, executions, executionTotals, findings, refresh, lastScan, scanHistory, scanning, runScan,
     approvals, approve, retests, retest, retesting, selectedKey, lastRun, running, runPipeline, addTarget, audit, operator, setOperator, system, blueprints, blueprint, ingest, ingesting, openBlueprint]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
