@@ -231,6 +231,11 @@ class EngineConfig(BaseModel):
         ge=1,
         description="Maximum live-DOM candidates to evaluate during healing",
     )
+    min_action_timeout_ms: int = Field(
+        10_000,
+        ge=0,
+        description="Least time an action waits for its element before healing starts",
+    )
 
 
 class RunOptions(BaseModel):
@@ -247,6 +252,7 @@ class RunOptions(BaseModel):
     slow_mo_ms: int | None = Field(None, ge=0)
     tracing_enabled: bool | None = None
     max_candidates: int | None = Field(None, ge=1)
+    min_action_timeout_ms: int | None = Field(None, ge=0)
 
     def merged(self, base: EngineConfig) -> EngineConfig:
         """Return a new EngineConfig with non-None overrides applied."""

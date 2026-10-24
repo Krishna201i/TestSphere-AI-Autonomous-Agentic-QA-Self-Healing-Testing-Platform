@@ -86,6 +86,42 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `ARTIFACT_TRACES` | `true` | Record a Playwright trace (`.zip`, typically 1–5 MB) for every test run, downloadable from the run page |
 | `ARTIFACT_RETENTION_DAYS` | `30` | Delete artifacts after this many days (`0` keeps them until the execution or account is deleted). On GCS this is a bucket lifecycle rule set on first use (needs `storage.buckets.update`; otherwise add the rule in the console) |
 
+**Fix patches** (Security → Remediation → *Fix patch for your code*): the open findings of a site become a
+`git apply`-able diff against its repository (the project's *Git repository*, or one pasted in the form).
+The server shallow-clones it into `INGEST_WORKSPACE/patches/` (same host allow-list as ingestion, so `git`
+must be installed), edits a temporary copy, checks that edited Python/JavaScript still parses, stores the
+result in `fix_patches` and deletes the clone. Supported: FastAPI/Starlette and Flask (header hook, CORS
+allow-list, cookie flags, `uvicorn.run(server_header=False)`), Django settings, Express (header middleware,
+`cors()`, `res.cookie` options, `x-powered-by`), nginx `server {}` blocks. Anything else is listed as a manual change.
+
+**Verified deploy** (loop stage 6; Autopilot → project → Settings → *Verified deploy*, or *Deploy* on the
+project row): TestSphere calls the project's deploy hook, records the commit (`git ls-remote` of its
+repository), waits until the health URL (default: app URL) answers healthily `DEPLOY_HEALTHY_CHECKS` times in
+a row — after the page changes, or after `DEPLOY_SETTLE_SECONDS` if it never does — within
+`DEPLOY_TIMEOUT_SECONDS`, then runs the project's smoke tests. If health or smoke tests fail it calls the
+rollback hook, or with a Render deploy hook redeploys the last verified commit (`&ref=<sha>`), and checks
+health again. Hooks may only go to Render, Vercel, Netlify or hosts in `DEPLOY_HOOK_HOSTS` (https, no
+redirects). *Deploy and verify automatically after a run passes* closes the loop. Deployments run in the
+API process, also with `PIPELINE_EXECUTION=worker`.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `DEPLOY_HOOK_HOSTS` | `""` | Extra hosts deploy/rollback hooks may call (comma-separated) |
+| `DEPLOY_TIMEOUT_SECONDS` | `600` | How long a deploy (and a rollback) may take to become healthy |
+| `DEPLOY_SETTLE_SECONDS` | `90` | When the health URL looks the same before and after, wait this long before trusting it |
+| `DEPLOY_POLL_SECONDS` / `DEPLOY_HEALTHY_CHECKS` | `10` / `3` | Health check interval and how many healthy answers in a row count |
+
+**GitHub** (Profile → Integrations): each user connects GitHub with a fine-grained personal access token
+limited to chosen repositories, with *Contents*, *Pull requests* and *Commit statuses* set to Read and write.
+The token is checked with GitHub, encrypted with `TOKEN_ENCRYPTION_KEY` and never returned to the browser.
+Then **Open pull request** on a fix patch creates a branch `testsphere/fix-<id>` from the commit the patch was
+built against, with one commit of the patched files, and a pull request to the default branch. Runs started
+by a GitHub push set a `TestSphere` commit status (success / failure / error) linking to the run page.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `TOKEN_ENCRYPTION_KEY` | generated in `data/.token_key` locally; **required when hosted** | Fernet key for stored integration tokens. Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Changing it disconnects every user's GitHub |
+
 Slack alerts are set per project in Autopilot → project → Settings: paste a Slack incoming-webhook URL
 (Slack → Apps → *Incoming Webhooks*; only `https://hooks.slack.com/services/...` is accepted) and choose
 "when a run fails or regresses" or "after every run". Each run page also offers a **JUnit XML** download

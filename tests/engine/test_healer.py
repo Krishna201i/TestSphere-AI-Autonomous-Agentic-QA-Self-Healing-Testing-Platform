@@ -303,3 +303,53 @@ async def test_skips_non_unique_candidates(site, mutate) -> None:
     click = _click(result)
     assert click.status == StepStatus.FAILED
     assert click.healing.candidates == []
+
+
+# ---------------------------------------------------------------------------
+# Identity rules
+# ---------------------------------------------------------------------------
+
+
+def test_the_broken_primary_attribute_is_not_held_against_candidates():
+    from engine.healer import broken_attributes
+
+    assert broken_attributes('[data-testid="login-button"]') == {"data-testid"}
+    assert broken_attributes("#login-btn") == {"id"}
+    assert broken_attributes("form [name='email']") == {"name"}
+    renamed = _button_fp(attributes={"type": "submit", "data-testid": "login-button-v2"})
+    with_testid, _ = score_fingerprint(_button_fp(), renamed)
+    ignoring, _ = score_fingerprint(_button_fp(), renamed, frozenset({"data-testid"}))
+    assert ignoring > with_testid
+    assert ignoring == 1.0
+
+
+def test_an_unchanged_id_survives_moving_and_wrapping():
+    from engine.healer import ID_ANCHOR_SCORE
+
+    moved = _button_fp(parent_chain=["div.field-wrap", "span.slot", "form#login-form"], sibling_index=4,
+                       bounding_box=BoundingBox(x=600, y=900, width=200, height=40))
+    score, _ = score_fingerprint(_button_fp(), moved, frozenset({"data-testid"}))
+    assert score >= ID_ANCHOR_SCORE
+
+
+def test_a_look_alike_sharing_no_identity_is_capped_below_the_threshold():
+    from engine.healer import NO_IDENTITY_CAP
+
+    stored = ElementFingerprint(tag="input", id="email", name="email", placeholder="Work email",
+                                aria_label="Work email", attributes={"type": "email", "autocomplete": "email"},
+                                parent_chain=["form"], sibling_index=1,
+                                bounding_box=BoundingBox(x=10, y=10, width=200, height=30))
+    twin = stored.model_copy(update={"id": "email-twin", "name": "email-twin", "placeholder": "Confirm work email",
+                                     "aria_label": "Confirm work email"})
+    score, _ = score_fingerprint(stored, twin, frozenset({"data-testid"}))
+    assert score <= NO_IDENTITY_CAP
+    same_but_renamed = stored.model_copy(update={"id": "x", "name": "y"})  # placeholder still identifies it
+    assert score_fingerprint(stored, same_but_renamed, frozenset({"data-testid"}))[0] > NO_IDENTITY_CAP
+
+
+def test_a_different_kind_of_input_is_never_the_same_element():
+    box = ElementFingerprint(tag="input", id="remember", attributes={"type": "checkbox"})
+    radio = box.model_copy(update={"attributes": {"type": "radio"}})
+    email = ElementFingerprint(tag="input", id="email", attributes={"type": "email"})
+    assert score_fingerprint(box, radio)[0] == 0.0
+    assert score_fingerprint(email, email.model_copy(update={"attributes": {"type": "text"}}))[0] > 0.0

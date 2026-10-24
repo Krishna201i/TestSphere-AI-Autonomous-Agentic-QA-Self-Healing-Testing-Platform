@@ -22,7 +22,9 @@ from backend.api import (
     audit_router,
     health_router,
     ingest_router,
+    integrations_router,
     me_router,
+    patches_router,
     pipelines_router,
     projects_router,
     security_router,
@@ -35,6 +37,7 @@ from backend.api import (
 from backend.config import settings, startup_safety_problem
 from backend.database.session import get_store, init_db
 from backend.database.store import StoreUnavailableError
+from backend.http_hardening import HardeningMiddleware
 from backend.netguard import check_target
 from backend.observability import (
     RequestContextMiddleware,
@@ -73,6 +76,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         if interrupted := recover_interrupted(get_store()):
             logger.warning("Marked %d pipeline run(s) interrupted by the restart.", interrupted)
+        from backend.pipeline.deploy import recover_interrupted as recover_deployments
+
+        if interrupted := recover_deployments(get_store()):
+            logger.warning("Marked %d deployment(s) interrupted by the restart.", interrupted)
     except Exception as exc:  # noqa: BLE001 - startup check: log and keep serving
         logger.warning("Could not check for interrupted pipeline runs: %s", exc)
     scheduler_task = None
@@ -116,6 +123,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Security headers on every response; oversized bodies refused before reading
+app.add_middleware(HardeningMiddleware)
+
 # Outermost: request ids and the access log cover CORS answers too
 app.add_middleware(RequestContextMiddleware)
 
@@ -132,6 +142,8 @@ api_routers = [
     ingest_router,
     system_router,
     me_router,
+    integrations_router,
+    patches_router,
     pipelines_router,
     webhooks_router,
 ]

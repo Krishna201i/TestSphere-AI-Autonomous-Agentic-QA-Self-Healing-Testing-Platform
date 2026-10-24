@@ -15,6 +15,7 @@ import {
   getApplications,
   getAudit,
   getBlueprint,
+  getDeployments,
   getExecutionStats,
   getFindings,
   getPipelineRuns,
@@ -38,6 +39,7 @@ const DATA_INTERVAL_MS = 15000;
 const RUNS_ACTIVE_MS = 2000;
 const RUNS_LIMIT = 40;
 const ACTIVE_RUN = ['queued', 'running'];
+const ACTIVE_DEPLOY = ['queued', 'deploying', 'verifying', 'rolling_back'];
 const OPERATOR_KEY = 'testsphere.operator';
 export const DEFAULT_OPERATOR = 'dev_active';
 
@@ -94,6 +96,7 @@ export function WorkspaceProvider({ children }) {
   const [lastRun, setLastRun] = useState(persisted.lastRun || null);
   const [running, setRunning] = useState(null);
   const [pipelineRuns, setPipelineRuns] = useState(null); // null until the first load
+  const [deployments, setDeployments] = useState([]);
 
   useEffect(() => {
     savePersisted({ scanMeta, scanHistory, selectedKey, lastRun });
@@ -167,6 +170,22 @@ export function WorkspaceProvider({ children }) {
     const id = setInterval(refreshRuns, runActive ? RUNS_ACTIVE_MS : DATA_INTERVAL_MS);
     return () => clearInterval(id);
   }, [refreshRuns, runActive]);
+  // Deployments: followed every 2 seconds while one is in progress
+  const refreshDeployments = useCallback(async () => {
+    try {
+      const rows = await getDeployments(10);
+      if (Array.isArray(rows)) setDeployments(rows);
+    } catch {
+      // older backend or outage: the loop shows deploy as not configured
+    }
+  }, []);
+  const deployActive = deployments.some((d) => ACTIVE_DEPLOY.includes(d.status));
+  useEffect(() => {
+    refreshDeployments();
+    const id = setInterval(refreshDeployments, deployActive ? RUNS_ACTIVE_MS : DATA_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [refreshDeployments, deployActive]);
+
   // A run finishing changes executions, findings and projects too
   const wasActive = useRef(runActive);
   useEffect(() => {
@@ -316,8 +335,8 @@ export function WorkspaceProvider({ children }) {
     health, projects, applications, testCases, executions, executionTotals, findings, refresh,
     lastScan, scanHistory, scanning, runScan,
     approvals, approve, retests, retest, retesting, selectedKey, setSelectedKey,
-    lastRun, running, runPipeline, addTarget, audit, pipelineRuns, refreshRuns,
-  }), [pipelineRuns, refreshRuns, health, projects, applications, testCases, executions, executionTotals, findings, refresh, lastScan, scanHistory, scanning, runScan,
+    lastRun, running, runPipeline, addTarget, audit, pipelineRuns, refreshRuns, deployments, refreshDeployments,
+  }), [pipelineRuns, refreshRuns, deployments, refreshDeployments, health, projects, applications, testCases, executions, executionTotals, findings, refresh, lastScan, scanHistory, scanning, runScan,
     approvals, approve, retests, retest, retesting, selectedKey, lastRun, running, runPipeline, addTarget, audit, operator, setOperator, system, blueprints, blueprint, ingest, ingesting, openBlueprint]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

@@ -21,8 +21,8 @@ from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
 from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Record, Store
-from backend.models import PIPELINE_RUNS, PROJECTS
-from backend.pipeline import scheduler
+from backend.models import DEPLOYMENTS, PIPELINE_RUNS, PROJECTS
+from backend.pipeline import deploy, scheduler
 from backend.pipeline.runner import active_run, start_run
 from backend.ratelimit import limit_runs
 from backend.services.project_service import ProjectService
@@ -144,6 +144,36 @@ def get_run_junit(run_id: int, db: Store = Depends(get_db), user: User = Depends
     run = ensure_owned(user, db.get(PIPELINE_RUNS, run_id), "Pipeline run")
     return Response(content=junit_xml(run), media_type="application/xml",
                     headers={"Content-Disposition": f'attachment; filename="testsphere-run-{run_id}.xml"'})
+
+
+@router.post("/projects/{project_id}/deploy", status_code=status.HTTP_201_CREATED)
+async def deploy_project(project_id: int, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> dict[str, Any]:
+    """Deploy the project through its hook, verify health and smoke tests, roll back on failure."""
+    project = owned_project(db, user, project_id)
+    if not project.get("deploy_hook_url"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Add a deploy hook to the project first (Autopilot → Settings).")
+    if deploy.active_deployment(db, project_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A deployment of this project is already running.")
+    return deploy.start_deployment(db, project, actor=actor_for(user, "dev_active"))
+
+
+@router.get("/deployments")
+def list_deployments(
+    project_id: int | None = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    db: Store = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    filters: dict[str, Any] = scope(user)
+    if project_id is not None:
+        filters["project_id"] = project_id
+    return db.find(DEPLOYMENTS, order_by="id", descending=True, limit=limit, **filters)
+
+
+@router.get("/deployments/{deployment_id}")
+def get_deployment(deployment_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+    return ensure_owned(user, db.get(DEPLOYMENTS, deployment_id), "Deployment")
 
 
 @router.post("/scheduler/tick")

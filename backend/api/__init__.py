@@ -6,7 +6,9 @@ from backend.api.applications import router as applications_router
 from backend.api.audit import router as audit_router
 from backend.api.health import router as health_router
 from backend.api.ingest import router as ingest_router
+from backend.api.integrations import router as integrations_router
 from backend.api.me import router as me_router
+from backend.api.patches import router as patches_router
 from backend.api.pipelines import router as pipelines_router
 from backend.api.projects import router as projects_router
 from backend.api.security import router as security_router
@@ -18,6 +20,8 @@ from backend.api.workflow import router as workflow_router
 
 __all__ = [
     "me_router",
+    "integrations_router",
+    "patches_router",
     "pipelines_router",
     "webhooks_router",
     "ingest_router",

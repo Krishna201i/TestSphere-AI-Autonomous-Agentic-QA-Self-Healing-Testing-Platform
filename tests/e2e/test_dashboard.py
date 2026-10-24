@@ -79,7 +79,7 @@ def browser():
 
 @pytest.mark.parametrize(("route", "selector"), PAGES, ids=[p[0] or "home" for p in PAGES])
 def test_every_page_renders_without_errors(server, browser, route, selector):
-    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900})
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(f"{server}/#/{route}")
@@ -96,7 +96,7 @@ def test_every_page_renders_without_errors(server, browser, route, selector):
 def test_every_page_meets_wcag_21_aa(server, browser, route, selector, scheme):
     """axe-core automated checks (contrast, names, labels, ARIA) in both themes; not a substitute for a manual audit."""
     # Reduced motion: axe must measure final colours, not a fade-in halfway through
-    page = browser.new_page(viewport={"width": 1280, "height": 900}, color_scheme=scheme, reduced_motion="reduce")
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900}, color_scheme=scheme, reduced_motion="reduce")
     page.goto(f"{server}/#/{route}")
     page.wait_for_selector(selector, timeout=15_000)
     page.wait_for_timeout(500)
@@ -107,7 +107,7 @@ def test_every_page_meets_wcag_21_aa(server, browser, route, selector, scheme):
 
 
 def test_privacy_notice_is_reachable_before_sign_in(server, browser):
-    page = browser.new_page()
+    page = browser.new_page(bypass_csp=True)
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
 
@@ -133,7 +133,7 @@ def test_privacy_notice_is_reachable_before_sign_in(server, browser):
 @pytest.mark.parametrize(("route", "selector"), PAGES, ids=[p[0] or "home" for p in PAGES])
 def test_every_page_fits_a_phone(server, browser, route, selector):
     """At 390px wide nothing may push the page sideways."""
-    page = browser.new_page(viewport={"width": 390, "height": 844})
+    page = browser.new_page(bypass_csp=True, viewport={"width": 390, "height": 844})
     page.goto(f"{server}/#/{route}")
     page.wait_for_selector(selector, timeout=15_000)
     page.wait_for_timeout(500)
@@ -152,7 +152,7 @@ def test_loop_follows_a_running_pipeline(server, browser):
            "created_at": "2026-10-24T10:00:00Z", "started_at": "2026-10-24T10:00:00Z", "finished_at": None,
            "stages": [{"key": k, "label": k.title(), "status": st, "detail": None} for k, st in zip(STAGE_KEYS, statuses, strict=True)],
            "summary": None, "tests": [], "regressions": []}
-    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900})
     page.route("**/api/pipelines/runs?*", lambda r: r.fulfill(json=[run]))
     page.goto(server)
     page.wait_for_selector(".loop-node.running")
@@ -186,7 +186,7 @@ def test_run_page_shows_steps_healing_and_screenshots(server, browser):
                             "healing": {"original_locator": "[data-testid=login]", "selected_locator": "#login-btn",
                                         "strategy": "fingerprint", "confidence": 0.87,
                                         "candidates": [{"locator": "#login-btn", "score": 0.87}, {"locator": "button", "score": 0.4}]}}]}
-    page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.route("**/api/pipelines/runs/9", lambda r: r.fulfill(json=run))
@@ -210,5 +210,111 @@ def test_run_page_shows_steps_healing_and_screenshots(server, browser):
     page.locator(".shot").click()
     assert page.locator("dialog.lightbox[open]").count() == 1
     page.keyboard.press("Escape")
+    assert errors == []
+    page.close()
+
+
+def test_fix_patch_is_shown_as_a_reviewable_diff(server, browser):
+    target = "http://127.0.0.1:9/"
+    finding = {"key": "k1", "check_id": "SEC-HDR-FRAME", "severity": "medium", "title": "Page can be framed",
+               "status": "open", "target_url": target, "component": target, "evidence": [], "root_cause": "x",
+               "recommendation": "Send X-Frame-Options", "confidence": 0.9, "first_seen": "2026-10-24T10:00:00Z",
+               "last_seen": "2026-10-24T10:00:00Z",
+               "remediation": {"kind": "header", "summary": "s", "diff": [{"kind": "added", "text": "X-Frame-Options: DENY"}], "snippets": {}}}
+    patch = {"id": 3, "target_url": target, "repo": "https://github.com/acme/shop", "commit": "abc1234",
+             "frameworks": ["fastapi"], "created_at": "2026-10-24T10:00:00Z",
+             "applied": [{"check_id": "SEC-HDR-FRAME", "file": "app/main.py", "how": "HTTP middleware sets X-Frame-Options"}],
+             "manual": [{"check_id": "SEC-TRANSPORT-HTTP", "reason": "Serve the site over HTTPS."}],
+             "files": [{"path": "app/main.py", "verified": True, "check_note": None,
+                        "diff": "--- a/app/main.py\n+++ b/app/main.py\n@@ -1,2 +1,3 @@\n app = FastAPI()\n+# fix\n x = 1\n"}],
+             "patch": "..."}
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.route("**/api/security/findings", lambda r: r.fulfill(json=[finding]))
+    page.route("**/api/security/patches?*", lambda r: r.fulfill(json=[patch]))
+    page.goto(f"{server}/#/security/remediation")
+    page.wait_for_selector(".udiff")
+    assert page.locator(".ud-add").inner_text().strip() == "+# fix"
+    assert "Serve the site over HTTPS." in page.locator("#patch-title").locator("xpath=ancestor::section").inner_text()
+    assert page.get_by_role("button", name="Download .patch").count() == 1
+
+    page.add_script_tag(path=str(AXE))
+    violations = page.evaluate("tags => axe.run(document, {runOnly: {type: 'tag', values: tags}}).then(r => r.violations)", WCAG_AA)
+    assert [f"{v['id']} {[n['target'] for n in v['nodes']]}" for v in violations] == []
+    assert errors == []
+    page.close()
+
+
+def test_deployments_show_steps_and_drive_loop_stage_6(server, browser):
+    steps = [{"key": "deploy", "label": "Deploy", "status": "done", "detail": "api.render.com accepted it (HTTP 200) · commit bbbbbbb"},
+             {"key": "health", "label": "Health check", "status": "done", "detail": "Healthy 3 times in a row after the page changed (80 ms)"},
+             {"key": "smoke", "label": "Smoke tests", "status": "failed", "detail": "0 of 1 passed: Smoke: Shop (Timeout)"},
+             {"key": "rollback", "label": "Rollback", "status": "done", "detail": "redeploy of last verified commit aaaaaaa"}]
+    dep = {"id": 4, "project_id": 1, "project_name": "Shop", "status": "rolled_back", "trigger": "pipeline", "run_id": 9,
+           "commit": "b" * 40, "rollback_to": "a" * 40, "error": "Smoke tests failed", "steps": steps,
+           "health": [{"ok": True, "ms": 80}, {"ok": True, "ms": 90}, {"ok": False, "ms": 0}, {"ok": True, "ms": 70}],
+           "created_at": "2026-10-24T10:00:00Z", "finished_at": "2026-10-24T10:05:00Z"}
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.route("**/api/pipelines/deployments?*", lambda r: r.fulfill(json=[dep]))
+    page.goto(f"{server}/#/security/validation")
+    page.wait_for_selector("#deploy-title")
+    card = page.locator("section:has(#deploy-title)")
+    assert "rolled back" in card.inner_text().lower() and "redeploy of last verified commit" in card.inner_text()
+    assert card.locator(".stage-item.failed").count() == 1
+
+    page.add_script_tag(path=str(AXE))
+    violations = page.evaluate("tags => axe.run(document, {runOnly: {type: 'tag', values: tags}}).then(r => r.violations)", WCAG_AA)
+    assert [f"{v['id']} {[n['target'] for n in v['nodes']]}" for v in violations] == []
+
+    page.goto(f"{server}/#/")
+    page.wait_for_selector(".loop .loop-node")
+    stage6 = page.locator(".loop .loop-node").filter(has_text="Verified Deploy")
+    assert "Rolled back" in stage6.inner_text()
+    assert errors == []
+    page.close()
+
+
+def test_the_dashboard_runs_under_its_own_content_security_policy(server, browser):
+    """No CSP violations while the real dashboard loads and navigates (CSP not bypassed)."""
+    page = browser.new_page()
+    violations: list[str] = []
+    page.on("console", lambda m: violations.append(m.text) if "Content Security Policy" in m.text else None)
+    page.on("pageerror", lambda e: violations.append(str(e)))
+    for route in ("", "autopilot", "reports", "security/remediation", "visualizer", "privacy"):
+        page.goto(f"{server}/#/{route}")
+        page.wait_for_timeout(800)
+    assert "content-security-policy" in page.evaluate("() => fetch('/api/health').then(r => [...r.headers.keys()].join(','))")
+    assert violations == []
+    page.close()
+
+
+def test_fix_patch_opens_a_pull_request(server, browser):
+    target = "http://127.0.0.1:9/"
+    finding = {"key": "k1", "check_id": "SEC-HDR-FRAME", "severity": "medium", "title": "Page can be framed",
+               "status": "open", "target_url": target, "component": target, "evidence": [], "root_cause": "x",
+               "recommendation": "Send X-Frame-Options", "confidence": 0.9, "first_seen": "2026-10-24T10:00:00Z",
+               "last_seen": "2026-10-24T10:00:00Z", "remediation": {"kind": "header", "summary": "s", "diff": [], "snippets": {}}}
+    patch = {"id": 5, "target_url": target, "repo": "https://github.com/acme/shop", "commit": "b" * 40, "github": True,
+             "pull_request": None, "frameworks": ["fastapi"], "created_at": "2026-10-24T10:00:00Z", "manual": [],
+             "applied": [{"check_id": "SEC-HDR-FRAME", "file": "app/main.py", "how": "HTTP middleware sets X-Frame-Options"}],
+             "files": [{"path": "app/main.py", "verified": True, "check_note": None,
+                        "diff": "--- a/app/main.py\n+++ b/app/main.py\n@@ -1 +1,2 @@\n app = FastAPI()\n+# fix\n"}], "patch": "..."}
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.route("**/api/security/findings", lambda r: r.fulfill(json=[finding]))
+    page.route("**/api/security/patches?*", lambda r: r.fulfill(json=[patch]))
+    page.route("**/api/security/patches/5/pull-request",
+               lambda r: r.fulfill(status=201, json={"url": "https://github.com/acme/shop/pull/12", "number": 12,
+                                                    "branch": "testsphere/fix-5", "base": "main"}))
+    page.goto(f"{server}/#/security/remediation")
+    page.get_by_role("button", name="Open pull request").click()
+    link = page.get_by_role("link", name="Pull request #12")
+    link.wait_for()
+    assert link.get_attribute("href") == "https://github.com/acme/shop/pull/12"
+    assert "bbbbbbb" in page.locator("#patch-title").locator("xpath=ancestor::section").inner_text()
     assert errors == []
     page.close()

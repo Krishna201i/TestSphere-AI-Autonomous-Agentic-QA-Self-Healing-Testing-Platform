@@ -37,6 +37,7 @@ not applicable (step has no target).
 from __future__ import annotations
 
 import logging
+import re
 
 from playwright.async_api import Page
 from rapidfuzz import fuzz
@@ -73,6 +74,29 @@ POSITION_FALLOFF_PX = 300.0
 # Stable attributes compared for the attribute signal (fingerprint.attributes keys)
 _STABLE_ATTRS = ("data-testid", "data-test-id", "type", "autocomplete", "href", "for")
 
+# Identity rules (see score_fingerprint):
+# - an unchanged id on the same kind of element is strong evidence even when the
+#   element was moved or wrapped: its score is raised to ID_ANCHOR_SCORE;
+# - when the stored element had identifying features (id, name, placeholder,
+#   aria-label, text, href) and the candidate shares none of them, it is a
+#   look-alike, not the same element: its score is capped at NO_IDENTITY_CAP.
+ID_ANCHOR_SCORE = 0.85
+NO_IDENTITY_CAP = 0.6
+TEXT_SAME = 0.8  # fuzzy text ratio that counts as "the same text"
+
+_LOCATOR_ATTR_RE = re.compile(r"\[\s*([\w:-]+)\s*[~|^$*]?=")
+_LOCATOR_ID_RE = re.compile(r"#([\w-]+)")
+_FIELD_OF_ATTR = {"id": "id", "name": "name", "placeholder": "placeholder", "aria-label": "aria_label", "role": "role"}
+
+
+def broken_attributes(primary_locator: str) -> frozenset[str]:
+    """Attributes the (failed) primary locator matched on.  They have changed by
+    definition, so they are not evidence for or against any candidate."""
+    attrs = set(_LOCATOR_ATTR_RE.findall(primary_locator or ""))
+    if _LOCATOR_ID_RE.search(primary_locator or ""):
+        attrs.add("id")
+    return frozenset(attrs)
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -99,6 +123,7 @@ async def attempt_healing(
         return None
 
     stored = target.fingerprint
+    ignore = broken_attributes(target.primary_locator)
     threshold = config.heal_threshold
     tried = {target.primary_locator}
     candidates: list[HealingCandidate] = []
@@ -113,7 +138,7 @@ async def attempt_healing(
         if live is None:
             continue
 
-        candidate = _candidate(locator, stored, live)
+        candidate = _candidate(locator, stored, live, ignore)
         candidates.append(candidate)
         if candidate.score >= threshold:
             log.info(
@@ -131,7 +156,7 @@ async def attempt_healing(
 
             live = await _resolve_unique(page, locator)
             if live is not None:
-                candidates.append(_candidate(locator, stored, live))
+                candidates.append(_candidate(locator, stored, live, ignore))
 
         ranked = sorted(candidates, key=lambda c: c.score, reverse=True)
         if ranked and ranked[0].score >= threshold:
@@ -158,6 +183,7 @@ async def attempt_healing(
 def score_fingerprint(
     stored: ElementFingerprint,
     live: ElementFingerprint,
+    ignore: frozenset[str] = frozenset(),
 ) -> tuple[float, HealingSignals]:
     """
     Compare a live element against the stored fingerprint.
@@ -170,7 +196,7 @@ def score_fingerprint(
         Weighted composite score in [0, 1] and the per-signal breakdown.
     """
     signals = HealingSignals(
-        attribute=_attribute_signal(stored, live),
+        attribute=_attribute_signal(stored, live, ignore),
         text=_text_signal(stored, live),
         position=_position_signal(stored, live),
         structure=_structure_signal(stored, live),
@@ -178,6 +204,8 @@ def score_fingerprint(
 
     if stored.tag and live.tag and stored.tag != live.tag:
         return 0.0, signals
+    if _input_kind(stored) != _input_kind(live):
+        return 0.0, signals  # e.g. a checkbox that became a radio: a different control
 
     score = (
         W_ATTRIBUTE * signals.attribute
@@ -185,6 +213,11 @@ def score_fingerprint(
         + W_POSITION * signals.position
         + W_STRUCTURE * signals.structure
     )
+    identity = _identity_matches(stored, live, ignore)
+    if identity is False:
+        score = min(score, NO_IDENTITY_CAP)
+    elif "id" not in ignore and stored.id and live.id == stored.id:
+        score = max(score, ID_ANCHOR_SCORE)
     return round(min(max(score, 0.0), 1.0), 4), signals
 
 
@@ -214,12 +247,13 @@ def _candidate(
     locator: str,
     stored: ElementFingerprint | None,
     live: ElementFingerprint,
+    ignore: frozenset[str] = frozenset(),
 ) -> HealingCandidate:
     if stored is None:
         return HealingCandidate(
             locator=locator, score=FALLBACK_WITHOUT_FINGERPRINT, signals=HealingSignals()
         )
-    score, signals = score_fingerprint(stored, live)
+    score, signals = score_fingerprint(stored, live, ignore)
     return HealingCandidate(locator=locator, score=score, signals=signals)
 
 
@@ -238,16 +272,46 @@ def _report(
     )
 
 
-def _attribute_signal(stored: ElementFingerprint, live: ElementFingerprint) -> float:
+# Input types that behave alike; a change between groups is a different control
+_TEXT_LIKE = {"", "text", "email", "password", "search", "tel", "url", "number"}
+
+
+def _input_kind(fp: ElementFingerprint) -> str | None:
+    if fp.tag != "input":
+        return None
+    kind = (fp.attributes.get("type") or "").lower()
+    return "text" if kind in _TEXT_LIKE else kind
+
+
+def _identity_matches(stored: ElementFingerprint, live: ElementFingerprint,
+                      ignore: frozenset[str]) -> bool | None:
+    """Whether the candidate shares any identifying feature with the stored
+    element (None when the stored element had none to compare)."""
+    checks: list[bool] = []
+    for attr, field in _FIELD_OF_ATTR.items():
+        expected = getattr(stored, field)
+        if attr != "role" and attr not in ignore and expected:
+            checks.append(getattr(live, field) == expected)
+    if stored.text:
+        checks.append(bool(live.text) and fuzz.ratio(stored.text, live.text) / 100.0 >= TEXT_SAME)
+    if stored.attributes.get("href") and "href" not in ignore:
+        checks.append(live.attributes.get("href") == stored.attributes["href"])
+    return any(checks) if checks else None
+
+
+def _attribute_signal(stored: ElementFingerprint, live: ElementFingerprint,
+                      ignore: frozenset[str] = frozenset()) -> float:
     """Fraction of the stored element's identifying attributes the live one shares."""
     checks: list[float] = []
 
-    for field in ("id", "name", "placeholder", "aria_label", "role"):
+    for attr, field in _FIELD_OF_ATTR.items():
         expected = getattr(stored, field)
-        if expected:
+        if expected and attr not in ignore:
             checks.append(1.0 if getattr(live, field) == expected else 0.0)
 
     for key in _STABLE_ATTRS:
+        if key in ignore:
+            continue
         expected = stored.attributes.get(key)
         if expected:
             checks.append(1.0 if live.attributes.get(key) == expected else 0.0)

@@ -91,7 +91,7 @@ def active_run(db: Store, project_id: int) -> Record | None:
 
 
 def create_run(db: Store, project: Record, *, trigger: str, actor: str, detail: str | None = None,
-               ingest: bool = False) -> Record:
+               ingest: bool = False, commit_sha: str | None = None) -> Record:
     if trigger not in TRIGGERS:
         raise ValueError(f"Unknown trigger {trigger!r}")
     return db.insert(
@@ -101,14 +101,14 @@ def create_run(db: Store, project: Record, *, trigger: str, actor: str, detail: 
         ingest=ingest, status="queued", error=None,
         stages=[{"key": k, "label": label, "status": "pending", "detail": None, "started_at": None, "finished_at": None}
                 for k, label in STAGES],
-        tests=[], summary=None, regressions=[], started_at=None, finished_at=None,
+        tests=[], summary=None, regressions=[], started_at=None, finished_at=None, commit_sha=commit_sha,
     )
 
 
 def start_run(db: Store, project: Record, *, trigger: str, actor: str, detail: str | None = None,
-              ingest: bool = False, executor: Callable[[int], Any] | None = None) -> Record:
+              ingest: bool = False, executor: Callable[[int], Any] | None = None, commit_sha: str | None = None) -> Record:
     """Create a run; execute it in the background here, or leave it queued for a worker."""
-    run = create_run(db, project, trigger=trigger, actor=actor, detail=detail, ingest=ingest)
+    run = create_run(db, project, trigger=trigger, actor=actor, detail=detail, ingest=ingest, commit_sha=commit_sha)
     if settings.PIPELINE_EXECUTION != "worker" or executor is not None:
         task = asyncio.get_running_loop().create_task((executor or execute_run)(run["id"]))
         _tasks.add(task)
@@ -200,10 +200,52 @@ async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None
             state.save(status="error", error=f"Internal error: {exc}", finished_at=now_iso())
         finished = db.get(PIPELINE_RUNS, run_id)
         try:
-            await notify_run(db.get(PROJECTS, project["id"]) or project, finished)
+            current = db.get(PROJECTS, project["id"]) or project
+            await notify_run(current, finished)
+            await asyncio.to_thread(report_commit_status, db, current, finished)
+            _deploy_if_green(db, current, finished)
         except StoreUnavailableError:
             pass
         return finished
+
+
+def report_commit_status(db: Store, project: Record, run: Record) -> bool:
+    """Show the run's result on the pushed commit in GitHub (when the owner connected GitHub)."""
+    from backend.api.integrations import github_token
+    from backend.github import GitHubClient, GitHubError, parse_repo
+    from backend.notify import run_url
+
+    repo = parse_repo(project.get("repo_url"))
+    if not (run.get("commit_sha") and repo):
+        return False
+    token = github_token(db, project.get("owner_uid"))
+    if not token:
+        return False
+    s = run.get("summary") or {}
+    state = {"passed": "success", "failed": "failure"}.get(run.get("status"), "error")
+    text = (f"{s.get('passed', 0)}/{s.get('total', 0)} tests passed" if s else (run.get("error") or run.get("status", "")))
+    if s.get("goal_untested"):
+        text += " (goal not tested)"
+    try:
+        with GitHubClient(token) as gh:
+            gh.set_commit_status(*repo, run["commit_sha"], state, f"Run #{run['id']}: {text}", run_url(run["id"]))
+        return True
+    except GitHubError as exc:
+        logger.warning("Could not set the commit status for run #%s: %s", run["id"], exc)
+        return False
+
+
+def _deploy_if_green(db: Store, project: Record, run: Record) -> None:
+    """Close the loop: a clean run of a project with deploy_on_pass ships it (stage 6)."""
+    from backend.pipeline import deploy
+
+    if not (project.get("deploy_on_pass") and project.get("deploy_hook_url")):
+        return
+    if run.get("status") != "passed" or run.get("regressions"):
+        return
+    if deploy.active_deployment(db, project["id"]):
+        return
+    deploy.start_deployment(db, project, actor=run.get("actor") or "pipeline", trigger="pipeline", run_id=run["id"])
 
 
 async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner: Any) -> None:
@@ -238,6 +280,12 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
     # ── plan ──
     state.stage("plan", "running")
     application, test_cases, plan_detail = await _plan(db, project, analysis, blueprint)
+    goal_untested = bool((project.get("prompt") or "").strip()) and not any(
+        str(tc.get("external_id", "")).endswith("-interaction") for tc in test_cases)
+    if goal_untested:
+        plan_detail += (" · Your goal was not tested: no form fields or buttons were found on the page"
+                        + ("" if analysis.get("rendered_in_browser") else " (even before scripts ran)"))
+    state.save(goal_untested=goal_untested)
     state.stage("plan", "done", plan_detail)
 
     # ── execute (with AI analysis + healing inside the orchestrator) ──
@@ -446,6 +494,7 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
     # A quarantined test still runs and is reported, but cannot fail the run
     failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value and not r.get("quarantined"))
     summary = {
+        "goal_untested": bool(state.doc.get("goal_untested")),
         "total": len(results),
         "passed": counts.get(TestExecutionStatus.PASSED.value, 0) + counts.get(TestExecutionStatus.HEALED.value, 0),
         "failed": failed,

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useWorkspace } from '../state/Workspace';
 import { ApprovalControls, DiffView } from '../components/RemediationCard';
+import FixPatchCard from '../components/FixPatch';
 import { timeAgo } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
 
@@ -161,6 +162,8 @@ export default function RemediationBridge({ onNavigate }) {
           )}
         </div>
       )}
+
+      {lastScan && <FixPatchCard targetUrl={lastScan.url} />}
 
       <LocatorHealing />
     </div>

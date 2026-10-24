@@ -79,5 +79,6 @@ async def github_webhook(
     message = (head.get("message") or "").splitlines()[0][:80] if head.get("message") else ""
     detail = f"{(payload.get('after') or '')[:7]} {message}".strip()
     pusher = (payload.get("pusher") or {}).get("name") or "github"
-    run = start_run(db, project, trigger="webhook", actor=f"github:{pusher}", detail=detail or None, ingest=True)
+    run = start_run(db, project, trigger="webhook", actor=f"github:{pusher}", detail=detail or None, ingest=True,
+                    commit_sha=payload.get("after") or None)
     return {"started": run["id"]}

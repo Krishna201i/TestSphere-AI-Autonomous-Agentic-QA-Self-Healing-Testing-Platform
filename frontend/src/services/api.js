@@ -113,6 +113,15 @@ export const approveFinding = (key, actor) =>
   request(`/api/security/findings/${encodeURIComponent(key)}/approve`, { method: 'POST', body: { actor } });
 export const retestFinding = (key, actor) =>
   request(`/api/security/findings/${encodeURIComponent(key)}/retest`, { method: 'POST', body: { actor } });
+/** Fix patch: open findings of a site as a diff against its repository. */
+export const createFixPatch = (payload) => request('/api/security/patches', { method: 'POST', body: payload });
+export const getFixPatches = (targetUrl) => request(`/api/security/patches?target_url=${encodeURIComponent(targetUrl)}`);
+export const downloadFixPatch = (id) => request(`/api/security/patches/${id}/download`, { raw: true });
+/** Integrations: GitHub token (stored encrypted on the server, never returned). */
+export const getIntegrations = () => request('/api/integrations');
+export const connectGitHub = (token) => request('/api/integrations/github', { method: 'PUT', body: { token } });
+export const disconnectGitHub = () => request('/api/integrations/github', { method: 'DELETE' });
+export const openPullRequest = (patchId) => request(`/api/security/patches/${patchId}/pull-request`, { method: 'POST' });
 export const getAudit = (limit = 300) => request(`/api/audit?limit=${limit}`);
 export const getSystem = () => request('/api/system');
 export const ingestCodebase = (source, actor) => request('/api/ingest', { method: 'POST', body: { source, actor } });
@@ -123,6 +132,9 @@ export const updateProject = (id, payload) => request(`/api/projects/${id}`, { m
 export const rotateWebhookSecret = (id) => request(`/api/projects/${id}/webhook-secret`, { method: 'POST' });
 export const runProjectPipeline = (projectId, ingest = false) =>
   request('/api/pipelines/run', { method: 'POST', body: { project_id: projectId, ingest } });
+/** Verified deploy: hook -> health -> smoke tests -> rollback on failure. */
+export const deployProject = (projectId) => request(`/api/pipelines/projects/${projectId}/deploy`, { method: 'POST' });
+export const getDeployments = (limit = 20) => request(`/api/pipelines/deployments?limit=${limit}`);
 export const quickPipeline = (payload) => request('/api/pipelines/quick', { method: 'POST', body: payload });
 export const getPipelineRuns = (limit = 30) => request(`/api/pipelines/runs?limit=${limit}`);
 export const getPipelineRun = (id) => request(`/api/pipelines/runs/${id}`);

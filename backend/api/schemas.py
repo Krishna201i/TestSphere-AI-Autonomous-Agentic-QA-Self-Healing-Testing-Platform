@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.models.test_execution import TestExecutionStatus
 from backend.notify import NOTIFY_CHOICES, check_slack_webhook
+from backend.pipeline.deploy_config import check_hook_url
 
 # ============================================================================
 # Project Schemas
@@ -41,6 +42,25 @@ class _ProjectPipelineFields(BaseModel):
     schedule_minutes: int | None = Field(None, description=f"Re-run interval in minutes, one of {SCHEDULE_CHOICES}")
     slack_webhook_url: str | None = Field(None, max_length=500, description="Slack incoming webhook for run alerts")
     notify_on: str | None = Field(None, description="'failures' (default) or 'always'")
+    deploy_hook_url: str | None = Field(None, max_length=1000, description="Deploy hook (Render, Vercel, Netlify, ...)")
+    rollback_hook_url: str | None = Field(None, max_length=1000, description="Hook that restores the previous version")
+    health_url: str | None = Field(None, max_length=1024, description="URL checked after a deploy (default: app URL)")
+    deploy_on_pass: bool | None = Field(None, description="Deploy and verify automatically after a passing run")
+
+    @field_validator("deploy_hook_url")
+    @classmethod
+    def _deploy_hook(cls, v: str | None) -> str | None:
+        return check_hook_url(v, "Deploy hook")
+
+    @field_validator("rollback_hook_url")
+    @classmethod
+    def _rollback_hook(cls, v: str | None) -> str | None:
+        return check_hook_url(v, "Rollback hook")
+
+    @field_validator("health_url")
+    @classmethod
+    def _health_url(cls, v: str | None) -> str | None:
+        return _check_http_url(v, "Health URL")
 
     @field_validator("slack_webhook_url")
     @classmethod
@@ -80,14 +100,14 @@ class ProjectCreate(_ProjectPipelineFields):
     """Payload to create a new testing project."""
 
     name: str = Field(..., min_length=1, max_length=255, description="Project name")
-    description: str | None = Field(None, description="Optional project description")
+    description: str | None = Field(None, max_length=5000, description="Optional project description")
 
 
 class ProjectUpdate(_ProjectPipelineFields):
     """Payload to update an existing project (send null/\"\" to clear a pipeline field)."""
 
     name: str | None = Field(None, min_length=1, max_length=255, description="Updated project name")
-    description: str | None = Field(None, description="Updated description")
+    description: str | None = Field(None, max_length=5000, description="Updated description")
 
 
 class ProjectResponse(BaseModel):
@@ -107,6 +127,12 @@ class ProjectResponse(BaseModel):
     webhook_secret: str | None = None
     slack_webhook_url: str | None = None
     notify_on: str | None = None
+    deploy_hook_url: str | None = None
+    rollback_hook_url: str | None = None
+    health_url: str | None = None
+    deploy_on_pass: bool | None = None
+    last_deploy_id: int | None = None
+    last_deploy_status: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -124,7 +150,7 @@ class ApplicationCreate(BaseModel):
     project_id: int = Field(..., description="Foreign key to Project")
     name: str = Field(..., min_length=1, max_length=255, description="Application name")
     base_url: str = Field(..., min_length=1, max_length=1024, description="Base URL of application under test")
-    description: str | None = Field(None, description="Optional application description")
+    description: str | None = Field(None, max_length=5000, description="Optional application description")
 
 
 class ApplicationUpdate(BaseModel):
@@ -132,7 +158,7 @@ class ApplicationUpdate(BaseModel):
 
     name: str | None = Field(None, min_length=1, max_length=255, description="Updated name")
     base_url: str | None = Field(None, min_length=1, max_length=1024, description="Updated base URL")
-    description: str | None = Field(None, description="Updated description")
+    description: str | None = Field(None, max_length=5000, description="Updated description")
 
 
 class ApplicationResponse(BaseModel):

@@ -285,7 +285,7 @@ h1, h2, h3, h4 { line-height: var(--lh-tight); }
 .icon-btn .badge {
   position: absolute; top: 0; right: 0;
   min-width: 16px; height: 16px; padding: 0 var(--s-1);
-  border-radius: var(--r-full); background: var(--violet); color: var(--on-accent);
+  border-radius: var(--r-full); background: var(--accent-strong); color: var(--on-accent);
   font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 16px; text-align: center;
 }
 .user {
@@ -539,6 +539,8 @@ select.input { padding-right: var(--s-2); }
 .select-sm { flex: none; min-width: 160px; height: var(--h-sm); font-size: var(--fs-sm); border-radius: var(--r-sm); }
 label.field { display: flex; flex-direction: column; gap: var(--s-1); font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--text-2); flex: 1; min-width: 180px; }
 label.field.wide { flex: 2; }
+label.check { display: flex; align-items: flex-start; gap: var(--s-2); font-size: var(--fs-sm); color: var(--text-2); cursor: pointer; }
+label.check input { margin-top: 2px; accent-color: var(--accent); }
 label.field .input { width: 100%; flex: none; }
 .field-error { color: var(--danger-text); font-size: var(--fs-sm); font-weight: var(--fw-regular); }
 
@@ -798,7 +800,7 @@ pre.code {
 .stage-item.running { border-color: var(--accent-border); background: var(--accent-soft); }
 .stage-item.done { background: var(--surface); }
 .stage-item.failed { border-color: var(--danger-border); background: var(--danger-soft); }
-.stage-item.skipped, .stage-item.pending { opacity: 0.8; }
+.stage-item.skipped, .stage-item.pending { border-style: dashed; }
 .stage-label { font-weight: var(--fw-medium); font-size: var(--fs-base); }
 .spin { animation: spin 1s linear infinite; color: var(--violet); }
 
@@ -836,6 +838,16 @@ pre.code {
 .heal-conf .meter { width: 80px; }
 .heal-cands summary, .step details summary { cursor: pointer; color: var(--text-2); }
 details > ul { margin-top: var(--s-2); }
+
+/* ── Unified diff (fix patches) ──────────────────────────── */
+.udiff { margin: 0; padding: var(--s-2) 0; font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.6; overflow-x: auto; max-height: 420px; background: var(--surface); }
+.udiff > span { display: block; padding: 0 var(--s-4); white-space: pre; min-width: max-content; }
+.ud-add { background: var(--success-soft); color: var(--success-fg); }
+.ud-del { background: var(--danger-soft); color: var(--danger-fg); }
+.ud-hunk { color: var(--accent); background: var(--accent-soft); }
+.ud-file { color: var(--muted); }
+.ud-ctx { color: var(--text-2); }
+.approval-note { padding: var(--s-2) var(--s-4); }
 
 /* ── Security sub-tabs ───────────────────────────────────── */
 .subnav { width: 100%; max-width: var(--page-max); margin: 0 auto; padding: var(--s-6) var(--gutter) 0; }
