@@ -23,6 +23,7 @@ from backend.api import (
     health_router,
     ingest_router,
     me_router,
+    patches_router,
     pipelines_router,
     projects_router,
     security_router,
@@ -132,6 +133,7 @@ api_routers = [
     ingest_router,
     system_router,
     me_router,
+    patches_router,
     pipelines_router,
     webhooks_router,
 ]

@@ -86,6 +86,14 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `ARTIFACT_TRACES` | `true` | Record a Playwright trace (`.zip`, typically 1–5 MB) for every test run, downloadable from the run page |
 | `ARTIFACT_RETENTION_DAYS` | `30` | Delete artifacts after this many days (`0` keeps them until the execution or account is deleted). On GCS this is a bucket lifecycle rule set on first use (needs `storage.buckets.update`; otherwise add the rule in the console) |
 
+**Fix patches** (Security → Remediation → *Fix patch for your code*): the open findings of a site become a
+`git apply`-able diff against its repository (the project's *Git repository*, or one pasted in the form).
+The server shallow-clones it into `INGEST_WORKSPACE/patches/` (same host allow-list as ingestion, so `git`
+must be installed), edits a temporary copy, checks that edited Python/JavaScript still parses, stores the
+result in `fix_patches` and deletes the clone. Supported: FastAPI/Starlette and Flask (header hook, CORS
+allow-list, cookie flags, `uvicorn.run(server_header=False)`), Django settings, Express (header middleware,
+`cors()`, `res.cookie` options, `x-powered-by`), nginx `server {}` blocks. Anything else is listed as a manual change.
+
 Slack alerts are set per project in Autopilot → project → Settings: paste a Slack incoming-webhook URL
 (Slack → Apps → *Incoming Webhooks*; only `https://hooks.slack.com/services/...` is accepted) and choose
 "when a run fails or regresses" or "after every run". Each run page also offers a **JUnit XML** download

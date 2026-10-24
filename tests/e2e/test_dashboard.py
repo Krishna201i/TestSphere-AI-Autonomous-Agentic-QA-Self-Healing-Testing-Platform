@@ -212,3 +212,35 @@ def test_run_page_shows_steps_healing_and_screenshots(server, browser):
     page.keyboard.press("Escape")
     assert errors == []
     page.close()
+
+
+def test_fix_patch_is_shown_as_a_reviewable_diff(server, browser):
+    target = "http://127.0.0.1:9/"
+    finding = {"key": "k1", "check_id": "SEC-HDR-FRAME", "severity": "medium", "title": "Page can be framed",
+               "status": "open", "target_url": target, "component": target, "evidence": [], "root_cause": "x",
+               "recommendation": "Send X-Frame-Options", "confidence": 0.9, "first_seen": "2026-10-24T10:00:00Z",
+               "last_seen": "2026-10-24T10:00:00Z",
+               "remediation": {"kind": "header", "summary": "s", "diff": [{"kind": "added", "text": "X-Frame-Options: DENY"}], "snippets": {}}}
+    patch = {"id": 3, "target_url": target, "repo": "https://github.com/acme/shop", "commit": "abc1234",
+             "frameworks": ["fastapi"], "created_at": "2026-10-24T10:00:00Z",
+             "applied": [{"check_id": "SEC-HDR-FRAME", "file": "app/main.py", "how": "HTTP middleware sets X-Frame-Options"}],
+             "manual": [{"check_id": "SEC-TRANSPORT-HTTP", "reason": "Serve the site over HTTPS."}],
+             "files": [{"path": "app/main.py", "verified": True, "check_note": None,
+                        "diff": "--- a/app/main.py\n+++ b/app/main.py\n@@ -1,2 +1,3 @@\n app = FastAPI()\n+# fix\n x = 1\n"}],
+             "patch": "..."}
+    page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.route("**/api/security/findings", lambda r: r.fulfill(json=[finding]))
+    page.route("**/api/security/patches?*", lambda r: r.fulfill(json=[patch]))
+    page.goto(f"{server}/#/security/remediation")
+    page.wait_for_selector(".udiff")
+    assert page.locator(".ud-add").inner_text().strip() == "+# fix"
+    assert "Serve the site over HTTPS." in page.locator("#patch-title").locator("xpath=ancestor::section").inner_text()
+    assert page.get_by_role("button", name="Download .patch").count() == 1
+
+    page.add_script_tag(path=str(AXE))
+    violations = page.evaluate("tags => axe.run(document, {runOnly: {type: 'tag', values: tags}}).then(r => r.violations)", WCAG_AA)
+    assert [f"{v['id']} {[n['target'] for n in v['nodes']]}" for v in violations] == []
+    assert errors == []
+    page.close()

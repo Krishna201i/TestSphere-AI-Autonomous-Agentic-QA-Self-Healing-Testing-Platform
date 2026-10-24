@@ -13,6 +13,7 @@ Entities are documents in these store collections (Firestore in production):
     agent_memory        kind, data
     users               uid, email, display_name, organization, job_title, last_login_at
     pipeline_runs       project_id, trigger, status, stages, tests, summary, ...
+    fix_patches         target_url, repo, commit, files, applied, manual, patch
 
 Documents owned by a user also carry ``owner_uid`` (see backend/auth.py).
 
@@ -30,8 +31,9 @@ AUDIT_EVENTS = "audit_events"
 BLUEPRINTS = "codebase_blueprints"
 USERS = "users"
 PIPELINE_RUNS = "pipeline_runs"
+FIX_PATCHES = "fix_patches"
 
 __all__ = [
     "TestExecutionStatus", "PROJECTS", "APPLICATIONS", "TEST_CASES", "TEST_EXECUTIONS",
-    "SECURITY_FINDINGS", "AUDIT_EVENTS", "BLUEPRINTS", "USERS", "PIPELINE_RUNS",
+    "SECURITY_FINDINGS", "AUDIT_EVENTS", "BLUEPRINTS", "USERS", "PIPELINE_RUNS", "FIX_PATCHES",
 ]
