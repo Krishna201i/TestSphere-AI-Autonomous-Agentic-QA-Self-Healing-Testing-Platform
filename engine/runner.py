@@ -302,11 +302,12 @@ async def _perform_action_with_locator(
     page: Page,
     step: Step,
     locator_str: str,
-    config: EngineConfig,  # noqa: ARG001 — reserved for future use
+    config: EngineConfig,
 ) -> str:
     """Run the step's action using *locator_str* and return it."""
     action = step.action
-    timeout = max(step.timeout_ms or 10000, 10000)
+    floor = config.min_action_timeout_ms
+    timeout = max(step.timeout_ms or floor, floor)
     loc = page.locator(locator_str).first
 
     if action == ActionType.CLICK:
