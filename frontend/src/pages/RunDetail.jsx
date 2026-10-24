@@ -274,6 +274,12 @@ export default function RunDetail({ params, onNavigate }) {
       </div>
 
       {run.error && <div className="alert-banner inline cell-wrap">{run.error}</div>}
+      {run.goal_untested && (
+        <div className="alert-banner inline" role="status">
+          <b>Your goal was not tested.</b> No form fields or buttons were found on the page, so only page-level checks ran.
+          A passing result here does not mean the flow you described works.
+        </div>
+      )}
       {notice && <div className="alert-banner inline" role="alert">{notice}</div>}
 
       <ol className="stage-list" aria-label="Stages">

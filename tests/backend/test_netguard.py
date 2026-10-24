@@ -84,3 +84,20 @@ async def test_a_browser_step_cannot_reach_an_internal_address(hosted):
         server.shutdown()
     assert result.steps[0].status == StepStatus.FAILED
     assert hits == []
+
+
+@pytest.mark.parametrize(("address", "blocked"), [
+    ("64:ff9b::a675:5e4e", False),   # NAT64 form of a public site (seen on IPv6-only networks)
+    ("64:ff9b::7f00:1", True),       # NAT64 form of 127.0.0.1
+    ("64:ff9b::a9fe:a9fe", True),    # NAT64 form of 169.254.169.254
+    ("::ffff:127.0.0.1", True),      # IPv4-mapped loopback
+    ("::ffff:8.8.8.8", False),
+    ("2606:4700::1111", False),      # plain public IPv6
+    ("fd00::1", True),               # unique local
+])
+def test_ipv6_forms_are_judged_by_the_address_they_reach(address, blocked):
+    import ipaddress
+
+    from backend.netguard import _blocked
+
+    assert _blocked(ipaddress.ip_address(address)) is blocked

@@ -118,6 +118,14 @@ class URLAnalyzerService:
         )
         meta_desc = meta_desc_match.group(1).strip() if meta_desc_match else None
 
+        # Client-rendered apps (React, Vue, ...) ship an almost empty HTML
+        # shell; read the DOM a real browser builds instead.
+        rendered = False
+        if not error_encountered and status_code < 400 and cls._looks_client_rendered(html):
+            dom = await cls._render_in_browser(normalized_url)
+            if dom:
+                html, rendered = dom, True
+
         # DOM Element Extraction
         inputs = cls._extract_inputs(html)
         buttons = cls._extract_buttons(html)
@@ -170,6 +178,7 @@ class URLAnalyzerService:
             "latency_ms": latency_ms,
             "page_title": page_title,
             "meta_description": meta_desc,
+            "rendered_in_browser": rendered,
             "elements_inventory": {
                 "inputs_count": len(inputs),
                 "buttons_count": len(buttons),
@@ -201,6 +210,38 @@ class URLAnalyzerService:
     # -------------------------------------------------------------------------
     # DOM Extractors
     # -------------------------------------------------------------------------
+
+    @classmethod
+    def _looks_client_rendered(cls, html: str) -> bool:
+        """An HTML shell whose content is built by scripts: no form controls,
+        little visible text, and scripts present."""
+        if not re.search(r"<script\b", html, re.IGNORECASE):
+            return False
+        if re.search(r"<(input|button|select|textarea)\b", html, re.IGNORECASE):
+            return False
+        body = re.sub(r"(?is)<(script|style|noscript)\b.*?</\1>", " ", html)
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body)).strip()
+        return len(text) < 400
+
+    @classmethod
+    async def _render_in_browser(cls, url: str) -> str | None:
+        """The page's DOM after its scripts ran, from the engine's guarded
+        browser (same egress policy and browser slots as test runs)."""
+        try:
+            from engine.browser import BrowserSession
+            from engine.schemas import EngineConfig
+
+            async with BrowserSession(EngineConfig(headless=True)) as session:
+                page = await session.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=20_000)
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=8_000)
+                except Exception:  # noqa: BLE001 - long-polling pages never go idle; use what rendered
+                    pass
+                return await page.content()
+        except Exception as exc:  # noqa: BLE001 - fall back to the static HTML
+            logger.warning("Could not render %s in a browser: %s", url, exc)
+            return None
 
     @classmethod
     def _extract_inputs(cls, html: str) -> list[dict[str, Any]]:
@@ -415,6 +456,50 @@ class URLAnalyzerService:
     # Autonomous Test Synthesis for Specific Website
     # -------------------------------------------------------------------------
 
+    _SUBMIT_WORDS = re.compile(r"\b(log ?in|sign ?in|submit|continue|next|search|save|send|go|add)\b", re.IGNORECASE)
+
+    @classmethod
+    def _primary_button(cls, buttons: list[dict[str, Any]], has_inputs: bool) -> dict[str, Any] | None:
+        """The button a user would press: a submit button or one saying so,
+        never a bare ``button`` locator that matches whatever comes first."""
+        named = [b for b in buttons if b["selector"] != "button"]
+        if not named:
+            return None
+        if has_inputs:
+            for b in named:
+                if b.get("type") == "submit" or cls._SUBMIT_WORDS.search(b.get("text") or ""):
+                    return b
+        return next((b for b in named if b.get("id")), named[0])
+
+    @staticmethod
+    def prompt_values(prompt: str | None) -> dict[str, str]:
+        """Values written in the goal: user name, password and a text to type.
+
+        Understands "log in with tomsmith / SuperSecretPassword!",
+        "username student and password Password123", "as standard_user with
+        password secret_sauce", "add a todo called Buy milk", quoted text.
+        """
+        text = re.sub(r"\b(?:https?://|www\.)\S+", " ", prompt or "")  # a URL is not "user / password"
+        values: dict[str, str] = {}
+        pair = re.search(r"([\w.@+-]+)\s*/\s*(\S+)", text)
+        if pair:
+            values["username"], values["password"] = pair.group(1), pair.group(2).rstrip(".,;")
+        pw = re.search(r"\bpass(?:word)?\s*(?:is|=|:)?\s*[\"']?([^\s\"',;]+)", text, re.IGNORECASE)
+        if pw:
+            values["password"] = pw.group(1)
+        user = re.search(r"\b(?:user ?name|user|login|e-?mail)\s*(?:is|=|:)?\s*[\"']?([\w.@+-]+)", text, re.IGNORECASE) \
+            or re.search(r"\b(?:log ?in|sign ?in)\s+as\s+[\"']?([\w.@+-]+)", text, re.IGNORECASE) \
+            or re.search(r"\bas\s+[\"']?([\w.@+-]+)\s+(?:with|and)\s+pass", text, re.IGNORECASE)
+        if user and user.group(1).lower() not in ("and", "with", "password", "is"):
+            values["username"] = user.group(1)
+        quoted = re.search(r"[\"“]([^\"”]{1,80})[\"”]", text)
+        called = re.search(r"\b(?:called|named|titled|search(?:es)? for|type)\s+(.+?)(?:\s+and\b|[.,;]|$)", text, re.IGNORECASE)
+        if quoted:
+            values["text"] = quoted.group(1)
+        elif called:
+            values["text"] = called.group(1).strip()
+        return values
+
     @classmethod
     def _synthesize_test_steps(
         cls,
@@ -451,24 +536,28 @@ class URLAnalyzerService:
         # Step 3: Interactive Inputs (if discovered)
         # Check if user prompt mentions login or credentials
         p_lower = (prompt or "").lower()
+        given = cls.prompt_values(prompt)
         if inputs:
-            for inp in inputs[:2]:  # Use up to 2 real inputs
+            for inp in inputs[:4]:  # the first few real inputs
                 itype = inp.get("type", "text")
                 iname = (inp.get("name") or "").lower()
                 target_sel = inp["selector"]
 
-                if "pass" in iname or itype == "password":
-                    val = "AutoQAPassword!99"
-                    desc = f"Enter test password in {target_sel}"
-                elif "user" in iname or "email" in iname or "login" in iname or itype == "email":
-                    val = "qa_user@testsphere.ai"
-                    desc = f"Enter test user identity in {target_sel}"
-                elif "search" in iname or itype == "search" or "search" in p_lower:
-                    val = "TestSphere QA Automation"
-                    desc = f"Execute search query in {target_sel}"
+                hint = f"{iname} {(inp.get('id') or '').lower()} {(inp.get('placeholder') or '').lower()}"
+                if itype in ("checkbox", "radio", "submit", "button", "file", "range", "color"):
+                    continue
+                if "pass" in hint or itype == "password":
+                    val = given.get("password", "AutoQAPassword!99")
+                    desc = f"Enter the password in {target_sel}"
+                elif any(k in hint for k in ("user", "email", "login")) or itype == "email":
+                    val = given.get("username", "qa_user@testsphere.ai")
+                    desc = f"Enter the user name in {target_sel}"
+                elif "search" in hint or itype == "search" or "search" in p_lower:
+                    val = given.get("text", "TestSphere QA Automation")
+                    desc = f"Search in {target_sel}"
                 else:
-                    val = "Verified Test Input"
-                    desc = f"Enter validation string into {target_sel}"
+                    val = given.get("text", "Verified Test Input")
+                    desc = f"Type into {target_sel}"
 
                 steps.append({
                     "step_number": step_num,
@@ -480,14 +569,25 @@ class URLAnalyzerService:
                 step_num += 1
 
         # Step 4: Buttons Click / Assertion (if discovered)
-        if buttons:
-            primary_btn = buttons[0]
+        primary_btn = cls._primary_button(buttons, bool(inputs))
+        if primary_btn:
             steps.append({
                 "step_number": step_num,
                 "action": "CLICK",
                 "target": primary_btn["selector"],
                 "value": None,
                 "description": f"Trigger interactive action on '{primary_btn['text']}' ({primary_btn['selector']})",
+            })
+            step_num += 1
+        elif any(st["action"] == "FILL" for st in steps):
+            # No button: forms like a to-do entry submit on Enter
+            last_filled = [st for st in steps if st["action"] == "FILL"][-1]
+            steps.append({
+                "step_number": step_num,
+                "action": "PRESS",
+                "target": last_filled["target"],
+                "value": "Enter",
+                "description": f"Press Enter in {last_filled['target']}",
             })
             step_num += 1
         else:
