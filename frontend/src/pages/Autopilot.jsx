@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Circle, Copy, GitBranch, Loader2, MinusCircle, Play, RefreshCw, XCircle, Zap } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import {
   getPipelineRun,
-  getPipelineRuns,
   quickPipeline,
   rotateWebhookSecret,
   runProjectPipeline,
@@ -19,8 +18,6 @@ const SCHEDULES = [
 ];
 const TRIGGER_LABEL = { manual: 'Manual', schedule: 'Scheduled', webhook: 'GitHub push' };
 const ACTIVE = ['queued', 'running'];
-const ACTIVE_POLL_MS = 2000;
-const IDLE_POLL_MS = 15000;
 
 function StageIcon({ status }) {
   if (status === 'done') return <CheckCircle2 size={18} className="ok-text" />;
@@ -63,26 +60,24 @@ function QuickRun({ onStarted }) {
   return (
     <section className="card">
       <div className="card-head"><h3>Run the whole pipeline</h3><span className="pill violet"><Zap size={14} /> One click</span></div>
-      <p className="hint" style={{ margin: 0 }}>
+      <p className="card-sub">
         Analyzes the page, plans a suite of tests, runs every one in a real browser, self-heals broken steps,
         scans security headers and reports regressions — no manual steps. The URL becomes a project you can schedule below.
       </p>
       <form className="form-row" onSubmit={onSubmit}>
-        <label className="field" style={{ flex: 3 }}>
+        <label className="field wide">
           Target URL
           <input className="input" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://your-app.example/" required />
         </label>
-        <label className="field" style={{ flex: 3 }}>
+        <label className="field wide">
           What to test (optional)
           <input className="input" value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} placeholder="e.g. log in and reach the dashboard" />
         </label>
-        <label className="field" style={{ flex: 2 }}>
+        <label className="field">
           Git repository (optional)
           <input className="input" value={form.repo_url} onChange={(e) => setForm({ ...form, repo_url: e.target.value })} placeholder="https://github.com/you/app" />
         </label>
-        <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-          <button className="btn btn-primary" type="submit" disabled={busy}><Play size={16} /> {busy ? 'Starting…' : 'Run pipeline'}</button>
-        </div>
+        <button className="btn btn-primary" type="submit" disabled={busy}><Play size={16} /> {busy ? 'Starting…' : 'Run pipeline'}</button>
       </form>
       {error && <div className="error-text">{error}</div>}
     </section>
@@ -111,7 +106,7 @@ function RunDetail({ run }) {
         {run.stages.map((st) => (
           <li key={st.key} className={`stage-item ${st.status}`}>
             <StageIcon status={st.status} />
-            <div style={{ minWidth: 0 }}>
+            <div className="min-w-0">
               <div className="stage-label">{st.label}</div>
               {st.detail && <div className="small muted cell-wrap">{st.detail}</div>}
             </div>
@@ -211,7 +206,7 @@ function ProjectRow({ project, latest, onRun, onChanged }) {
           {project.next_run_at && <div className="small muted">next run {timeUntil(project.next_run_at)}</div>}
         </td>
         <td>{latest ? <RunStatus status={latest.status} /> : project.last_run_status ? <RunStatus status={project.last_run_status} /> : <span className="muted small">never run</span>}</td>
-        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+        <td className="text-right nowrap">
           <button type="button" className="btn btn-sm" onClick={() => setOpen(!open)} aria-expanded={open}>Settings</button>{' '}
           <button type="button" className="btn btn-sm btn-primary" disabled={busy || active || !project.app_url}
             onClick={() => act(async () => onRun(await runProjectPipeline(project.id)))}>
@@ -224,14 +219,14 @@ function ProjectRow({ project, latest, onRun, onChanged }) {
           <td colSpan={4}>
             {open && (
               <div className="settings-grid">
-                <form className="auth-form" onSubmit={(e) => { e.preventDefault(); act(() => updateProject(project.id, form)); }}>
+                <form className="form-stack" onSubmit={(e) => { e.preventDefault(); act(() => updateProject(project.id, form)); }}>
                   <label className="field">App URL<input className="input" value={form.app_url} onChange={(e) => setForm({ ...form, app_url: e.target.value })} placeholder="https://app.example/" /></label>
                   <label className="field">Git repository<input className="input" value={form.repo_url} onChange={(e) => setForm({ ...form, repo_url: e.target.value })} placeholder="https://github.com/you/app" /></label>
                   <label className="field">What to test<input className="input" value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} placeholder="optional" /></label>
                   <div><button type="submit" className="btn btn-sm" disabled={busy}>Save</button></div>
                 </form>
-                <div className="auth-form">
-                  <div className="small"><GitBranch size={14} style={{ verticalAlign: '-2px' }} /> <b>Run on every push</b> — in GitHub: Settings → Webhooks → Add webhook, content type <span className="mono">application/json</span>, “Just the push event”.</div>
+                <div className="form-stack">
+                  <div className="small"><GitBranch size={14} className="icon-inline" /> <b>Run on every push</b> — in GitHub: Settings → Webhooks → Add webhook, content type <span className="mono">application/json</span>, “Just the push event”.</div>
                   <CopyField label="Payload URL" value={webhookUrl(project.id)} />
                   <CopyField label="Secret" value={project.webhook_secret || ''} />
                   <div><button type="button" className="btn btn-sm" disabled={busy} onClick={() => act(() => rotateWebhookSecret(project.id))}><RefreshCw size={13} /> New secret</button></div>
@@ -247,41 +242,19 @@ function ProjectRow({ project, latest, onRun, onChanged }) {
 }
 
 export default function Autopilot() {
-  const { projects, refresh, system } = useWorkspace();
-  const [runs, setRuns] = useState([]);
+  const { projects, refresh, system, pipelineRuns, refreshRuns } = useWorkspace();
+  const runs = pipelineRuns || [];
   const [selectedId, setSelectedId] = useState(null);
-  const [selected, setSelected] = useState(null);
+  const [older, setOlder] = useState(null); // a run past the list's newest 40
 
-  const loadRuns = useCallback(async () => {
-    try {
-      setRuns(await getPipelineRuns(40));
-    } catch {
-      // the banner / health pulse already explains outages
-    }
-  }, []);
-
-  const anyActive = runs.some((r) => ACTIVE.includes(r.status)) || (selected && ACTIVE.includes(selected.status));
-
-  useEffect(() => {
-    loadRuns();
-    const id = setInterval(loadRuns, anyActive ? ACTIVE_POLL_MS : IDLE_POLL_MS);
-    return () => clearInterval(id);
-  }, [loadRuns, anyActive]);
-
-  // Follow the selected run (default: newest)
+  // The list holds full records and is followed every 2 seconds while a run is active
   const shownId = selectedId || runs[0]?.id || null;
+  const listed = runs.find((r) => r.id === shownId) || null;
   useEffect(() => {
-    if (!shownId) return undefined;
-    let alive = true;
-    const pull = () => getPipelineRun(shownId).then((r) => { if (alive) setSelected(r); }).catch(() => {});
-    pull();
-    const id = setInterval(pull, ACTIVE_POLL_MS);
-    return () => { alive = false; clearInterval(id); };
-  }, [shownId]);
-
-  useEffect(() => {
-    if (selected && !ACTIVE.includes(selected.status)) refresh();
-  }, [selected?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!shownId || listed) return;
+    getPipelineRun(shownId).then(setOlder).catch(() => setOlder(null));
+  }, [shownId, listed]);
+  const shown = listed || (older?.id === shownId ? older : null);
 
   const latestByProject = useMemo(() => {
     const map = {};
@@ -291,8 +264,7 @@ export default function Autopilot() {
 
   function started(run) {
     setSelectedId(run.id);
-    setSelected(run);
-    loadRuns();
+    refreshRuns();
     refresh();
   }
 
@@ -306,7 +278,7 @@ export default function Autopilot() {
       </div>
 
       <QuickRun onStarted={started} />
-      <RunDetail run={selected && selected.id === shownId ? selected : runs.find((r) => r.id === shownId)} />
+      <RunDetail run={shown} />
 
       <section className="card">
         <div className="card-head"><h3>Projects</h3><span className="muted small">{projects.length}</span></div>

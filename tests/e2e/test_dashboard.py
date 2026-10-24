@@ -91,10 +91,11 @@ def test_every_page_renders_without_errors(server, browser, route, selector):
 
 
 @pytest.mark.skipif(not AXE.exists(), reason="axe-core not installed (cd frontend && npm ci)")
+@pytest.mark.parametrize("scheme", ["light", "dark"])
 @pytest.mark.parametrize(("route", "selector"), PAGES, ids=[p[0] or "home" for p in PAGES])
-def test_every_page_meets_wcag_21_aa(server, browser, route, selector):
-    """axe-core automated checks (contrast, names, labels, ARIA); not a substitute for a manual audit."""
-    page = browser.new_page(viewport={"width": 1280, "height": 900})
+def test_every_page_meets_wcag_21_aa(server, browser, route, selector, scheme):
+    """axe-core automated checks (contrast, names, labels, ARIA) in both themes; not a substitute for a manual audit."""
+    page = browser.new_page(viewport={"width": 1280, "height": 900}, color_scheme=scheme)
     page.goto(f"{server}/#/{route}")
     page.wait_for_selector(selector, timeout=15_000)
     page.wait_for_timeout(500)
@@ -125,4 +126,38 @@ def test_privacy_notice_is_reachable_before_sign_in(server, browser):
     page.get_by_role("button", name="Back to sign in").click()
     page.get_by_role("button", name="Continue with Google").wait_for()
     assert errors == []
+    page.close()
+
+
+@pytest.mark.parametrize(("route", "selector"), PAGES, ids=[p[0] or "home" for p in PAGES])
+def test_every_page_fits_a_phone(server, browser, route, selector):
+    """At 390px wide nothing may push the page sideways."""
+    page = browser.new_page(viewport={"width": 390, "height": 844})
+    page.goto(f"{server}/#/{route}")
+    page.wait_for_selector(selector, timeout=15_000)
+    page.wait_for_timeout(500)
+    overflow = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    page.close()
+    assert overflow <= 0
+
+
+STAGE_KEYS = ["codebase", "analyze", "plan", "execute", "heal", "security", "report"]
+
+
+def test_loop_follows_a_running_pipeline(server, browser):
+    """The loop marks the running stage, the done ones before it, and shows the run in its hub."""
+    statuses = ["done", "done", "done", "running", "pending", "pending", "pending"]
+    run = {"id": 7, "project_id": 1, "project_name": "Shop", "status": "running", "trigger": "manual",
+           "created_at": "2026-10-24T10:00:00Z", "started_at": "2026-10-24T10:00:00Z", "finished_at": None,
+           "stages": [{"key": k, "label": k.title(), "status": st, "detail": None} for k, st in zip(STAGE_KEYS, statuses, strict=True)],
+           "summary": None, "tests": [], "regressions": []}
+    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    page.route("**/api/pipelines/runs?*", lambda r: r.fulfill(json=[run]))
+    page.goto(server)
+    page.wait_for_selector(".loop-node.running")
+    assert page.locator(".loop .loop-node.running").count() == 1
+    assert "AI QA Agent" in page.locator(".loop .loop-node.running").inner_text()
+    assert page.locator(".loop .loop-node.done").count() >= 1
+    assert "run #7" in page.locator(".loop .loop-hub").inner_text().lower()
+    assert page.locator(".loop .loop-token").count() == 1
     page.close()

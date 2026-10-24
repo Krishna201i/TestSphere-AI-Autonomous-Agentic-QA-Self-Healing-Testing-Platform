@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bell, ChevronDown, LogOut, Search, Server, UserRound } from 'lucide-react';
+import { Bell, ChevronDown, LogOut, Monitor, Moon, Server, Sun, UserRound } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { useAuth } from '../state/Auth';
+import { THEMES, useTheme } from '../state/theme';
 import { API_BASE_LABEL } from '../services/api';
 import { healthStats, pct, timeAgo, toDate } from '../lib/derive';
 
@@ -38,7 +39,7 @@ export function Logo({ size = 40 }) {
 }
 
 /** Menu anchored under its trigger; closes on outside click or Escape. */
-function Popover({ open, onClose, children, label, width = 360 }) {
+function Popover({ open, onClose, children, label, size = '' }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return undefined;
@@ -52,7 +53,7 @@ function Popover({ open, onClose, children, label, width = 360 }) {
     };
   }, [open, onClose]);
   if (!open) return null;
-  return <div ref={ref} className="popover" role="dialog" aria-label={label} style={{ width }}>{children}</div>;
+  return <div ref={ref} className={`popover ${size}`} role="dialog" aria-label={label}>{children}</div>;
 }
 
 function useMenu() {
@@ -75,6 +76,7 @@ export default function TopNav({ page, onNavigate }) {
   const displayName = signedIn ? (auth.user.name || auth.user.email) : operator;
   const h = healthStats(health);
   const menu = useMenu();
+  const [theme, setTheme] = useTheme();
   const [seenAt, setSeenAt] = useState(loadSeen);
   const [draftName, setDraftName] = useState(operator);
   const unread = audit.filter((a) => toDate(a.at).getTime() > seenAt).length;
@@ -98,28 +100,14 @@ export default function TopNav({ page, onNavigate }) {
   }
 
   const initials = displayName.split(/[\s._@-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
-  const envLabel = system ? `env: ${system.environment} [${system.commit || 'main'}]` : `env: ${import.meta.env.MODE} [offline]`;
+  const status = !h.online ? ['off', 'Offline'] : h.dbDown ? ['warn', 'Degraded'] : ['', 'Operational'];
 
   return (
     <header className="topbar">
-      <div className="brand">
-        <Logo />
-        <span className="brand-name">TESTSPHERE AI</span>
-      </div>
-      <span className="brand-divider" />
-      <div className="workspace-status" aria-live="polite">
-        <div className="live">
-          <span className={`dot ${!h.online ? 'off' : h.dbDown ? 'warn' : ''}`} />
-          {!h.online ? 'Backend Offline' : h.dbDown ? 'Database Down' : 'Live Workspace'}
-        </div>
-        <div className="health">
-          SYS_HEALTH: {!h.online
-            ? <span className="bad-text">DOWN ({pct(h.successRate)})</span>
-            : h.dbDown
-              ? <span className="warn-text">DEGRADED</span>
-              : <span className="ok-text">OK ({pct(h.successRate)})</span>}
-        </div>
-      </div>
+      <button type="button" className="brand" onClick={() => onNavigate('home')} aria-label="TestSphere AI, home">
+        <Logo size={28} />
+        <span className="brand-name">TestSphere <b>AI</b></span>
+      </button>
 
       <nav className="navpills" aria-label="Main">
         {PAGES.map((p) => (
@@ -131,31 +119,31 @@ export default function TopNav({ page, onNavigate }) {
       </nav>
 
       <div className="topbar-right">
-        {/* Environment / connection */}
-        <div className="menu-anchor">
-          <button type="button" className="env-select" aria-expanded={menu.open === 'env'} onClick={() => menu.toggle('env')}>
-            <Search size={18} />
-            <span className="sep" />
-            <span className="env-label">{envLabel}</span>
-            <ChevronDown size={16} />
+        {/* System status and connection details */}
+        <div className="menu-anchor" aria-live="polite">
+          <button type="button" className="status-chip" aria-expanded={menu.open === 'env'} onClick={() => menu.toggle('env')}
+            aria-label={`System status: ${status[1]}`}>
+            <span className={`dot ${status[0]}`} />
+            <span className="status-text">{status[1]}</span>
+            <ChevronDown size={14} aria-hidden="true" />
           </button>
-          <Popover open={menu.open === 'env'} onClose={menu.close} label="Environment">
+          <Popover open={menu.open === 'env'} onClose={menu.close} label="System status">
             <div className="popover-head"><Server size={16} /> Connected backend</div>
             <dl className="kv small">
               <dt>API</dt><dd className="mono">{API_BASE_LABEL}</dd>
-              <dt>Status</dt><dd>{h.online ? <span className="ok-text">online · {h.latency}ms</span> : <span className="bad-text">unreachable</span>}</dd>
+              <dt>Status</dt><dd>{h.online ? <span className="ok-text">online · {h.latency} ms · {pct(h.successRate, 0)} of recent checks</span> : <span className="bad-text">unreachable</span>}</dd>
               <dt>Database</dt><dd>{h.dbDown ? <span className="warn-text">{h.dbError}</span> : h.online ? <span className="ok-text">connected</span> : '—'}</dd>
               {system ? (
                 <>
                   <dt>Version</dt><dd>{system.commit || 'unknown'} · API v{system.api_version}</dd>
                   <dt>Environment</dt><dd>{system.environment} · {system.database}</dd>
-                  <dt>LLM</dt><dd>{system.llm.provider} / {system.llm.model}{system.llm.provider === 'mock' && <span className="muted"> (offline, scripted)</span>}</dd>
+                  <dt>AI model</dt><dd>{system.llm.provider} / {system.llm.model}{system.llm.provider === 'mock' && <span className="muted"> (offline, scripted)</span>}</dd>
                   <dt>Scan scope</dt><dd>{system.scan_scope.join(', ')}</dd>
                   <dt>Ingestion</dt><dd>{system.ingestion.git_hosts.join(', ')}{system.ingestion.local_paths ? ' · local folders' : ''}</dd>
                   <dt>Memory</dt><dd>{system.memory_backend}</dd>
                 </>
               ) : (
-                <><dt>Version</dt><dd className="bad-text">This backend has no /api/system — it is running older code.</dd></>
+                <><dt>Version</dt><dd className="bad-text">This backend has no /api/system, so it is running older code.</dd></>
               )}
             </dl>
           </Popover>
@@ -165,16 +153,16 @@ export default function TopNav({ page, onNavigate }) {
         <div className="menu-anchor">
           <button type="button" className="icon-btn" aria-expanded={menu.open === 'bell'}
             aria-label={`Notifications${unread ? `, ${unread} new` : ''}`} onClick={openNotifications}>
-            <Bell size={21} />
+            <Bell size={18} />
             {unread > 0 && <span className="badge">{unread > 99 ? '99+' : unread}</span>}
           </button>
-          <Popover open={menu.open === 'bell'} onClose={menu.close} label="Notifications" width={400}>
+          <Popover open={menu.open === 'bell'} onClose={menu.close} label="Notifications" size="wide">
             <div className="popover-head">Notifications</div>
             {audit.length === 0 ? <div className="empty">Nothing yet.</div> : (
               <ul className="notif-list">
                 {audit.slice(0, 8).map((a) => (
                   <li key={a.id}>
-                    <span className={`timeline-mark mark ${a.level}`} />
+                    <span className={`mark ${a.level}`} />
                     <div>
                       <div className="notif-msg">{a.message}</div>
                       <div className="small muted">{a.kind}{a.actor ? ` · ${a.actor}` : ''} · {timeAgo(a.at)}</div>
@@ -183,7 +171,7 @@ export default function TopNav({ page, onNavigate }) {
                 ))}
               </ul>
             )}
-            <button type="button" className="btn btn-sm" style={{ width: '100%' }} onClick={() => go('audit')}>View all in Audit &amp; Logs</button>
+            <button type="button" className="btn btn-sm btn-block" onClick={() => go('audit')}>View all in Audit</button>
           </Popover>
         </div>
 
@@ -195,38 +183,48 @@ export default function TopNav({ page, onNavigate }) {
               : <span className="avatar">{initials}</span>}
             <span className="name">{displayName}</span>
           </button>
-          <Popover open={menu.open === 'profile'} onClose={menu.close} label="Profile" width={320}>
+          <Popover open={menu.open === 'profile'} onClose={menu.close} label="Profile" size="narrow">
             {signedIn ? (
               <>
                 <div className="popover-head"><UserRound size={16} /> Signed in</div>
                 <div>
-                  <div style={{ fontWeight: 600 }}>{auth.user.name || auth.user.email}</div>
+                  <div className="strong">{auth.user.name || auth.user.email}</div>
                   {auth.user.name && <div className="small muted cell-wrap">{auth.user.email}</div>}
                 </div>
-                <p className="hint" style={{ margin: 0 }}>Your verified identity is recorded on approvals, scans, retests and pipeline runs.</p>
+                <p className="hint m-0">Your verified identity is recorded on approvals, scans, retests and pipeline runs.</p>
               </>
             ) : (
               <>
                 <div className="popover-head"><UserRound size={16} /> Operator</div>
-                <form onSubmit={(e) => { e.preventDefault(); setOperator(draftName); menu.close(); }} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <form className="form-stack" onSubmit={(e) => { e.preventDefault(); setOperator(draftName); menu.close(); }}>
                   <label className="field">
                     Name recorded on approvals, scans and retests
                     <input className="input" value={draftName} onChange={(e) => setDraftName(e.target.value)} maxLength={64} />
                   </label>
                   <button type="submit" className="btn btn-primary btn-sm">Save</button>
                 </form>
-                <p className="hint" style={{ margin: '10px 0 0' }}>
-                  Sign-in is off on this server (single local user), so this name is trusted as typed.
-                </p>
+                <p className="hint m-0">Sign-in is off on this server (single local user), so this name is trusted as typed.</p>
               </>
             )}
             <div className="popover-links">
-              <button type="button" className="tab" onClick={() => go('profile')}>Profile</button>
-              <button type="button" className="tab" onClick={() => go('audit', { query: displayName })}>My activity</button>
-              <button type="button" className="tab" onClick={() => menu.toggle('env')}>Connection</button>
+              <button type="button" className="chip" onClick={() => go('profile')}>Profile</button>
+              <button type="button" className="chip" onClick={() => go('audit', { query: displayName })}>My activity</button>
+              <button type="button" className="chip" onClick={() => go('privacy')}>Privacy</button>
+            </div>
+            <div className="menu-sep" />
+            <div className="row-between small">
+              <span className="muted">Theme</span>
+              <div className="tabs" role="radiogroup" aria-label="Theme">
+                {THEMES.map(([id, label]) => (
+                  <button key={id} type="button" role="radio" aria-checked={theme === id} className={`tab ${theme === id ? 'active' : ''}`}
+                    onClick={() => setTheme(id)}>
+                    {id === 'system' ? <Monitor size={13} /> : id === 'light' ? <Sun size={13} /> : <Moon size={13} />} {label}
+                  </button>
+                ))}
+              </div>
             </div>
             {signedIn && (
-              <button type="button" className="btn btn-sm" onClick={() => { menu.close(); auth.signOut(); }}>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => { menu.close(); auth.signOut(); }}>
                 <LogOut size={14} /> Sign out
               </button>
             )}
