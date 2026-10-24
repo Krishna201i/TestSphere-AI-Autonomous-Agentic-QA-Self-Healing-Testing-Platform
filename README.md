@@ -30,7 +30,7 @@
 | CI | Live | `.github/workflows/ci.yml`: locked deps, tests, lint, `pip-audit`, frontend build, `npm audit` |
 | Deployment & rollback (5.7) | Not built | |
 
-**Self-healing benchmark** (`python -m engine.benchmark`, 6 broken-page mutants of the demo app): 4/4 healable mutants healed, 2/2 unhealable mutants refused, 0 false heals (verified against ground truth).
+**Self-healing benchmark** (`python -m engine.heal_benchmark`; 4 pages × every test target × 15 mutation operators, 277 cases; `--quick` runs 52). On the quick corpus TestSphere heals **92.3%** of the cases where healing is right with **0 false heals**, and refuses **100%** of the cases where the target is gone or became a different element. A static fallback chain (first unique fallback, like `locator.or(...)`) heals as many but **16.3%** of its heals land on the wrong element and it refuses only 46.2%. Ground truth is element identity; details in [docs/healing-benchmark-quick.md](docs/healing-benchmark-quick.md). The original 6-mutant benchmark is still `python -m engine.benchmark`.
 
 ---
 
