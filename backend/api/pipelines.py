@@ -7,10 +7,11 @@ progress, and list past runs.  Runs execute in the background; poll
 """
 
 import hmac
+import xml.etree.ElementTree as ET  # building XML only; nothing untrusted is parsed
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
 from backend.api.projects import owned_project
@@ -93,6 +94,41 @@ def list_runs(
 @router.get("/runs/{run_id}")
 def get_run(run_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
     return ensure_owned(user, db.get(PIPELINE_RUNS, run_id), "Pipeline run")
+
+
+def junit_xml(run: dict[str, Any]) -> str:
+    """The run's tests as a JUnit XML report (what CI systems and test dashboards read)."""
+    tests = run.get("tests") or []
+    suite = ET.Element("testsuite", {
+        "name": f"TestSphere: {run.get('project_name', 'project')}",
+        "tests": str(len(tests)),
+        "failures": str(sum(1 for t in tests if t.get("status") == "FAILED" and not t.get("quarantined"))),
+        "skipped": str(sum(1 for t in tests if t.get("status") == "FAILED" and t.get("quarantined"))),
+        "timestamp": run.get("started_at") or run.get("created_at") or "",
+        "id": str(run.get("id")),
+    })
+    for t in tests:
+        case = ET.SubElement(suite, "testcase", {"classname": t.get("category") or "saved", "name": t.get("name", "")})
+        error = (t.get("error") or "").strip()
+        first_line = error.splitlines()[0][:300] if error else ""
+        if t.get("status") == "FAILED" and t.get("quarantined"):
+            ET.SubElement(case, "skipped", {"message": f"quarantined: {first_line}"})
+        elif t.get("status") == "FAILED":
+            failure = ET.SubElement(case, "failure", {"message": first_line or "failed"})
+            failure.text = error
+        notes = [n for n, on in (("self-healed", t.get("healed")), ("flaky", t.get("flaky"))) if on]
+        if notes:
+            ET.SubElement(case, "system-out").text = f"{', '.join(notes)} (execution #{t.get('execution_id')})"
+    suites = ET.Element("testsuites")
+    suites.append(suite)
+    return ET.tostring(suites, encoding="unicode", xml_declaration=True)
+
+
+@router.get("/runs/{run_id}/junit")
+def get_run_junit(run_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Response:
+    run = ensure_owned(user, db.get(PIPELINE_RUNS, run_id), "Pipeline run")
+    return Response(content=junit_xml(run), media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="testsphere-run-{run_id}.xml"'})
 
 
 @router.post("/scheduler/tick")

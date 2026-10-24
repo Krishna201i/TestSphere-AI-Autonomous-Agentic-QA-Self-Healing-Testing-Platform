@@ -126,6 +126,8 @@ export const runProjectPipeline = (projectId, ingest = false) =>
 export const quickPipeline = (payload) => request('/api/pipelines/quick', { method: 'POST', body: payload });
 export const getPipelineRuns = (limit = 30) => request(`/api/pipelines/runs?limit=${limit}`);
 export const getPipelineRun = (id) => request(`/api/pipelines/runs/${id}`);
+/** The run's tests as JUnit XML (for CI dashboards), as a Blob. */
+export const getRunJunit = (id) => request(`/api/pipelines/runs/${id}/junit`, { raw: true });
 
 export const getMe = () => request('/api/me');
 export const recordLogin = () => request('/api/me/login', { method: 'POST' });

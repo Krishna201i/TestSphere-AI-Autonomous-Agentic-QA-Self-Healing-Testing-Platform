@@ -175,13 +175,17 @@ function CopyField({ label, value }) {
 
 function ProjectRow({ project, latest, onRun, onChanged }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ app_url: project.app_url || '', repo_url: project.repo_url || '', prompt: project.prompt || '' });
+  const fromProject = (p) => ({
+    app_url: p.app_url || '', repo_url: p.repo_url || '', prompt: p.prompt || '',
+    slack_webhook_url: p.slack_webhook_url || '', notify_on: p.notify_on || 'failures',
+  });
+  const [form, setForm] = useState(() => fromProject(project));
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setForm({ app_url: project.app_url || '', repo_url: project.repo_url || '', prompt: project.prompt || '' });
-  }, [project.app_url, project.repo_url, project.prompt]);
+    setForm(fromProject(project));
+  }, [project.app_url, project.repo_url, project.prompt, project.slack_webhook_url, project.notify_on]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function act(fn) {
     setError(null);
@@ -226,6 +230,18 @@ function ProjectRow({ project, latest, onRun, onChanged }) {
                   <label className="field">App URL<input className="input" value={form.app_url} onChange={(e) => setForm({ ...form, app_url: e.target.value })} placeholder="https://app.example/" /></label>
                   <label className="field">Git repository<input className="input" value={form.repo_url} onChange={(e) => setForm({ ...form, repo_url: e.target.value })} placeholder="https://github.com/you/app" /></label>
                   <label className="field">What to test<input className="input" value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} placeholder="optional" /></label>
+                  <label className="field">
+                    Slack alerts (incoming webhook URL)
+                    <input className="input" value={form.slack_webhook_url} onChange={(e) => setForm({ ...form, slack_webhook_url: e.target.value })}
+                      placeholder="https://hooks.slack.com/services/…" />
+                  </label>
+                  <label className="field">
+                    Send an alert
+                    <select className="input" value={form.notify_on} onChange={(e) => setForm({ ...form, notify_on: e.target.value })} disabled={!form.slack_webhook_url}>
+                      <option value="failures">When a run fails or regresses</option>
+                      <option value="always">After every run</option>
+                    </select>
+                  </label>
                   <div><button type="submit" className="btn btn-sm" disabled={busy}>Save</button></div>
                 </form>
                 <div className="form-stack">

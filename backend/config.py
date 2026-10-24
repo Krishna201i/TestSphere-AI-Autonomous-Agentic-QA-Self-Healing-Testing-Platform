@@ -188,6 +188,10 @@ class Settings(BaseSettings):
         default_factory=lambda: os.getenv("ARTIFACT_TRACES", "true").lower() in ("true", "1"))
     ARTIFACT_RETENTION_DAYS: int = Field(default_factory=lambda: int(os.getenv("ARTIFACT_RETENTION_DAYS", "30")))
 
+    # The dashboard's public address, for links in notifications (Slack).
+    # On Render it defaults to the service's own URL.
+    DASHBOARD_URL: str = Field(default_factory=lambda: os.getenv("DASHBOARD_URL") or os.getenv("RENDER_EXTERNAL_URL", ""))
+
     # Shown on the dashboard's privacy notice: who users contact about their
     # data (e-mail or URL of the operator / grievance officer).
     PRIVACY_CONTACT: str = Field(default_factory=lambda: os.getenv("PRIVACY_CONTACT", ""))

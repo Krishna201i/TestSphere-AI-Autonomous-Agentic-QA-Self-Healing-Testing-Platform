@@ -4,6 +4,7 @@ import { useWorkspace } from '../state/Workspace';
 import { getPipelineRuns } from '../services/api';
 import { SEVERITY_ORDER, timeAgo, toDate } from '../lib/derive';
 import { RunStatus } from './Autopilot';
+import usePersistentState from '../lib/usePersistentState';
 
 const PERIODS = [['7', 'Last 7 days'], ['30', 'Last 30 days'], ['all', 'All time']];
 const FINISHED = ['passed', 'failed'];
@@ -193,10 +194,10 @@ export default function Reports({ onNavigate }) {
   const { projects, findings } = useWorkspace();
   const [runs, setRuns] = useState(null);
   const [error, setError] = useState(null);
-  const [projectId, setProjectId] = useState('all');
-  const [period, setPeriod] = useState('30');
+  const [projectId, setProjectId] = usePersistentState('reports.project', 'all');
+  const [period, setPeriod] = usePersistentState('reports.period', '30');
   const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = usePersistentState('reports.status', 'all');
   const [shown, setShown] = useState(PAGE_SIZE);
 
   useEffect(() => {

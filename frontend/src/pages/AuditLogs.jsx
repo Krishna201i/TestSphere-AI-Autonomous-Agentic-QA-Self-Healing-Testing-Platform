@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { toDate } from '../lib/derive';
+import usePersistentState from '../lib/usePersistentState';
 
 const KINDS = ['all', 'scan', 'approval', 'retest', 'qa', 'target', 'execution'];
 
 export default function AuditLogs({ params }) {
   const { audit, executions, testCases } = useWorkspace();
   const [query, setQuery] = useState(params?.query || '');
-  const [kind, setKind] = useState('all');
+  const [kind, setKind] = usePersistentState('audit.kind', 'all');
 
   useEffect(() => {
     if (params?.query != null) setQuery(params.query);

@@ -43,6 +43,7 @@ from backend.models import (
     TEST_EXECUTIONS,
 )
 from backend.models.test_execution import TestExecutionStatus
+from backend.notify import notify_run
 from backend.pipeline import suite
 from backend.services.security_service import record_audit
 from backend.services.test_case_service import TestCaseService
@@ -197,7 +198,12 @@ async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None
             logger.exception("Pipeline #%s crashed", run_id)
             state.skip_rest("Not run: the pipeline stopped on an internal error")
             state.save(status="error", error=f"Internal error: {exc}", finished_at=now_iso())
-        return db.get(PIPELINE_RUNS, run_id)
+        finished = db.get(PIPELINE_RUNS, run_id)
+        try:
+            await notify_run(db.get(PROJECTS, project["id"]) or project, finished)
+        except StoreUnavailableError:
+            pass
+        return finished
 
 
 async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner: Any) -> None:
