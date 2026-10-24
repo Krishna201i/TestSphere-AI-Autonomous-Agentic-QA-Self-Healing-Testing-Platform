@@ -17,8 +17,8 @@ function Snippets({ snippets }) {
   if (!names.length) return null;
   const current = snippets[tab] ? tab : names[0];
   return (
-    <div className="subbox">
-      <div className="approve-row" style={{ marginBottom: 8 }}>
+    <div className="subbox stack">
+      <div className="approve-row">
         <span className="title">Apply on the target</span>
         <div className="tabs">
           {names.map((n) => (
@@ -26,7 +26,7 @@ function Snippets({ snippets }) {
           ))}
         </div>
       </div>
-      <pre className="code">{snippets[current]}</pre>
+      <pre className="code" tabIndex={0} aria-label={`${current} configuration`}>{snippets[current]}</pre>
     </div>
   );
 }
@@ -40,7 +40,7 @@ function LocatorHealing() {
     <section className="card">
       <div className="card-head">
         <h3>Locator Self-Healing</h3>
-        <span className="muted small">engine healing reports — fallbacks, then fingerprint scan</span>
+        <span className="muted small">fallback locators first, then a fingerprint scan</span>
       </div>
       {healedSteps.length === 0 && healedRuns.length === 0 && (
         <div className="empty">No healing activity yet. Heals appear when a test's locator breaks and the engine repairs it.</div>
@@ -51,13 +51,13 @@ function LocatorHealing() {
             <span className="title">{lastRun.label} · step {s.step_id}</span>
             <span className={`status ${s.status === 'healed' ? 'HEALED' : 'FAILED'}`}>{s.status}</span>
           </div>
-          <dl className="kv" style={{ marginTop: 8 }}>
+          <dl className="kv mt-2">
             <dt>Original</dt><dd className="mono small">{s.healing.original_locator}</dd>
             <dt>Healed to</dt><dd className="mono small">{s.healing.selected_locator || '— refused (no safe candidate)'}</dd>
             <dt>Strategy</dt><dd>{s.healing.strategy_used} · confidence {Math.round(s.healing.confidence * 100)}%</dd>
           </dl>
           {s.healing.candidates.length > 0 && (
-            <div className="table-wrap" style={{ marginTop: 8 }}>
+            <div className="table-wrap mt-2">
               <table className="table">
                 <thead><tr><th>Candidate</th><th>Score</th><th>Attr</th><th>Text</th><th>Pos</th><th>Struct</th></tr></thead>
                 <tbody>
@@ -105,12 +105,15 @@ export default function RemediationBridge({ onNavigate }) {
       </div>
 
       {!lastScan ? (
-        <section className="card empty">
-          No findings to remediate yet.
-          <div style={{ marginTop: 10 }}><button type="button" className="btn" onClick={() => onNavigate('attacker')}>Run a scan</button></div>
+        <section className="card">
+          <div className="empty">
+            <span className="empty-title">No findings to fix yet</span>
+            Fix proposals appear after a security scan.
+            <button type="button" className="btn btn-sm" onClick={() => onNavigate('attacker')}>Run a scan</button>
+          </div>
         </section>
       ) : (
-        <div className="grid-main-side" style={{ gridTemplateColumns: 'minmax(0, 0.9fr) minmax(0, 1.6fr)' }}>
+        <div className="grid-side-main">
           <section className="card">
             <div className="card-head"><h3>Proposals</h3><span className="muted small">{findings.length}</span></div>
             <div className="table-wrap">
@@ -149,7 +152,7 @@ export default function RemediationBridge({ onNavigate }) {
               ) : (
                 <div className="subbox">
                   <h4>Manual change required</h4>
-                  <p style={{ margin: 0 }}>{selected.remediation?.summary || selected.recommendation}</p>
+                  <p className="m-0">{selected.remediation?.summary || selected.recommendation}</p>
                   <p className="hint">This needs a code or infrastructure change, which requires repository access (module 5.1 / 5.5 — not built yet). Retest after the change:</p>
                   <ApprovalControls finding={selected} />
                 </div>

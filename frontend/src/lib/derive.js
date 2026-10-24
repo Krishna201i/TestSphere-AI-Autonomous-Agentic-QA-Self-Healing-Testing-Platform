@@ -80,43 +80,100 @@ export function healthStats(samples = []) {
 export const pct = (v, digits = 1) => (v == null ? '—' : `${(v * 100).toFixed(digits)}%`);
 
 /**
- * Pipeline stages with what is actually built ("live" / "partial" / "planned")
- * and which stage needs attention right now.
+ * The testing loop: seven stages that run in a cycle, each with what is built
+ * ("built" / "partial" / "planned") and its live state from the newest
+ * pipeline run, scans, approvals and retests.
  */
-export function pipelineStages(ws) {
+export const LOOP_STAGES = [
+  { id: 'ingest', num: '1', title: 'Codebase Ingestion', short: 'Ingest', runKeys: ['codebase'], built: 'built', page: 'visualizer',
+    about: 'Reads the repository: languages, frameworks, routes, existing tests and committed secrets. Nothing in it is executed.' },
+  { id: 'qa', num: '2A', title: 'AI QA Agent', short: 'Test', runKeys: ['analyze', 'plan', 'execute', 'heal'], built: 'built', page: 'autopilot',
+    about: 'Analyzes the live page, plans tests, runs them in Playwright and self-heals broken locators.' },
+  { id: 'attack', num: '2B', title: 'AI Attacker Agent', short: 'Attack', runKeys: ['security'], built: 'built', page: 'attacker',
+    about: 'Passive, scope-checked security scan: headers, cookies, CORS, TLS and forms. No payloads are sent.' },
+  { id: 'report', num: '3', title: 'Unified Reporting', short: 'Report', runKeys: ['report'], built: 'built', page: 'reports',
+    about: 'Test results, regressions since the previous run and security findings in one report.' },
+  { id: 'remediate', num: '4', title: 'AI Remediation', short: 'Fix', runKeys: [], built: 'partial', page: 'remediation',
+    about: 'Proposes header and cookie fixes for a human to approve. Source-code patches are not built yet.' },
+  { id: 'validate', num: '5', title: 'Validation Engine', short: 'Verify', runKeys: [], built: 'built', page: 'validation',
+    about: 'Re-runs the original check after a fix. A failed retest goes back to remediation.' },
+  { id: 'deploy', num: '6', title: 'Verified Deploy', short: 'Deploy', runKeys: [], built: 'planned', page: 'validation',
+    about: 'Deploy, health-check and roll back the app under test. Planned, not built yet.' },
+];
+
+const RUN_ACTIVE = ['queued', 'running'];
+
+/** One state for several pipeline-run stages: running beats failed beats done. */
+export function mergeStageStatus(statuses) {
+  if (!statuses.length) return null;
+  if (statuses.includes('running')) return 'running';
+  if (statuses.includes('failed')) return 'failed';
+  if (statuses.every((s) => s === 'skipped')) return 'skipped';
+  if (statuses.every((s) => s === 'done' || s === 'skipped')) return 'done';
+  if (statuses.some((s) => s === 'done')) return 'running'; // between two of its steps
+  return 'pending';
+}
+
+/**
+ * Loop model for the diagram: per-stage `state` (running / done / failed /
+ * waiting / skipped / pending / idle / planned) with a short `note`, the run
+ * it reflects, and how far round the loop that run got.
+ */
+export function loopModel(ws) {
+  const runs = ws.pipelineRuns || [];
+  const run = runs.find((r) => RUN_ACTIVE.includes(r.status)) || runs[0] || null;
+  const active = Boolean(run && RUN_ACTIVE.includes(run.status));
+  const runStage = (key) => run?.stages?.find((s) => s.key === key) || null;
+
   const findings = ws.lastScan?.findings || [];
-  const awaitingApproval = findings.filter((f) => f.remediation?.kind === 'header' && !ws.approvals[f.key]);
-  const awaitingRetest = findings.filter((f) => ws.approvals[f.key] && ws.retests[f.key]?.result !== 'pass');
+  const awaitingApproval = findings.filter((f) => f.remediation?.kind === 'header' && !ws.approvals?.[f.key]).length;
+  const approved = findings.filter((f) => ws.approvals?.[f.key]);
+  const awaitingRetest = approved.filter((f) => ws.retests?.[f.key]?.result !== 'pass').length;
+  const verified = approved.length - awaitingRetest;
 
-  const stages = [
-    { id: 'ingest', num: '1.', title: 'Codebase Ingestion', badge: ws.blueprints.length ? 'Blueprint Ready' : 'Awaiting Codebase', tone: 'gray', status: 'live',
-      detail: ws.blueprints.length
-        ? `${ws.blueprints.length} codebase(s) analyzed; latest: ${ws.blueprints[0].name} (${ws.blueprints[0].files_total} files, ${ws.blueprints[0].routes} routes, ${ws.blueprints[0].risks} risks).`
-        : 'Ingest a Git repository or local folder to build its blueprint.', page: 'pipeline' },
-    { id: 'qa', num: '2A.', title: 'AI QA Agent', badge: 'Functional Tests', tone: 'blue', status: 'live',
-      detail: 'Plans tests from the live page, runs them in Playwright and self-heals broken locators.', page: 'pipeline' },
-    { id: 'attack', num: '2B.', title: 'AI Attacker Agent', badge: 'Authorized Pen-Test', tone: 'orange', status: 'live',
-      detail: 'Passive, scope-checked scan (headers, cookies, CORS, TLS). Active payload testing is not built yet.', page: 'attacker' },
-    { id: 'report', num: '3.', title: 'Unified Reporting', badge: 'Evidence & Priority', tone: 'gray', status: 'partial',
-      detail: 'Security findings share one Finding schema, deduplicated and severity-sorted. QA failures are not merged in yet.', page: 'audit' },
-    { id: 'remediate', num: '4.', title: 'AI Remediation', badge: 'Human Approval', tone: 'violet', status: 'partial',
-      detail: `${awaitingApproval.length} fix proposal(s) awaiting approval. Proposals cover header/cookie config; source-code patches need 5.1.`, page: 'remediation' },
-    { id: 'validate', num: '5.', title: 'Validation Engine', badge: 'Sandbox Retest', tone: 'blue', status: 'live',
-      detail: `${awaitingRetest.length} approved fix(es) awaiting a passing retest. Retests re-run the original check.`, page: 'validation' },
-    { id: 'deploy', num: '6.', title: 'Verified Deploy', badge: 'Health Check & Rollback', tone: 'green', status: 'planned',
-      detail: 'Deployment, health checks and rollback for target apps are not built yet (module 5.7).', page: 'validation' },
-  ];
+  const stages = LOOP_STAGES.map((st) => {
+    const parts = st.runKeys.map(runStage).filter(Boolean);
+    let state = mergeStageStatus(parts.map((p) => p.status)) || 'idle';
+    const current = parts.find((p) => p.status === 'running');
+    let note = current?.label || null;
 
-  let active = 'ingest';
-  if (ws.ingesting) active = 'ingest';
-  else if (ws.running) active = 'qa';
-  else if (ws.scanning) active = 'attack';
-  else if (awaitingApproval.length) active = 'remediate';
-  else if (awaitingRetest.length) active = 'validate';
-  else if (ws.blueprints.length && !ws.lastScan) active = 'attack';
-  else if (ws.lastScan) active = 'report';
+    if (st.id === 'ingest' && ws.ingesting) state = 'running';
+    if (st.id === 'qa' && ws.running) { state = 'running'; note = 'Running tests'; }
+    if (st.id === 'attack' && ws.scanning) { state = 'running'; note = 'Scanning'; }
+    if (st.id === 'remediate') {
+      if (awaitingApproval) { state = 'waiting'; note = `${awaitingApproval} fix${awaitingApproval === 1 ? '' : 'es'} to approve`; }
+      else if (approved.length) { state = 'done'; note = `${approved.length} approved`; }
+    }
+    if (st.id === 'validate') {
+      if (ws.retesting) { state = 'running'; note = 'Retesting'; }
+      else if (awaitingRetest) { state = 'waiting'; note = `${awaitingRetest} to retest`; }
+      else if (verified) { state = 'done'; note = `${verified} verified`; }
+    }
+    if (st.built === 'planned') state = 'planned';
+    if (!note && state === 'failed') note = parts.find((p) => p.status === 'failed')?.detail?.split('\n')[0] || null;
+    if (!active && state === 'pending') state = 'idle';
+    return { ...st, state, note };
+  });
 
-  return { stages, active };
+  const running = stages.find((s) => s.state === 'running') || null;
+  const runKeys = LOOP_STAGES.flatMap((s) => s.runKeys);
+  const finishedSteps = run ? (run.stages || []).filter((s) => ['done', 'skipped', 'failed'].includes(s.status)).length : 0;
+  // Furthest stage this run reached (index into LOOP_STAGES)
+  let reached = -1;
+  stages.forEach((s, i) => {
+    if (s.runKeys.length && ['done', 'running', 'failed', 'skipped'].includes(s.state)) reached = i;
+  });
+
+  return {
+    stages,
+    run,
+    active,
+    running,
+    reached,
+    progress: run ? finishedSteps / runKeys.length : 0,
+    attention: stages.filter((s) => s.state === 'waiting'),
+    cycles: runs.filter((r) => !RUN_ACTIVE.includes(r.status)).length,
+  };
 }
 
 /**

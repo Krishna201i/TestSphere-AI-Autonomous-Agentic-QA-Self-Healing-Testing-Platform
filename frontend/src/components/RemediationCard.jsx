@@ -8,7 +8,7 @@ import { timeAgo } from '../lib/derive';
  * Changed lines come first, so the fix is visible without scrolling; unchanged
  * headers follow as context.
  */
-export function DiffView({ diff, leftTitle = 'Observed headers:', rightTitle = 'Proposed fix:', contextLines = 4 }) {
+export function DiffView({ diff, leftTitle = 'Observed', rightTitle = 'Proposed fix', contextLines = 4, stacked = false }) {
   const context = diff.filter((d) => d.kind === 'context');
   const removed = diff.filter((d) => d.kind === 'removed');
   const added = diff.filter((d) => d.kind === 'added');
@@ -18,7 +18,7 @@ export function DiffView({ diff, leftTitle = 'Observed headers:', rightTitle = '
   const col = (title, changed, mark, placeholder) => (
     <div className="diff-col">
       <div className="diff-title">{title}</div>
-      <div className="diff-lines">
+      <div className="diff-lines" tabIndex={0} role="region" aria-label={title}>
         {changed.length === 0 && placeholder && (
           <div className="diff-line removed"><span className="ln" /><span>−</span><span>{placeholder}</span></div>
         )}
@@ -36,7 +36,7 @@ export function DiffView({ diff, leftTitle = 'Observed headers:', rightTitle = '
   // A missing header has nothing to remove: say so explicitly on the left
   const missing = removed.length === 0 && added.length ? `${added.map((a) => a.text.split(':')[0]).join(', ')} (not sent)` : null;
   return (
-    <div className="diff">
+    <div className={`diff ${stacked ? 'stacked' : ''}`}>
       {col(leftTitle, removed, 'removed', missing)}
       {col(rightTitle, added, 'added')}
     </div>
@@ -75,25 +75,25 @@ export function ApprovalControls({ finding }) {
     }
   }
 
-  let state = <><Clock3 size={16} /> Awaiting human approval</>;
-  if (resolved) state = <><CheckCircle2 size={17} color="var(--green)" /> Retest passed · resolved <Check size={15} /></>;
-  else if (approval) state = <><CheckCircle2 size={17} color="var(--green)" /> Approved by {approval.by} · {timeAgo(approval.at)}</>;
+  let state = <><Clock3 size={16} /> Waiting for approval</>;
+  if (resolved) state = <span className="row ok-text"><CheckCircle2 size={16} /> Retest passed, resolved <Check size={14} /></span>;
+  else if (approval) state = <span className="row ok-text"><CheckCircle2 size={16} /> Approved by {approval.by} · {timeAgo(approval.at)}</span>;
 
   return (
-    <div className="subbox approve-box">
+    <div className="approve-box">
       <div className="approve-row">
-        <span className="title">Approved codebase patch diff</span>
+        <span className="title">Fix status</span>
         <span className="state">{state}</span>
       </div>
       {!approval && (
         <button type="button" className="btn btn-primary btn-block" onClick={onApprove}>
-          Approve Patch
+          Approve fix
         </button>
       )}
       {approval && !resolved && (
         <>
           <button type="button" className="btn btn-primary btn-block" onClick={onRetest} disabled={retesting === finding.key}>
-            {retesting === finding.key ? 'Retesting…' : 'Run Retest'}
+            {retesting === finding.key ? 'Retesting…' : 'Run retest'}
           </button>
           <span className="hint">
             Apply the approved config on the target (ready-to-paste snippets are in the Remediation Bridge), then retest.
@@ -102,7 +102,7 @@ export function ApprovalControls({ finding }) {
         </>
       )}
       {resolved && (
-        <button type="button" className="btn btn-block" disabled>Resolved — fix verified by retest</button>
+        <button type="button" className="btn btn-block" disabled>Resolved: the retest verified the fix</button>
       )}
       {error && <span className="error-text">{error}</span>}
     </div>
@@ -115,27 +115,29 @@ export default function RemediationCard({ onOpen }) {
   return (
     <section className="card" aria-labelledby="remediation-title">
       <div className="card-head">
-        <h3 id="remediation-title">Self-Healing Remediation Bridge</h3>
-        <span className="card-chip">Card</span>
+        <h3 id="remediation-title">Fix proposals</h3>
+        {finding && <span className={`sev ${finding.severity}`}>{finding.severity}</span>}
       </div>
 
       {finding ? (
         <>
+          <p className="card-sub cell-wrap">{finding.title}</p>
           <div className="subbox flush">
-            <div className="approval-head">Human-in-the-Loop approval required for {finding.check_id}</div>
-            <DiffView diff={finding.remediation.diff} />
+            <div className="approval-head">Needs your approval · <span className="mono">{finding.check_id}</span></div>
+            <DiffView diff={finding.remediation.diff} stacked />
           </div>
           <ApprovalControls finding={finding} />
         </>
       ) : (
-        <div className="subbox empty">
-          No fix proposals yet. Proposals appear after a scan finds header or cookie issues.
-          <div style={{ marginTop: 10 }}>
-            <button type="button" className="btn btn-sm" onClick={onOpen}>Open Attacker Agent</button>
-          </div>
+        <div className="empty">
+          <span className="empty-title">No fixes to approve</span>
+          Proposals appear when a scan finds header or cookie issues.
+          <button type="button" className="btn btn-sm" onClick={onOpen}>Open security</button>
         </div>
       )}
-      <span className="hint">Operator: {operator}. Every approval and retest is recorded in Audit &amp; Logs.</span>
+      <div className="card-foot">
+        <span className="small muted">Signed as {operator}. Approvals and retests are recorded in Audit.</span>
+      </div>
     </section>
   );
 }

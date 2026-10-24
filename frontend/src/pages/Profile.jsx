@@ -41,8 +41,8 @@ export function DeleteAccount({ onDeleted }) {
     );
   }
   return (
-    <form className="auth-form" onSubmit={onDelete}>
-      <p className="small" style={{ margin: 0 }}>
+    <form className="form-stack" onSubmit={onDelete}>
+      <p className="small m-0">
         This permanently erases your projects, test cases, results, pipeline runs, findings, blueprints, audit
         trail and profile, and deletes your sign-in account. It cannot be undone.
       </p>
@@ -51,7 +51,7 @@ export function DeleteAccount({ onDeleted }) {
         <input className="input" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" spellCheck={false} />
       </label>
       {error && <div className="error-text" role="alert">{error}</div>}
-      <div className="form-row" style={{ alignItems: 'center' }}>
+      <div className="row">
         <button type="submit" className="btn btn-danger" disabled={busy || typed !== CONFIRM_PHRASE}>
           <Trash2 size={16} /> {busy ? 'Deleting…' : 'Delete everything'}
         </button>
@@ -99,7 +99,7 @@ export default function Profile({ onNavigate }) {
   const stats = me?.stats;
 
   return (
-    <div className="page">
+    <div className="page page-form">
       <div className="page-title">
         <div>
           <h1>Profile</h1>
@@ -110,7 +110,7 @@ export default function Profile({ onNavigate }) {
         )}
       </div>
 
-      {error && <div className="alert-banner" role="alert" style={{ margin: 0 }}>{error}</div>}
+      {error && <div className="alert-banner inline" role="alert">{error}</div>}
 
       <div className="grid-main-side">
         <section className="card">
@@ -118,12 +118,12 @@ export default function Profile({ onNavigate }) {
             {me?.photo_url
               ? <img className="avatar avatar-lg" src={me.photo_url} alt="" referrerPolicy="no-referrer" />
               : <span className="avatar avatar-lg">{initialsOf(name)}</span>}
-            <div style={{ minWidth: 0 }}>
+            <div className="min-w-0">
               <div className="profile-name">{name}</div>
               <div className="muted cell-wrap">{me?.email || (me?.local ? 'Sign-in is off on this server — single local user' : '')}</div>
             </div>
           </div>
-          <form className="auth-form" onSubmit={onSave}>
+          <form className="form-stack" onSubmit={onSave}>
             <label className="field">
               Display name (shown on approvals, scans and pipeline runs)
               <input className="input" value={form.display_name} maxLength={80}
@@ -141,7 +141,7 @@ export default function Profile({ onNavigate }) {
                   onChange={(e) => setForm({ ...form, job_title: e.target.value })} />
               </label>
             </div>
-            <div className="form-row" style={{ alignItems: 'center' }}>
+            <div className="row">
               <button type="submit" className="btn btn-primary" disabled={saving || !me}><Save size={16} /> {saving ? 'Saving…' : 'Save profile'}</button>
               {saved && <span className="ok-text small">Saved.</span>}
             </div>
@@ -170,23 +170,23 @@ export default function Profile({ onNavigate }) {
             </div>
           )}
           <div className="popover-links">
-            <button type="button" className="tab" onClick={() => onNavigate('autopilot')}>Autopilot</button>
-            <button type="button" className="tab" onClick={() => onNavigate('audit', { query: name })}>My activity</button>
+            <button type="button" className="chip" onClick={() => onNavigate('autopilot')}>Autopilot</button>
+            <button type="button" className="chip" onClick={() => onNavigate('audit', { query: name })}>My activity</button>
           </div>
         </section>
       </div>
 
       <section className="card">
         <div className="card-head"><h3>Your data</h3></div>
-        <p className="small" style={{ margin: 0 }}>
+        <p className="small m-0">
           Only you can see your projects and results. Read what is stored and where in the{' '}
           <button type="button" className="link-btn" onClick={() => onNavigate('privacy')}>
-            <ShieldCheck size={14} style={{ verticalAlign: '-2px' }} /> privacy notice
+            <ShieldCheck size={14} /> privacy notice
           </button>.
         </p>
         {auth.mode === 'firebase'
           ? <DeleteAccount onDeleted={() => auth.signOut()} />
-          : <p className="muted small" style={{ margin: 0 }}>Sign-in is off on this server, so there is no personal account to delete.</p>}
+          : <p className="muted small m-0">Sign-in is off on this server, so there is no personal account to delete.</p>}
       </section>
     </div>
   );

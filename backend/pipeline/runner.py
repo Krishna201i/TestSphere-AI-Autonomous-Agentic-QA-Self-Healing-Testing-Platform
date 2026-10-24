@@ -43,6 +43,7 @@ from backend.models import (
     TEST_EXECUTIONS,
 )
 from backend.models.test_execution import TestExecutionStatus
+from backend.notify import notify_run
 from backend.pipeline import suite
 from backend.services.security_service import record_audit
 from backend.services.test_case_service import TestCaseService
@@ -197,7 +198,12 @@ async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None
             logger.exception("Pipeline #%s crashed", run_id)
             state.skip_rest("Not run: the pipeline stopped on an internal error")
             state.save(status="error", error=f"Internal error: {exc}", finished_at=now_iso())
-        return db.get(PIPELINE_RUNS, run_id)
+        finished = db.get(PIPELINE_RUNS, run_id)
+        try:
+            await notify_run(db.get(PROJECTS, project["id"]) or project, finished)
+        except StoreUnavailableError:
+            pass
+        return finished
 
 
 async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner: Any) -> None:
@@ -369,9 +375,10 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
         healed = status == TestExecutionStatus.HEALED.value or (
             status == TestExecutionStatus.PASSED.value and str(error or "").startswith("Self-healed"))
         results.append({"test_case_id": tc["id"], "name": tc["name"], "category": tc.get("category"),
-                        "execution_id": execution["id"], "status": status, "error": error, "healed": healed})
+                        "execution_id": execution["id"], "status": status, "error": error, "healed": healed,
+                        "quarantined": bool(tc.get("quarantined"))})
         state.save(tests=results)
-    failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value)
+    failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value and not r.get("quarantined"))
     state.stage("execute", "failed" if failed else "done",
                 f"{len(results) - failed} of {len(results)} passed" + (f", {failed} failed" if failed else ""))
     return results
@@ -400,11 +407,31 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
     return result
 
 
+FLAKY_WINDOW = 10  # recent finished runs looked at
+FLAKY_FLIPS = 2    # pass↔fail changes in that window that make a test flaky
+
+
+def flaky_tests(history: list[list[dict[str, Any]]], current: list[dict[str, Any]]) -> set[int]:
+    """Test cases whose result flipped between pass and fail at least FLAKY_FLIPS
+    times over *history* (older runs' tests, oldest first) plus *current*."""
+    outcomes: dict[int, list[bool]] = {}
+    for tests in [*history, current]:
+        for t in tests:
+            outcomes.setdefault(t["test_case_id"], []).append(t["status"] != TestExecutionStatus.FAILED.value)
+    return {tc for tc, seq in outcomes.items()
+            if sum(1 for a, b in zip(seq, seq[1:], strict=False) if a != b) >= FLAKY_FLIPS}
+
+
 def _report(state: _RunState, project: Record, results: list[dict[str, Any]], security: dict[str, Any] | None) -> None:
     db = state.db
     state.stage("report", "running")
-    previous = next((r for r in db.find(PIPELINE_RUNS, project_id=project["id"], order_by="id", descending=True)
-                     if r["id"] < state.id and r["status"] in ("passed", "failed")), None)
+    finished = [r for r in db.find(PIPELINE_RUNS, project_id=project["id"], order_by="id", descending=True,
+                                   limit=FLAKY_WINDOW + 5)
+                if r["id"] < state.id and r["status"] in ("passed", "failed")]
+    previous = finished[0] if finished else None
+    flaky = flaky_tests([r.get("tests") or [] for r in reversed(finished[:FLAKY_WINDOW])], results)
+    for r in results:
+        r["flaky"] = r["test_case_id"] in flaky
     before = {t["test_case_id"]: t["status"] for t in (previous or {}).get("tests", [])}
     regressions = [
         {"kind": "test", "name": r["name"], "test_case_id": r["test_case_id"], "was": before[r["test_case_id"]],
@@ -416,12 +443,15 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
         regressions.append({"kind": "security", "name": f"{f['check_id']}: {f['title']}", "was": "resolved", "now": "open"})
 
     counts = Counter(r["status"] for r in results)
-    failed = counts.get(TestExecutionStatus.FAILED.value, 0)
+    # A quarantined test still runs and is reported, but cannot fail the run
+    failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value and not r.get("quarantined"))
     summary = {
         "total": len(results),
         "passed": counts.get(TestExecutionStatus.PASSED.value, 0) + counts.get(TestExecutionStatus.HEALED.value, 0),
         "failed": failed,
         "healed": sum(1 for r in results if r["healed"]),
+        "flaky": len(flaky & {r["test_case_id"] for r in results}),
+        "quarantined_failed": counts.get(TestExecutionStatus.FAILED.value, 0) - failed,
         "findings": dict(Counter(f["severity"] for f in (security or {}).get("findings", []))) if security else None,
         "previous_run_id": previous["id"] if previous else None,
     }
@@ -429,7 +459,7 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
     state.stage("report", "done", f"{summary['passed']}/{summary['total']} passed"
                                   + (f" · {len(regressions)} regression(s)" if regressions else "")
                                   + (f" · compared with run #{previous['id']}" if previous else " · first run"))
-    state.save(status=status, summary=summary, regressions=regressions, finished_at=now_iso())
+    state.save(status=status, summary=summary, regressions=regressions, tests=results, finished_at=now_iso())
     _finish_project(db, project, state)
     record_audit(
         db, actor=state.doc["actor"], kind="pipeline", ref=str(state.id), owner_uid=project.get("owner_uid"),

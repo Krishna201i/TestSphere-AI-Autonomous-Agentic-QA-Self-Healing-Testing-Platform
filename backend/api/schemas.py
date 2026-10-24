@@ -6,10 +6,12 @@ Does not modify or duplicate any shared contracts.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.models.test_execution import TestExecutionStatus
+from backend.notify import NOTIFY_CHOICES, check_slack_webhook
 
 # ============================================================================
 # Project Schemas
@@ -37,6 +39,22 @@ class _ProjectPipelineFields(BaseModel):
     repo_url: str | None = Field(None, max_length=1024, description="Git repository to ingest (optional)")
     prompt: str | None = Field(None, max_length=500, description="What to test, in plain words (optional)")
     schedule_minutes: int | None = Field(None, description=f"Re-run interval in minutes, one of {SCHEDULE_CHOICES}")
+    slack_webhook_url: str | None = Field(None, max_length=500, description="Slack incoming webhook for run alerts")
+    notify_on: str | None = Field(None, description="'failures' (default) or 'always'")
+
+    @field_validator("slack_webhook_url")
+    @classmethod
+    def _slack(cls, v: str | None) -> str | None:
+        return check_slack_webhook(v)
+
+    @field_validator("notify_on")
+    @classmethod
+    def _notify_on(cls, v: str | None) -> str | None:
+        if v in (None, ""):
+            return v
+        if v not in NOTIFY_CHOICES:
+            raise ValueError(f"notify_on must be one of {NOTIFY_CHOICES}")
+        return v
 
     @field_validator("app_url")
     @classmethod
@@ -87,6 +105,8 @@ class ProjectResponse(BaseModel):
     last_run_status: str | None = None
     last_run_at: datetime | None = None
     webhook_secret: str | None = None
+    slack_webhook_url: str | None = None
+    notify_on: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -155,6 +175,7 @@ class TestCaseUpdate(BaseModel):
     category: str | None = None
     priority: str | None = None
     version: int | None = Field(None, ge=1)
+    quarantined: bool | None = Field(None, description="Still runs, but its failures no longer fail the run")
 
 
 class TestCaseResponse(BaseModel):
@@ -168,6 +189,7 @@ class TestCaseResponse(BaseModel):
     category: str | None = None
     priority: str | None = None
     version: int
+    quarantined: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -213,3 +235,34 @@ class TestExecutionResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ExecutionStepHealing(BaseModel):
+    original_locator: str
+    selected_locator: str | None = None
+    strategy: str = ""
+    confidence: float = 0.0
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ExecutionStep(BaseModel):
+    """One engine step as recorded for the run view."""
+
+    step_id: str
+    description: str | None = None
+    status: str
+    duration_ms: int = 0
+    locator: str | None = None
+    error: str | None = None
+    healing: ExecutionStepHealing | None = None
+    console: list[str] = Field(default_factory=list)
+    network_errors: list[str] = Field(default_factory=list)
+    screenshot: str | None = None
+    dom: str | None = None
+
+
+class TestExecutionDetail(TestExecutionResponse):
+    """An execution with its step results and artifact keys."""
+
+    steps: list[ExecutionStep] = Field(default_factory=list)
+    trace: str | None = None

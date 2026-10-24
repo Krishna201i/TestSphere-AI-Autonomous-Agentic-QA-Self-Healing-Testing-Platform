@@ -1,87 +1,101 @@
 import React from 'react';
-import { CheckCircle2 } from 'lucide-react';
+import { Activity, CircleDashed } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
-import { Ring, Waveform } from './charts';
-import { executionStats, healthStats, pct, retestStats } from '../lib/derive';
+import { AnimatedNumber, Sparkline } from './charts';
+import { executionStats, healthStats, retestStats, timeAgo } from '../lib/derive';
 
-export function HealthWaveformBox() {
-  const { health } = useWorkspace();
-  const h = healthStats(health);
+const asPct = (v) => `${Math.round(v * 100)}%`;
+
+function ResultTile({ label, rate, detail, empty, tone }) {
   return (
-    <div className="subbox">
-      <div className="wave-head">
-        <h4>{!h.online ? 'Backend Unreachable' : h.dbDown ? 'Degraded (database down)' : '200 OK'} Health Waveform</h4>
-        <span className="meta">
-          Response Time: <b>{h.latency == null ? '—' : `${h.latency}ms`}</b>{'  '}
-          Success Rate: <b>{pct(h.successRate)}</b>
-        </span>
-      </div>
-      <Waveform samples={health} />
+    <div className="result-tile">
+      <span className="rt-label">{label}</span>
+      <span className={`rt-value ${rate == null ? 'none' : ''}`}><AnimatedNumber value={rate == null ? null : rate * 100} format={(v) => `${Math.round(v)}%`} /></span>
+      <div className={`meter ${tone}`} aria-hidden="true"><span style={{ width: rate == null ? 0 : asPct(rate) }} /></div>
+      <span className="rt-detail">{rate == null ? empty : detail}</span>
     </div>
   );
 }
 
-export function ValidationRings() {
+/** Pass rate, self-heal rate and verified fixes as three equal tiles. */
+export function ResultTiles() {
   const { executions, executionTotals, retests } = useWorkspace();
   const ex = executionStats(executions, executionTotals);
   const rt = retestStats(retests);
+  const broken = ex.healed + ex.failed;
   return (
-    <div className="rings">
-      <div className="ring-item">
-        <Ring value={ex.passRate} color="var(--blue)" />
-        <span>Functional Tests</span>
-        <span className="sub">[{ex.passed + ex.healed}/{ex.total} passed]</span>
-      </div>
-      <div className="ring-item">
-        <Ring value={ex.healRate} color="var(--green)" />
-        <span>Self-Heals</span>
-        <span className="sub">[{ex.healed}/{ex.healed + ex.failed} broken]</span>
-      </div>
-      <div className="ring-item">
-        <Ring value={rt.rate} color="var(--green)" />
-        <span>Security Retest</span>
-        <span className="sub">[{rt.pass}/{rt.total} fixed]</span>
-      </div>
+    <div className="result-tiles">
+      <ResultTile label="Tests passed" rate={ex.passRate} tone="good"
+        detail={`${ex.passed + ex.healed} of ${ex.total} tests`} empty="No test runs yet" />
+      <ResultTile label="Self-healed" rate={ex.healRate}
+        detail={`${ex.healed} of ${broken} broken tests repaired`} empty="Nothing has broken yet" />
+      <ResultTile label="Fixes verified" rate={rt.rate} tone="good"
+        detail={`${rt.pass} of ${rt.total} security retests passed`} empty="No retests yet" />
     </div>
   );
 }
 
-export default function ValidationCard() {
-  const { executions, executionTotals } = useWorkspace();
-  const ex = executionStats(executions, executionTotals);
+/** The platform's own API health: state, latency, uptime and a sparkline. */
+export function HealthBox() {
+  const { health } = useWorkspace();
+  const h = healthStats(health);
+  const state = !h.online ? ['bad-text', 'Unreachable'] : h.dbDown ? ['warn-text', 'Database down'] : ['ok-text', 'Operational'];
+  return (
+    <div className="subbox tinted stack-sm">
+      <div className="health-row">
+        <span className="row"><Activity size={16} aria-hidden="true" /> API <span className={state[0]}>{state[1]}</span></span>
+        <span>Latency <b>{h.latency == null ? '—' : `${h.latency} ms`}</b> · Uptime <b>{h.successRate == null ? '—' : asPct(h.successRate)}</b></span>
+      </div>
+      <Sparkline samples={health} />
+      <span className="xsmall muted">{health.length === 1 ? 'First check' : `Last ${health.length} checks`}, every 3 seconds</span>
+    </div>
+  );
+}
 
+/** The newest pipeline runs, one line each. */
+export function LatestRuns({ onNavigate, limit = 4 }) {
+  const { pipelineRuns } = useWorkspace();
+  const runs = (pipelineRuns || []).slice(0, limit);
+  return (
+    <div className="stack-sm">
+      <div className="row-between">
+        <h4 className="section-title m-0">Latest runs</h4>
+        {runs.length > 0 && <button type="button" className="link-btn small" onClick={() => onNavigate('autopilot')}>All runs</button>}
+      </div>
+      {runs.length === 0 ? (
+        <div className="empty">
+          <span className="empty-title">No pipeline runs yet</span>
+          <button type="button" className="btn btn-sm" onClick={() => onNavigate('autopilot')}>Run the pipeline</button>
+        </div>
+      ) : (
+        <ul className="run-list">
+          {runs.map((r) => (
+            <li key={r.id}>
+              <button type="button" className="run-link" onClick={() => onNavigate('runs', { tab: String(r.id) })}>
+                <span className={`status run-${r.status}`}>{r.status}</span>
+                <span className="rl-name">#{r.id} {r.project_name}{r.summary ? <span className="muted"> · {r.summary.passed}/{r.summary.total} passed</span> : null}</span>
+                <span className="muted xsmall nowrap">{timeAgo(r.finished_at || r.started_at || r.created_at)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export default function ValidationCard({ onNavigate }) {
   return (
     <section className="card" aria-labelledby="validation-title">
       <div className="card-head">
-        <h3 id="validation-title">Automated Validation &amp; Deployment Pulse</h3>
-        <span className="card-chip">Card</span>
+        <h3 id="validation-title">Results</h3>
       </div>
-
-      <div className="validation-top">
-        <div className="subbox">
-          <h4>Validation Runs</h4>
-          <ValidationRings />
-        </div>
-        <div className="suite-side">
-          <div className="subbox">
-            <h4 style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              Test Suite
-              {ex.total > 0 && ex.failed === 0 && <><CheckCircle2 size={18} color="var(--green)" /><CheckCircle2 size={18} color="var(--green)" /></>}
-            </h4>
-            {ex.total ? (
-              <div className="big-stat">{pct(ex.passRate, 0)} <span>Passed</span></div>
-            ) : (
-              <div className="muted">No executions yet</div>
-            )}
-          </div>
-          <div className="subbox shield" title="Deployment and rollback for target apps are not built yet (module 5.7)">
-            <span>Rollback Shield: <span className="planned">Planned</span></span>
-            <span className="toggle" role="switch" aria-checked="false" aria-disabled="true" aria-label="Rollback Shield (planned, not available yet)" />
-          </div>
-        </div>
+      <ResultTiles />
+      <LatestRuns onNavigate={onNavigate} />
+      <HealthBox />
+      <div className="card-foot">
+        <span className="row small muted"><CircleDashed size={14} aria-hidden="true" /> Deploy and rollback for your app: planned</span>
       </div>
-
-      <HealthWaveformBox />
     </section>
   );
 }
