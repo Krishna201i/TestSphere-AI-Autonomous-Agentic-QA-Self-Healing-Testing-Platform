@@ -36,6 +36,7 @@ from backend.api import (
 from backend.config import settings, startup_safety_problem
 from backend.database.session import get_store, init_db
 from backend.database.store import StoreUnavailableError
+from backend.http_hardening import HardeningMiddleware
 from backend.netguard import check_target
 from backend.observability import (
     RequestContextMiddleware,
@@ -120,6 +121,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security headers on every response; oversized bodies refused before reading
+app.add_middleware(HardeningMiddleware)
 
 # Outermost: request ids and the access log cover CORS answers too
 app.add_middleware(RequestContextMiddleware)

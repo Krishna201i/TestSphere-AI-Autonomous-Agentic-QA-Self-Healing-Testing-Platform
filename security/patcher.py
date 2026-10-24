@@ -159,20 +159,28 @@ def _call_name(node: ast.AST) -> str:
     return ""
 
 
-def _python_apps(root: Path) -> list[tuple[Path, str, str, int]]:
-    """(file, framework, app variable, line of the assignment's end) for each app object."""
+def _python_apps(root: Path) -> list[tuple[Path, str, str, int, str]]:
+    """(file, framework, app variable, line of the assignment's end, its indentation)
+    for each app object: module-level ``app = FastAPI()`` or one built inside a
+    factory such as Flask's ``create_app()`` or ``get_application()``."""
     found = []
     for path in _files(root, (".py",)):
         try:
             tree = ast.parse(_read(path))
         except (SyntaxError, ValueError):
             continue
-        for node in tree.body:
+        for node in ast.walk(tree):
             if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                kind = _call_name(node.value)
-                if kind in ("FastAPI", "Starlette", "Flask"):
-                    found.append((path, kind.lower(), node.targets[0].id, node.end_lineno))
-    return sorted(found, key=lambda f: _rank(f[0], root))
+                target, value = node.targets[0], node.value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+                target, value = node.target, node.value
+            else:
+                continue
+            kind = _call_name(value) if isinstance(value, ast.Call) else ""
+            if kind in ("FastAPI", "Starlette", "Flask"):
+                found.append((path, kind.lower(), target.id, node.end_lineno, " " * node.col_offset))
+    # Prefer module-level apps, then entry-like files
+    return sorted(found, key=lambda f: (len(f[4]) > 0, *_rank(f[0], root)))
 
 
 def _django_settings(root: Path) -> list[Path]:
@@ -209,7 +217,7 @@ def _q(value: str) -> str:
 
 
 def _patch_python_headers(text: str, framework: str, var: str, end_line: int,
-                          fix: Fix) -> tuple[str, list[str], list[str]]:
+                          fix: Fix, indent: str = "") -> tuple[str, list[str], list[str]]:
     """Add or extend the header hook.  Returns (text, headers set, headers removed)."""
     tree = ast.parse(text)
     already = text.lower()
@@ -231,7 +239,9 @@ def _patch_python_headers(text: str, framework: str, var: str, end_line: int,
         ret = next((n for n in existing.body if isinstance(n, ast.Return)), None)
         if ret is not None:
             lines = text.split("\n")
-            new = lines[: ret.lineno - 1] + "\n".join(body).split("\n") + lines[ret.lineno - 1:]
+            pad = " " * max(ret.col_offset - 4, 0)  # the hook may be nested in a factory
+            added = [pad + line for line in "\n".join(body).split("\n")]
+            new = lines[: ret.lineno - 1] + added + lines[ret.lineno - 1:]
             return "\n".join(new), list(wanted), removing
 
     ids = ", ".join(sorted({fix.sources[h] for h in [*wanted, *removing] if h in fix.sources}))
@@ -241,9 +251,11 @@ def _patch_python_headers(text: str, framework: str, var: str, end_line: int,
     else:
         block = ["", "", f'@{var}.middleware("http")', f"async def {FUNC_NAME}(request, call_next):", doc,
                  "    response = await call_next(request)", *body, "    return response"]
+    if indent:  # inside a factory function: nest the hook, one blank line around it
+        block = [""] + [indent + line if line else "" for line in block[2:]]
     lines = text.split("\n")
     if end_line < len(lines) and lines[end_line].strip():
-        block += ["", ""]  # two blank lines before the code that follows
+        block += [""] if indent else ["", ""]  # blank lines before the code that follows
     return _insert_after_line(text, end_line, "\n".join(block)), list(wanted), removing
 
 
@@ -491,8 +503,8 @@ def build_patch(root: Path, findings: list[dict], site_url: str | None = None) -
 
     # Headers: in app code if there is any, else in nginx
     if py_apps and (fix.set_headers or fix.remove_headers):
-        path, kind, var, end_line = py_apps[0]
-        new, set_h, removed = _patch_python_headers(current(path), kind, var, end_line, fix)
+        path, kind, var, end_line, indent = py_apps[0]
+        new, set_h, removed = _patch_python_headers(current(path), kind, var, end_line, fix, indent)
         if new != current(path):
             save(path, new)
         hook = "after_request hook" if kind == "flask" else "HTTP middleware"

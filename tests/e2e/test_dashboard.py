@@ -79,7 +79,7 @@ def browser():
 
 @pytest.mark.parametrize(("route", "selector"), PAGES, ids=[p[0] or "home" for p in PAGES])
 def test_every_page_renders_without_errors(server, browser, route, selector):
-    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900})
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(f"{server}/#/{route}")
@@ -96,7 +96,7 @@ def test_every_page_renders_without_errors(server, browser, route, selector):
 def test_every_page_meets_wcag_21_aa(server, browser, route, selector, scheme):
     """axe-core automated checks (contrast, names, labels, ARIA) in both themes; not a substitute for a manual audit."""
     # Reduced motion: axe must measure final colours, not a fade-in halfway through
-    page = browser.new_page(viewport={"width": 1280, "height": 900}, color_scheme=scheme, reduced_motion="reduce")
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900}, color_scheme=scheme, reduced_motion="reduce")
     page.goto(f"{server}/#/{route}")
     page.wait_for_selector(selector, timeout=15_000)
     page.wait_for_timeout(500)
@@ -107,7 +107,7 @@ def test_every_page_meets_wcag_21_aa(server, browser, route, selector, scheme):
 
 
 def test_privacy_notice_is_reachable_before_sign_in(server, browser):
-    page = browser.new_page()
+    page = browser.new_page(bypass_csp=True)
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
 
@@ -133,7 +133,7 @@ def test_privacy_notice_is_reachable_before_sign_in(server, browser):
 @pytest.mark.parametrize(("route", "selector"), PAGES, ids=[p[0] or "home" for p in PAGES])
 def test_every_page_fits_a_phone(server, browser, route, selector):
     """At 390px wide nothing may push the page sideways."""
-    page = browser.new_page(viewport={"width": 390, "height": 844})
+    page = browser.new_page(bypass_csp=True, viewport={"width": 390, "height": 844})
     page.goto(f"{server}/#/{route}")
     page.wait_for_selector(selector, timeout=15_000)
     page.wait_for_timeout(500)
@@ -152,7 +152,7 @@ def test_loop_follows_a_running_pipeline(server, browser):
            "created_at": "2026-10-24T10:00:00Z", "started_at": "2026-10-24T10:00:00Z", "finished_at": None,
            "stages": [{"key": k, "label": k.title(), "status": st, "detail": None} for k, st in zip(STAGE_KEYS, statuses, strict=True)],
            "summary": None, "tests": [], "regressions": []}
-    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900})
     page.route("**/api/pipelines/runs?*", lambda r: r.fulfill(json=[run]))
     page.goto(server)
     page.wait_for_selector(".loop-node.running")
@@ -186,7 +186,7 @@ def test_run_page_shows_steps_healing_and_screenshots(server, browser):
                             "healing": {"original_locator": "[data-testid=login]", "selected_locator": "#login-btn",
                                         "strategy": "fingerprint", "confidence": 0.87,
                                         "candidates": [{"locator": "#login-btn", "score": 0.87}, {"locator": "button", "score": 0.4}]}}]}
-    page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.route("**/api/pipelines/runs/9", lambda r: r.fulfill(json=run))
@@ -228,7 +228,7 @@ def test_fix_patch_is_shown_as_a_reviewable_diff(server, browser):
              "files": [{"path": "app/main.py", "verified": True, "check_note": None,
                         "diff": "--- a/app/main.py\n+++ b/app/main.py\n@@ -1,2 +1,3 @@\n app = FastAPI()\n+# fix\n x = 1\n"}],
              "patch": "..."}
-    page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.route("**/api/security/findings", lambda r: r.fulfill(json=[finding]))
@@ -255,7 +255,7 @@ def test_deployments_show_steps_and_drive_loop_stage_6(server, browser):
            "commit": "b" * 40, "rollback_to": "a" * 40, "error": "Smoke tests failed", "steps": steps,
            "health": [{"ok": True, "ms": 80}, {"ok": True, "ms": 90}, {"ok": False, "ms": 0}, {"ok": True, "ms": 70}],
            "created_at": "2026-10-24T10:00:00Z", "finished_at": "2026-10-24T10:05:00Z"}
-    page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.route("**/api/pipelines/deployments?*", lambda r: r.fulfill(json=[dep]))
@@ -274,4 +274,18 @@ def test_deployments_show_steps_and_drive_loop_stage_6(server, browser):
     stage6 = page.locator(".loop .loop-node").filter(has_text="Verified Deploy")
     assert "Rolled back" in stage6.inner_text()
     assert errors == []
+    page.close()
+
+
+def test_the_dashboard_runs_under_its_own_content_security_policy(server, browser):
+    """No CSP violations while the real dashboard loads and navigates (CSP not bypassed)."""
+    page = browser.new_page()
+    violations: list[str] = []
+    page.on("console", lambda m: violations.append(m.text) if "Content Security Policy" in m.text else None)
+    page.on("pageerror", lambda e: violations.append(str(e)))
+    for route in ("", "autopilot", "reports", "security/remediation", "visualizer", "privacy"):
+        page.goto(f"{server}/#/{route}")
+        page.wait_for_timeout(800)
+    assert "content-security-policy" in page.evaluate("() => fetch('/api/health').then(r => [...r.headers.keys()].join(','))")
+    assert violations == []
     page.close()
