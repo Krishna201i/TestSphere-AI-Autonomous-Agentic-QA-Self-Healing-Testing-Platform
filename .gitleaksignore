@@ -1,7 +1,14 @@
+# History was rewritten on 2026-10-25. GitHub keeps the old commits reachable through pull request refs,
+# so each finding is listed for its original commit and for its rewritten commit.
+
 # Fake key in a test that checks keys are masked in repr() (tests/test_llm_client.py)
+e0b268153b224c2e911beea52a3d10cd048c2f65:tests/test_llm_client.py:generic-api-key:234
+3e283df2cbbfd64d0ca9f5fcdf39dbe44cea6801:tests/test_llm_client.py:generic-api-key:234
 7241121f8e009014ea2ed9d3810cbeb82dac601d:tests/test_llm_client.py:generic-api-key:234
 c8a41e96994a908cbd941108e15845d8ec3e07ef:tests/test_llm_client.py:generic-api-key:234
 # Not a secret: a keyword argument in engine/heal_benchmark.py whose value is a loop variable
+acfb308e9d6fac948b253d2080cddc806e237ab7:engine/heal_benchmark.py:generic-api-key:361
 15e6683c3dbe9c967c6bee9db1b59e6573d0c758:engine/heal_benchmark.py:generic-api-key:361
 # Not a secret: an earlier version of the comment above quoted that same code
+e932dc0280c183975fd16a12a18703d663653d60:.gitleaksignore:generic-api-key:4
 8a4ace3f8e6e06b3d3fae008e71c7050798dc65e:.gitleaksignore:generic-api-key:4
