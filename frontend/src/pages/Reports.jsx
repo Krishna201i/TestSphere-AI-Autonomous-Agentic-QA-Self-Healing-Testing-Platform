@@ -4,14 +4,15 @@ import { useWorkspace } from '../state/Workspace';
 import { getPipelineRuns } from '../services/api';
 import { SEVERITY_ORDER, timeAgo, toDate } from '../lib/derive';
 import { RunStatus } from './Autopilot';
+import usePersistentState from '../lib/usePersistentState';
 
 const PERIODS = [['7', 'Last 7 days'], ['30', 'Last 30 days'], ['all', 'All time']];
 const FINISHED = ['passed', 'failed'];
 // Result colors (validated: lightness band, CVD separation; legend + table carry identity too)
 const RESULT_SERIES = [
-  { key: 'passed', label: 'Passed', color: 'var(--green)' },
-  { key: 'healed', label: 'Self-healed', color: 'var(--violet)' },
-  { key: 'failed', label: 'Failed', color: 'var(--red)' },
+  { key: 'passed', label: 'Passed' },
+  { key: 'healed', label: 'Self-healed' },
+  { key: 'failed', label: 'Failed' },
 ];
 const PAGE_SIZE = 100;
 
@@ -75,11 +76,11 @@ function PassRateChart({ runs }) {
             </g>
           );
         })}
-        {pts.length > 0 && <path d={`${path} L${last.x},${pad.t + h} L${pts[0].x},${pad.t + h} Z`} fill="var(--green)" opacity="0.1" />}
-        <path d={path} fill="none" stroke="var(--green)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {pts.length > 0 && <path d={`${path} L${last.x},${pad.t + h} L${pts[0].x},${pad.t + h} Z`} className="area-pass" />}
+        <path d={path} className="line-pass" />
         {hover && <line x1={hover.x} x2={hover.x} y1={pad.t} y2={pad.t + h} className="chart-crosshair" />}
         {(hover ? [hover] : last ? [last] : []).map((p) => (
-          <circle key={p.run.id} cx={p.x} cy={p.y} r="5" fill="var(--green)" stroke="var(--card)" strokeWidth="2" />
+          <circle key={p.run.id} cx={p.x} cy={p.y} r="5" className="dot-pass" />
         ))}
         {last && !hover && <text x={last.x + 9} y={last.y + 4} className="chart-label">{pctText(last.rate)}</text>}
         {pts.length > 0 && (
@@ -124,7 +125,7 @@ function ResultsChart({ runs }) {
       const v = values[s.key];
       if (!v) return;
       const sh = scale(v);
-      segs.push({ key: s.key, color: s.color, y: y - sh, h: sh });
+      segs.push({ key: s.key, y: y - sh, h: sh });
       y -= sh;
     });
     return { run: r, x, values, segs };
@@ -133,7 +134,7 @@ function ResultsChart({ runs }) {
   return (
     <div className="chart" ref={ref}>
       <div className="chart-legend">
-        {RESULT_SERIES.map((s) => <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>)}
+        {RESULT_SERIES.map((s) => <span key={s.key}><i className={`swatch series-${s.key}`} />{s.label}</span>)}
       </div>
       <svg width={width} height={height} role="img" aria-label="Test results per pipeline run" onMouseLeave={() => setHover(null)}>
         {ticks.map((t) => {
@@ -156,7 +157,7 @@ function ResultsChart({ runs }) {
               const y1 = s.y + s.h - gap;
               if (y1 - y0 <= 0) return null;
               const d = `M${c.x},${y1} L${c.x},${y0 + r} Q${c.x},${y0} ${c.x + r},${y0} L${c.x + barW - r},${y0} Q${c.x + barW},${y0} ${c.x + barW},${y0 + r} L${c.x + barW},${y1} Z`;
-              return <path key={s.key} d={d} fill={s.color} opacity={hover && hover.run.id !== c.run.id ? 0.45 : 1} />;
+              return <path key={s.key} d={d} className={`series-${s.key}`} opacity={hover && hover.run.id !== c.run.id ? 0.45 : 1} />;
             })}
           </g>
         ))}
@@ -171,7 +172,7 @@ function ResultsChart({ runs }) {
         <div className="chart-tip" style={{ left: Math.min(hover.x + barW + 8, width - 190), top: 30 }}>
           <b>Run {runLabel(hover.run)}</b> · {hover.run.project_name}
           {RESULT_SERIES.map((s) => (
-            <div key={s.key}><i className="tip-key" style={{ background: s.color }} />{s.label}: {hover.values[s.key]}</div>
+            <div key={s.key}><i className={`swatch series-${s.key}`} />{s.label}: {hover.values[s.key]}</div>
           ))}
         </div>
       )}
@@ -193,10 +194,10 @@ export default function Reports({ onNavigate }) {
   const { projects, findings } = useWorkspace();
   const [runs, setRuns] = useState(null);
   const [error, setError] = useState(null);
-  const [projectId, setProjectId] = useState('all');
-  const [period, setPeriod] = useState('30');
+  const [projectId, setProjectId] = usePersistentState('reports.project', 'all');
+  const [period, setPeriod] = usePersistentState('reports.period', '30');
   const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = usePersistentState('reports.status', 'all');
   const [shown, setShown] = useState(PAGE_SIZE);
 
   useEffect(() => {
@@ -232,7 +233,7 @@ export default function Reports({ onNavigate }) {
   const q = query.trim().toLowerCase();
   const results = data.results.filter((t) => {
     const label = t.healed && t.status === 'PASSED' ? 'HEALED' : t.status;
-    return (statusFilter === 'all' || label === statusFilter)
+    return (statusFilter === 'all' || label === statusFilter || (statusFilter === 'FLAKY' && t.flaky))
       && (!q || `${t.name} ${t.run.project_name} ${t.error || ''}`.toLowerCase().includes(q));
   });
 
@@ -269,20 +270,20 @@ export default function Reports({ onNavigate }) {
   }
 
   return (
-    <div className="page report-page">
+    <div className="page">
       <div className="page-title">
         <div>
           <h1>Reports</h1>
           <p>Every Autopilot result in one place: pass-rate trends, regressions, security posture and each test outcome. <span className="print-only">{scopeLabel} · generated {new Date().toLocaleString()}</span></p>
         </div>
-        <div className="form-row no-print">
+        <div className="page-actions no-print">
           <button type="button" className="btn" onClick={exportCsv} disabled={!data.results.length}><Download size={16} /> CSV</button>
           <button type="button" className="btn" onClick={exportJson} disabled={!data.inScope.length}><FileJson size={16} /> JSON</button>
           <button type="button" className="btn" onClick={() => window.print()}><Printer size={16} /> PDF</button>
         </div>
       </div>
 
-      <div className="form-row no-print" style={{ alignItems: 'center' }}>
+      <div className="form-row center no-print">
         <select className="input select-sm" aria-label="Project" value={projectId} onChange={(e) => { setProjectId(e.target.value); setShown(PAGE_SIZE); }}>
           <option value="all">All projects</option>
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -294,12 +295,12 @@ export default function Reports({ onNavigate }) {
         </div>
       </div>
 
-      {error && <div className="alert-banner" role="alert" style={{ margin: 0 }}>{error}</div>}
+      {error && <div className="alert-banner inline" role="alert">{error}</div>}
       {runs === null && !error && <div className="empty">Loading results…</div>}
 
       {runs !== null && (
         <>
-          <div className="stat-tiles report-kpis">
+          <div className="stat-tiles">
             <div className="stat-tile"><div className="v">{pctText(data.totals.total ? data.totals.passed / data.totals.total : null)}</div><div className="l">Pass rate</div></div>
             <div className="stat-tile"><div className="v">{data.finished.length}</div><div className="l">Completed runs</div></div>
             <div className="stat-tile"><div className="v">{data.totals.total}</div><div className="l">Tests executed</div></div>
@@ -364,7 +365,7 @@ export default function Reports({ onNavigate }) {
                   </table>
                 </div>
               )}
-              <button type="button" className="btn btn-sm no-print" style={{ alignSelf: 'flex-start' }} onClick={() => onNavigate('security')}>Open Security</button>
+              <button type="button" className="btn btn-sm no-print self-start" onClick={() => onNavigate('security')}>Open Security</button>
             </section>
           </div>
 
@@ -393,13 +394,13 @@ export default function Reports({ onNavigate }) {
 
           <section className="card">
             <div className="card-head"><h3>All results</h3><span className="muted small">{results.length} of {data.results.length} test results</span></div>
-            <div className="form-row no-print" style={{ alignItems: 'center' }}>
-              <div className="search" style={{ flex: 1, minWidth: 220 }}>
+            <div className="form-row center no-print">
+              <div className="search">
                 <Search size={18} />
                 <input value={query} onChange={(e) => { setQuery(e.target.value); setShown(PAGE_SIZE); }} placeholder="Search tests, projects, errors..." aria-label="Search results" />
               </div>
               <div className="tabs" role="tablist" aria-label="Filter by result">
-                {['all', 'PASSED', 'HEALED', 'FAILED'].map((s) => (
+                {['all', 'PASSED', 'HEALED', 'FAILED', 'FLAKY'].map((s) => (
                   <button key={s} type="button" role="tab" aria-selected={statusFilter === s} className={`tab ${statusFilter === s ? 'active' : ''}`} onClick={() => { setStatusFilter(s); setShown(PAGE_SIZE); }}>{s === 'all' ? 'all' : s.toLowerCase()}</button>
                 ))}
               </div>
@@ -411,10 +412,10 @@ export default function Reports({ onNavigate }) {
                   <tbody>
                     {results.slice(0, shown).map((t) => (
                       <tr key={`${t.run.id}-${t.execution_id}`}>
-                        <td className="small">#{t.run.id}<div className="muted">{t.run.trigger}</div></td>
+                        <td className="small"><button type="button" className="link-btn" onClick={() => onNavigate('runs', { tab: `${t.run.id}/${t.execution_id}` })}>#{t.run.id}</button><div className="muted">{t.run.trigger}</div></td>
                         <td className="cell-wrap small">{t.run.project_name}</td>
                         <td className="cell-wrap">{t.name}<div className="small muted">{t.category || 'saved'}</div></td>
-                        <td><span className={`status ${t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}`}>{t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}</span></td>
+                        <td><span className="row"><span className={`status ${t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}`}>{t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}</span>{t.flaky && <span className="status FLAKY">Flaky</span>}{t.quarantined && <span className="pill gray">Quarantined</span>}</span></td>
                         <td className="small cell-wrap">{t.error ? t.error.split('\n')[0] : '—'}</td>
                         <td className="small muted">{timeAgo(t.run.finished_at || t.run.started_at)}</td>
                       </tr>
@@ -424,7 +425,7 @@ export default function Reports({ onNavigate }) {
               </div>
             )}
             {results.length > shown && (
-              <button type="button" className="btn btn-sm no-print" style={{ alignSelf: 'center' }} onClick={() => setShown(shown + PAGE_SIZE)}>
+              <button type="button" className="btn btn-sm no-print self-center" onClick={() => setShown(shown + PAGE_SIZE)}>
                 Show {Math.min(PAGE_SIZE, results.length - shown)} more
               </button>
             )}

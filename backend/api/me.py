@@ -13,6 +13,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from backend.artifacts import delete_owner_artifacts
 from backend.auth import User, get_current_user, scope
 from backend.config import settings
 from backend.database.session import get_db
@@ -135,6 +136,7 @@ def delete_me(payload: AccountDeletion, db: Store = Depends(get_db),
                             detail="Sign-in is off on this server, so there is no personal account to delete.")
     deleted = {name: len(db.delete_where(name, owner_uid=user.uid)) for name in OWNED_COLLECTIONS}
     deleted[USERS] = len(db.delete_where(USERS, uid=user.uid))
+    deleted["artifacts"] = delete_owner_artifacts(user.uid)
     sign_in_deleted = _delete_sign_in_account(user.uid)
     logger.info("Account %s erased: %s documents, sign-in account %s",
                 user.uid, sum(deleted.values()), "deleted" if sign_in_deleted else "NOT deleted")

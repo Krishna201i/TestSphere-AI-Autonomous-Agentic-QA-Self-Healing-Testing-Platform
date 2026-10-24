@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { toDate } from '../lib/derive';
+import usePersistentState from '../lib/usePersistentState';
 
 const KINDS = ['all', 'scan', 'approval', 'retest', 'qa', 'target', 'execution'];
 
 export default function AuditLogs({ params }) {
   const { audit, executions, testCases } = useWorkspace();
   const [query, setQuery] = useState(params?.query || '');
-  const [kind, setKind] = useState('all');
+  const [kind, setKind] = usePersistentState('audit.kind', 'all');
 
   useEffect(() => {
     if (params?.query != null) setQuery(params.query);
@@ -55,10 +56,10 @@ export default function AuditLogs({ params }) {
       </div>
 
       <section className="card">
-        <div className="form-row" style={{ alignItems: 'center' }}>
-          <div className="search" style={{ flex: 1, minWidth: 220 }}>
+        <div className="form-row center">
+          <div className="search">
             <Search size={18} />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search telemetry, findings, or logs..." aria-label="Search logs" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search logs" aria-label="Search logs" />
           </div>
           <div className="tabs" role="tablist" aria-label="Filter by type">
             {KINDS.map((k) => (

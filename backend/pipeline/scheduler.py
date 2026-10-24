@@ -13,6 +13,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+from backend.artifacts import expire_old_artifacts
 from backend.config import settings
 from backend.database.session import get_store
 from backend.database.store import Store, StoreUnavailableError
@@ -72,6 +73,7 @@ async def scheduler_loop() -> None:
             started = await tick()
             if started:
                 logger.info("Scheduled pipeline runs started: %s", started)
+            await asyncio.to_thread(expire_old_artifacts)
         except StoreUnavailableError as exc:
             logger.warning("Scheduler skipped a tick (database unavailable): %s", exc)
         except Exception:

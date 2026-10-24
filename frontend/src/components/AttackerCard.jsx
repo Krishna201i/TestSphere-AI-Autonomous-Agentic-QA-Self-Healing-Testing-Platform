@@ -1,65 +1,54 @@
 import React from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
-import { Bars, RadarChart } from './charts';
-import { RADAR_AXES, pathOf, radarValues, timeAgo, topFinding } from '../lib/derive';
+import { RadarChart } from './charts';
+import { RADAR_AXES, SEVERITY_ORDER, pathOf, radarValues, timeAgo, topFinding } from '../lib/derive';
 
 export default function AttackerCard({ onOpen }) {
-  const { lastScan, scanHistory, scanning } = useWorkspace();
+  const { lastScan, scanning } = useWorkspace();
   const findings = lastScan?.findings || [];
   const top = topFinding(findings);
+  const counts = SEVERITY_ORDER.map((s) => [s, findings.filter((f) => f.severity === s).length]).filter(([, n]) => n);
 
   return (
     <section className="card" aria-labelledby="attacker-title">
       <div className="card-head">
-        <h3 id="attacker-title">AI Attacker Agent (Red Team)</h3>
-        <span className="card-chip">Card</span>
+        <h3 id="attacker-title">Security scan</h3>
+        <span className="pill blue" title="Passive checks only, and only hosts on the server's scope allowlist"><ShieldCheck size={12} /> Safe mode</span>
       </div>
+      {lastScan && <p className="card-sub cell-wrap">{pathOf(lastScan.final_url || lastScan.url)} · {timeAgo(lastScan.at)}</p>}
 
-      <div className="attacker-body">
-        <div className="radar-col">
-          <span className="label">Radar Map Visualizer</span>
-          <RadarChart values={radarValues(findings)} labels={RADAR_AXES.map((a) => a.label)} size={230} />
-          <span className="pill blue" title="Passive checks only, and only hosts on the server's scope allowlist">
-            Safe-Mode: <span style={{ color: 'var(--pill-blue-fg)' }}>Enforced</span>
-          </span>
+      {scanning && <div className="empty">Scanning the target: one GET per page, scope-checked.</div>}
+      {!scanning && !lastScan && (
+        <div className="empty">
+          <span className="empty-title">No scan yet</span>
+          Checks headers, cookies, CORS, TLS and forms without sending payloads.
+          <button type="button" className="btn btn-sm" onClick={onOpen}>Run a passive scan</button>
         </div>
-
-        <div className="evidence-col">
-          <div className="subbox">
-            <h4>Live Scan Evidence</h4>
-            {scanning && <div className="evidence-lines">Scanning target… one GET per page, scope-checked.</div>}
-            {!scanning && !lastScan && (
-              <div className="evidence-lines muted">
-                No scan yet.{' '}
-                <button type="button" className="btn btn-sm" onClick={onOpen}>Run a passive scan</button>
-              </div>
-            )}
-            {!scanning && lastScan && (
-              <div className="evidence-lines">
-                <div>Discovered target: {pathOf(lastScan.final_url || lastScan.url)}</div>
-                <div>Checks run: headers, cookies, CORS, TLS, forms ({timeAgo(lastScan.at)})</div>
-                {top ? (
-                  <>
-                    <div>Finding: <span className="warn"><AlertTriangle size={14} style={{ verticalAlign: '-2px' }} /> {top.title}</span></div>
-                    <div>Severity: {cap(top.severity)} / Impact: {top.root_cause}</div>
-                  </>
-                ) : (
-                  <div style={{ color: 'var(--green-text)' }}>No weaknesses found by passive checks.</div>
-                )}
-              </div>
-            )}
+      )}
+      {!scanning && lastScan && (
+        <>
+          {counts.length > 0 && (
+            <div className="pill-row">{counts.map(([s, n]) => <span key={s} className={`sev ${s}`}>{n} {s}</span>)}</div>
+          )}
+          {top ? (
+            <div className="finding-lead">
+              <span className="fl-title"><AlertTriangle size={16} aria-hidden="true" /> {top.title}</span>
+              <span className="fl-body">{top.root_cause}</span>
+            </div>
+          ) : (
+            <div className="finding-lead ok"><span className="fl-title"><ShieldCheck size={16} aria-hidden="true" /> No weaknesses found by passive checks</span></div>
+          )}
+          <div className="radar-wrap">
+            <RadarChart values={radarValues(findings)} labels={RADAR_AXES.map((a) => a.label)} size={240} />
           </div>
+        </>
+      )}
 
-          <div className="subbox bars-box">
-            <Bars values={scanHistory.map((s) => s.count)} />
-            <div className="rate">Exploit Success Rate: 0.0%</div>
-            <div className="small muted">Passive mode · no payloads sent · {findings.length} finding(s) in last scan</div>
-          </div>
-        </div>
+      <div className="card-foot">
+        <span className="small muted">{findings.length} finding{findings.length === 1 ? '' : 's'} · passive mode</span>
+        <button type="button" className="btn btn-sm" onClick={onOpen}>Open findings</button>
       </div>
     </section>
   );
 }
-
-const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);

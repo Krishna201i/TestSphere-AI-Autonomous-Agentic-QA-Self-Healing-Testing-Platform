@@ -47,11 +47,11 @@ class TestCaseService:
     def update_test_case(
         db: Store, test_case_id: int, external_id: str | None = None, name: str | None = None,
         description: str | None = None, category: str | None = None, priority: str | None = None,
-        version: int | None = None,
+        version: int | None = None, quarantined: bool | None = None,
     ) -> Record:
         TestCaseService.get_test_case(db, test_case_id)
         fields = {"external_id": external_id, "name": name, "description": description,
-                  "category": category, "priority": priority, "version": version}
+                  "category": category, "priority": priority, "version": version, "quarantined": quarantined}
         return db.update(TEST_CASES, test_case_id, **{k: v for k, v in fields.items() if v is not None})
 
     @staticmethod

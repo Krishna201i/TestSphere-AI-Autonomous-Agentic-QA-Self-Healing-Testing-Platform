@@ -176,6 +176,22 @@ class Settings(BaseSettings):
     # (localhost, 10.x, 169.254.x ...). Off on hosted servers (SSRF), on in local development.
     ALLOW_PRIVATE_TARGETS: bool = Field(default_factory=lambda: _default_allow_private_targets())
 
+    # Test artifacts (screenshots, DOM snapshots, Playwright traces) kept per
+    # execution: "local" (ARTIFACTS_DIR on this server) or "gcs" (a Cloud
+    # Storage bucket, e.g. the Firebase project's <project>.appspot.com), which
+    # survives redeploys and is shared with a separate worker.  Kept for
+    # ARTIFACT_RETENTION_DAYS (0 = until the execution or account is deleted).
+    ARTIFACT_STORE: str = Field(default_factory=lambda: os.getenv("ARTIFACT_STORE", "local").strip().lower())
+    ARTIFACT_BUCKET: str = Field(default_factory=lambda: os.getenv("ARTIFACT_BUCKET", ""))
+    ARTIFACTS_DIR: str = Field(default_factory=lambda: os.getenv("ARTIFACTS_DIR", "./data/artifacts"))
+    ARTIFACT_TRACES: bool = Field(
+        default_factory=lambda: os.getenv("ARTIFACT_TRACES", "true").lower() in ("true", "1"))
+    ARTIFACT_RETENTION_DAYS: int = Field(default_factory=lambda: int(os.getenv("ARTIFACT_RETENTION_DAYS", "30")))
+
+    # The dashboard's public address, for links in notifications (Slack).
+    # On Render it defaults to the service's own URL.
+    DASHBOARD_URL: str = Field(default_factory=lambda: os.getenv("DASHBOARD_URL") or os.getenv("RENDER_EXTERNAL_URL", ""))
+
     # Shown on the dashboard's privacy notice: who users contact about their
     # data (e-mail or URL of the operator / grievance officer).
     PRIVACY_CONTACT: str = Field(default_factory=lambda: os.getenv("PRIVACY_CONTACT", ""))
