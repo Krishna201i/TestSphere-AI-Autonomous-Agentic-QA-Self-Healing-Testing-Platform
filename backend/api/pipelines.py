@@ -7,7 +7,8 @@ progress, and list past runs.  Runs execute in the background; poll
 """
 
 import hmac
-import xml.etree.ElementTree as ET  # building XML only; nothing untrusted is parsed
+import html
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -96,32 +97,46 @@ def get_run(run_id: int, db: Store = Depends(get_db), user: User = Depends(get_c
     return ensure_owned(user, db.get(PIPELINE_RUNS, run_id), "Pipeline run")
 
 
+_XML_INVALID = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+
+
+def _xml_text(value: Any) -> str:
+    """Escaped XML text/attribute value; drops characters XML 1.0 cannot hold (e.g. ANSI escapes)."""
+    return html.escape(_XML_INVALID.sub("", str(value)), quote=True)
+
+
+def _tag(name: str, attrs: dict[str, Any], body: str | None = None) -> str:
+    attr = "".join(f' {k}="{_xml_text(v)}"' for k, v in attrs.items())
+    return f"<{name}{attr}/>" if body is None else f"<{name}{attr}>{body}</{name}>"
+
+
 def junit_xml(run: dict[str, Any]) -> str:
-    """The run's tests as a JUnit XML report (what CI systems and test dashboards read)."""
+    """The run's tests as a JUnit XML report (what CI systems and test dashboards read).
+
+    Written as escaped text: nothing is parsed, so no XML library is needed."""
     tests = run.get("tests") or []
-    suite = ET.Element("testsuite", {
-        "name": f"TestSphere: {run.get('project_name', 'project')}",
-        "tests": str(len(tests)),
-        "failures": str(sum(1 for t in tests if t.get("status") == "FAILED" and not t.get("quarantined"))),
-        "skipped": str(sum(1 for t in tests if t.get("status") == "FAILED" and t.get("quarantined"))),
-        "timestamp": run.get("started_at") or run.get("created_at") or "",
-        "id": str(run.get("id")),
-    })
+    cases = []
     for t in tests:
-        case = ET.SubElement(suite, "testcase", {"classname": t.get("category") or "saved", "name": t.get("name", "")})
         error = (t.get("error") or "").strip()
         first_line = error.splitlines()[0][:300] if error else ""
+        inner = ""
         if t.get("status") == "FAILED" and t.get("quarantined"):
-            ET.SubElement(case, "skipped", {"message": f"quarantined: {first_line}"})
+            inner += _tag("skipped", {"message": f"quarantined: {first_line}"})
         elif t.get("status") == "FAILED":
-            failure = ET.SubElement(case, "failure", {"message": first_line or "failed"})
-            failure.text = error
+            inner += _tag("failure", {"message": first_line or "failed"}, _xml_text(error))
         notes = [n for n, on in (("self-healed", t.get("healed")), ("flaky", t.get("flaky"))) if on]
         if notes:
-            ET.SubElement(case, "system-out").text = f"{', '.join(notes)} (execution #{t.get('execution_id')})"
-    suites = ET.Element("testsuites")
-    suites.append(suite)
-    return ET.tostring(suites, encoding="unicode", xml_declaration=True)
+            inner += _tag("system-out", {}, _xml_text(f"{', '.join(notes)} (execution #{t.get('execution_id')})"))
+        cases.append(_tag("testcase", {"classname": t.get("category") or "saved", "name": t.get("name", "")}, inner))
+    suite = _tag("testsuite", {
+        "name": f"TestSphere: {run.get('project_name', 'project')}",
+        "tests": len(tests),
+        "failures": sum(1 for t in tests if t.get("status") == "FAILED" and not t.get("quarantined")),
+        "skipped": sum(1 for t in tests if t.get("status") == "FAILED" and t.get("quarantined")),
+        "timestamp": run.get("started_at") or run.get("created_at") or "",
+        "id": run.get("id"),
+    }, "".join(cases))
+    return f"<?xml version='1.0' encoding='utf-8'?>\n<testsuites>{suite}</testsuites>"
 
 
 @router.get("/runs/{run_id}/junit")
