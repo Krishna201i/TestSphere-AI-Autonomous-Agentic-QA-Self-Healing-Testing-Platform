@@ -244,3 +244,34 @@ def test_fix_patch_is_shown_as_a_reviewable_diff(server, browser):
     assert [f"{v['id']} {[n['target'] for n in v['nodes']]}" for v in violations] == []
     assert errors == []
     page.close()
+
+
+def test_deployments_show_steps_and_drive_loop_stage_6(server, browser):
+    steps = [{"key": "deploy", "label": "Deploy", "status": "done", "detail": "api.render.com accepted it (HTTP 200) · commit bbbbbbb"},
+             {"key": "health", "label": "Health check", "status": "done", "detail": "Healthy 3 times in a row after the page changed (80 ms)"},
+             {"key": "smoke", "label": "Smoke tests", "status": "failed", "detail": "0 of 1 passed: Smoke: Shop (Timeout)"},
+             {"key": "rollback", "label": "Rollback", "status": "done", "detail": "redeploy of last verified commit aaaaaaa"}]
+    dep = {"id": 4, "project_id": 1, "project_name": "Shop", "status": "rolled_back", "trigger": "pipeline", "run_id": 9,
+           "commit": "b" * 40, "rollback_to": "a" * 40, "error": "Smoke tests failed", "steps": steps,
+           "health": [{"ok": True, "ms": 80}, {"ok": True, "ms": 90}, {"ok": False, "ms": 0}, {"ok": True, "ms": 70}],
+           "created_at": "2026-10-24T10:00:00Z", "finished_at": "2026-10-24T10:05:00Z"}
+    page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.route("**/api/pipelines/deployments?*", lambda r: r.fulfill(json=[dep]))
+    page.goto(f"{server}/#/security/validation")
+    page.wait_for_selector("#deploy-title")
+    card = page.locator("section:has(#deploy-title)")
+    assert "rolled back" in card.inner_text().lower() and "redeploy of last verified commit" in card.inner_text()
+    assert card.locator(".stage-item.failed").count() == 1
+
+    page.add_script_tag(path=str(AXE))
+    violations = page.evaluate("tags => axe.run(document, {runOnly: {type: 'tag', values: tags}}).then(r => r.violations)", WCAG_AA)
+    assert [f"{v['id']} {[n['target'] for n in v['nodes']]}" for v in violations] == []
+
+    page.goto(f"{server}/#/")
+    page.wait_for_selector(".loop .loop-node")
+    stage6 = page.locator(".loop .loop-node").filter(has_text="Verified Deploy")
+    assert "Rolled back" in stage6.inner_text()
+    assert errors == []
+    page.close()

@@ -94,6 +94,23 @@ result in `fix_patches` and deletes the clone. Supported: FastAPI/Starlette and 
 allow-list, cookie flags, `uvicorn.run(server_header=False)`), Django settings, Express (header middleware,
 `cors()`, `res.cookie` options, `x-powered-by`), nginx `server {}` blocks. Anything else is listed as a manual change.
 
+**Verified deploy** (loop stage 6; Autopilot → project → Settings → *Verified deploy*, or *Deploy* on the
+project row): TestSphere calls the project's deploy hook, records the commit (`git ls-remote` of its
+repository), waits until the health URL (default: app URL) answers healthily `DEPLOY_HEALTHY_CHECKS` times in
+a row — after the page changes, or after `DEPLOY_SETTLE_SECONDS` if it never does — within
+`DEPLOY_TIMEOUT_SECONDS`, then runs the project's smoke tests. If health or smoke tests fail it calls the
+rollback hook, or with a Render deploy hook redeploys the last verified commit (`&ref=<sha>`), and checks
+health again. Hooks may only go to Render, Vercel, Netlify or hosts in `DEPLOY_HOOK_HOSTS` (https, no
+redirects). *Deploy and verify automatically after a run passes* closes the loop. Deployments run in the
+API process, also with `PIPELINE_EXECUTION=worker`.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `DEPLOY_HOOK_HOSTS` | `""` | Extra hosts deploy/rollback hooks may call (comma-separated) |
+| `DEPLOY_TIMEOUT_SECONDS` | `600` | How long a deploy (and a rollback) may take to become healthy |
+| `DEPLOY_SETTLE_SECONDS` | `90` | When the health URL looks the same before and after, wait this long before trusting it |
+| `DEPLOY_POLL_SECONDS` / `DEPLOY_HEALTHY_CHECKS` | `10` / `3` | Health check interval and how many healthy answers in a row count |
+
 Slack alerts are set per project in Autopilot → project → Settings: paste a Slack incoming-webhook URL
 (Slack → Apps → *Incoming Webhooks*; only `https://hooks.slack.com/services/...` is accepted) and choose
 "when a run fails or regresses" or "after every run". Each run page also offers a **JUnit XML** download

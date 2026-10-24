@@ -2,6 +2,7 @@ import React from 'react';
 import { useWorkspace } from '../state/Workspace';
 import { executionStats, pct, retestStats, timeAgo } from '../lib/derive';
 import { HealthBox, ResultTiles } from '../components/ValidationCard';
+import Deployments from '../components/Deployments';
 
 export default function ValidationEngine({ onNavigate }) {
   const { executions, executionTotals, testCases, findings, retests, retest, retesting } = useWorkspace();
@@ -29,11 +30,13 @@ export default function ValidationEngine({ onNavigate }) {
             <dt>Security retests</dt><dd>{rt.total} run · {rt.pass} verified fixed ({pct(rt.rate)})</dd>
           </dl>
         </section>
-        <section className="card">
-          <div className="card-head"><h3>Deployment</h3><span className="pill green">6 · Health Check &amp; Rollback</span></div>
-          <p className="card-sub">Deploying your app, health checks after a deploy and automatic rollback are planned (module 5.7). Below is TestSphere's own API health.</p>
-          <HealthBox />
-        </section>
+        <div className="stack-lg">
+          <Deployments onNavigate={onNavigate} />
+          <section className="card">
+            <div className="card-head"><h3>TestSphere API health</h3></div>
+            <HealthBox />
+          </section>
+        </div>
       </div>
 
       <section className="card">

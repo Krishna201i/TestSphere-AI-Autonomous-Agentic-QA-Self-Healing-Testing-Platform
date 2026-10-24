@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Circle, Copy, GitBranch, Loader2, MinusCircle, Play, RefreshCw, XCircle, Zap } from 'lucide-react';
+import { CheckCircle2, Circle, Copy, GitBranch, Loader2, MinusCircle, Play, RefreshCw, Rocket, XCircle, Zap } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import {
+  deployProject,
   getPipelineRun,
   quickPipeline,
   rotateWebhookSecret,
@@ -173,11 +174,13 @@ function CopyField({ label, value }) {
   );
 }
 
-function ProjectRow({ project, latest, onRun, onChanged }) {
+function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
   const [open, setOpen] = useState(false);
   const fromProject = (p) => ({
     app_url: p.app_url || '', repo_url: p.repo_url || '', prompt: p.prompt || '',
     slack_webhook_url: p.slack_webhook_url || '', notify_on: p.notify_on || 'failures',
+    deploy_hook_url: p.deploy_hook_url || '', rollback_hook_url: p.rollback_hook_url || '',
+    health_url: p.health_url || '', deploy_on_pass: Boolean(p.deploy_on_pass),
   });
   const [form, setForm] = useState(() => fromProject(project));
   const [error, setError] = useState(null);
@@ -185,7 +188,8 @@ function ProjectRow({ project, latest, onRun, onChanged }) {
 
   useEffect(() => {
     setForm(fromProject(project));
-  }, [project.app_url, project.repo_url, project.prompt, project.slack_webhook_url, project.notify_on]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [project.app_url, project.repo_url, project.prompt, project.slack_webhook_url, project.notify_on,
+    project.deploy_hook_url, project.rollback_hook_url, project.health_url, project.deploy_on_pass]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function act(fn) {
     setError(null);
@@ -215,6 +219,14 @@ function ProjectRow({ project, latest, onRun, onChanged }) {
         <td>{latest ? <RunStatus status={latest.status} /> : project.last_run_status ? <RunStatus status={project.last_run_status} /> : <span className="muted small">never run</span>}</td>
         <td className="text-right nowrap">
           <button type="button" className="btn btn-sm" onClick={() => setOpen(!open)} aria-expanded={open}>Settings</button>{' '}
+          {project.deploy_hook_url && (
+            <>
+              <button type="button" className="btn btn-sm" disabled={busy} title="Deploy, check health and smoke tests, roll back on failure"
+                onClick={() => act(async () => { await deployProject(project.id); onDeployed(); })}>
+                <Rocket size={13} /> Deploy
+              </button>{' '}
+            </>
+          )}
           <button type="button" className="btn btn-sm btn-primary" disabled={busy || active || !project.app_url}
             onClick={() => act(async () => onRun(await runProjectPipeline(project.id)))}>
             <Play size={13} /> {active ? latest.status : 'Run now'}
@@ -242,6 +254,27 @@ function ProjectRow({ project, latest, onRun, onChanged }) {
                       <option value="always">After every run</option>
                     </select>
                   </label>
+                  <h4 className="section-title mt-3">Verified deploy</h4>
+                  <label className="field">
+                    Deploy hook (Render, Vercel or Netlify)
+                    <input className="input" value={form.deploy_hook_url} onChange={(e) => setForm({ ...form, deploy_hook_url: e.target.value })}
+                      placeholder="https://api.render.com/deploy/srv-…?key=…" />
+                  </label>
+                  <label className="field">
+                    Rollback hook (optional; on Render the last verified commit is redeployed)
+                    <input className="input" value={form.rollback_hook_url} onChange={(e) => setForm({ ...form, rollback_hook_url: e.target.value })}
+                      placeholder="A deploy hook for your stable version" />
+                  </label>
+                  <label className="field">
+                    Health URL (default: the app URL)
+                    <input className="input" value={form.health_url} onChange={(e) => setForm({ ...form, health_url: e.target.value })}
+                      placeholder="https://app.example/health" />
+                  </label>
+                  <label className="check">
+                    <input type="checkbox" checked={form.deploy_on_pass} disabled={!form.deploy_hook_url}
+                      onChange={(e) => setForm({ ...form, deploy_on_pass: e.target.checked })} />
+                    Deploy and verify automatically after a run passes with no regressions
+                  </label>
                   <div><button type="submit" className="btn btn-sm" disabled={busy}>Save</button></div>
                 </form>
                 <div className="form-stack">
@@ -261,7 +294,7 @@ function ProjectRow({ project, latest, onRun, onChanged }) {
 }
 
 export default function Autopilot({ onNavigate }) {
-  const { projects, refresh, system, pipelineRuns, refreshRuns } = useWorkspace();
+  const { projects, refresh, system, pipelineRuns, refreshRuns, refreshDeployments } = useWorkspace();
   const runs = pipelineRuns || [];
   const [selectedId, setSelectedId] = useState(null);
   const [older, setOlder] = useState(null); // a run past the list's newest 40
@@ -310,7 +343,8 @@ export default function Autopilot({ onNavigate }) {
               <thead><tr><th>Project</th><th>Schedule</th><th>Last run</th><th /></tr></thead>
               <tbody>
                 {projects.map((p) => (
-                  <ProjectRow key={p.id} project={p} latest={latestByProject[p.id]} onRun={started} onChanged={refresh} />
+                  <ProjectRow key={p.id} project={p} latest={latestByProject[p.id]} onRun={started} onChanged={refresh}
+                    onDeployed={() => { refreshDeployments(); onNavigate('validation'); }} />
                 ))}
               </tbody>
             </table>
