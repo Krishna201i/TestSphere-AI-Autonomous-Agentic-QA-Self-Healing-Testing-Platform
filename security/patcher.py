@@ -76,6 +76,7 @@ class FileChange:
     diff: str
     verified: bool | None  # None = no checker for this file type
     check_note: str | None = None
+    content: str | None = None  # the whole patched file (for a pull request)
 
 
 @dataclass
@@ -610,5 +611,5 @@ def build_patch(root: Path, findings: list[dict], site_url: str | None = None) -
     for path, (original, new) in sorted(edited.items(), key=lambda kv: str(kv[0])):
         rel = path.relative_to(root).as_posix()
         ok, note = _verify(path, new)
-        files.append(FileChange(rel, _diff(rel, original, new), ok, note))
+        files.append(FileChange(rel, _diff(rel, original, new), ok, note, new if new.endswith("\n") else new + "\n"))
     return PatchResult(frameworks, files, applied, manual)

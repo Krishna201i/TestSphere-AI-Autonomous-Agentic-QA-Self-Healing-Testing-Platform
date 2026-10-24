@@ -289,3 +289,32 @@ def test_the_dashboard_runs_under_its_own_content_security_policy(server, browse
     assert "content-security-policy" in page.evaluate("() => fetch('/api/health').then(r => [...r.headers.keys()].join(','))")
     assert violations == []
     page.close()
+
+
+def test_fix_patch_opens_a_pull_request(server, browser):
+    target = "http://127.0.0.1:9/"
+    finding = {"key": "k1", "check_id": "SEC-HDR-FRAME", "severity": "medium", "title": "Page can be framed",
+               "status": "open", "target_url": target, "component": target, "evidence": [], "root_cause": "x",
+               "recommendation": "Send X-Frame-Options", "confidence": 0.9, "first_seen": "2026-10-24T10:00:00Z",
+               "last_seen": "2026-10-24T10:00:00Z", "remediation": {"kind": "header", "summary": "s", "diff": [], "snippets": {}}}
+    patch = {"id": 5, "target_url": target, "repo": "https://github.com/acme/shop", "commit": "b" * 40, "github": True,
+             "pull_request": None, "frameworks": ["fastapi"], "created_at": "2026-10-24T10:00:00Z", "manual": [],
+             "applied": [{"check_id": "SEC-HDR-FRAME", "file": "app/main.py", "how": "HTTP middleware sets X-Frame-Options"}],
+             "files": [{"path": "app/main.py", "verified": True, "check_note": None,
+                        "diff": "--- a/app/main.py\n+++ b/app/main.py\n@@ -1 +1,2 @@\n app = FastAPI()\n+# fix\n"}], "patch": "..."}
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.route("**/api/security/findings", lambda r: r.fulfill(json=[finding]))
+    page.route("**/api/security/patches?*", lambda r: r.fulfill(json=[patch]))
+    page.route("**/api/security/patches/5/pull-request",
+               lambda r: r.fulfill(status=201, json={"url": "https://github.com/acme/shop/pull/12", "number": 12,
+                                                    "branch": "testsphere/fix-5", "base": "main"}))
+    page.goto(f"{server}/#/security/remediation")
+    page.get_by_role("button", name="Open pull request").click()
+    link = page.get_by_role("link", name="Pull request #12")
+    link.wait_for()
+    assert link.get_attribute("href") == "https://github.com/acme/shop/pull/12"
+    assert "bbbbbbb" in page.locator("#patch-title").locator("xpath=ancestor::section").inner_text()
+    assert errors == []
+    page.close()

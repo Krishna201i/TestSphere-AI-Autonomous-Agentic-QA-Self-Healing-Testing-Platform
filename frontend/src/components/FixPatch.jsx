@@ -3,9 +3,9 @@
  * repository, file by file, with the fixes it makes and the ones it cannot.
  */
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Copy, Download, FileDiff, GitBranch, TriangleAlert } from 'lucide-react';
+import { CheckCircle2, Copy, Download, ExternalLink, FileDiff, GitBranch, GitPullRequest, TriangleAlert } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
-import { createFixPatch, downloadFixPatch, getFixPatches } from '../services/api';
+import { createFixPatch, downloadFixPatch, getFixPatches, openPullRequest } from '../services/api';
 import { timeAgo } from '../lib/derive';
 
 const hostOf = (url) => {
@@ -38,7 +38,39 @@ function saveBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-function PatchView({ patch }) {
+function PullRequestButton({ patch, onOpened }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  if (patch.pull_request) {
+    return (
+      <a className="btn btn-sm" href={patch.pull_request.url} target="_blank" rel="noreferrer">
+        <GitPullRequest size={14} /> Pull request #{patch.pull_request.number} <ExternalLink size={12} />
+      </a>
+    );
+  }
+  if (!patch.github || patch.files.length === 0) return null;
+  async function open() {
+    setBusy(true);
+    setError(null);
+    try {
+      onOpened(await openPullRequest(patch.id));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <button type="button" className="btn btn-sm btn-primary" onClick={open} disabled={busy}>
+        <GitPullRequest size={14} /> {busy ? 'Opening…' : 'Open pull request'}
+      </button>
+      {error && <span className="error-text" role="alert">{error}</span>}
+    </>
+  );
+}
+
+function PatchView({ patch, onPullRequest }) {
   const [copied, setCopied] = useState(false);
   const file = `testsphere-fix-${patch.id}.patch`;
   return (
@@ -46,10 +78,11 @@ function PatchView({ patch }) {
       <div className="row-between">
         <span className="row small">
           {patch.frameworks.map((f) => <span key={f} className="pill blue">{f}</span>)}
-          <span className="muted"><GitBranch size={13} className="icon-inline" /> {patch.repo}{patch.commit ? ` @ ${patch.commit}` : ''} · {timeAgo(patch.created_at)}</span>
+          <span className="muted"><GitBranch size={13} className="icon-inline" /> {patch.repo}{patch.commit ? ` @ ${patch.commit.slice(0, 7)}` : ''} · {timeAgo(patch.created_at)}</span>
         </span>
         {patch.files.length > 0 && (
           <span className="row">
+            <PullRequestButton patch={patch} onOpened={onPullRequest} />
             <button type="button" className="btn btn-sm" onClick={() => downloadFixPatch(patch.id).then((b) => saveBlob(b, file))}><Download size={14} /> Download .patch</button>
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => navigator.clipboard?.writeText(patch.patch).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}>
               <Copy size={14} /> {copied ? 'Copied' : 'Copy'}
@@ -149,7 +182,7 @@ export default function FixPatchCard({ targetUrl }) {
       {!linked && !repo && <div className="hint">Link a repository to the site's project in Autopilot, or paste one here.</div>}
       {busy && <div className="hint">Cloning the repository and editing a temporary copy…</div>}
       {error && <div className="error-text" role="alert">{error}</div>}
-      {latest && <PatchView patch={latest} />}
+      {latest && <PatchView patch={latest} onPullRequest={(pr) => setPatches((prev) => prev.map((p) => (p.id === latest.id ? { ...p, pull_request: pr } : p)))} />}
       {patches.length > 1 && (
         <details className="small">
           <summary>Earlier patches ({patches.length - 1})</summary>
