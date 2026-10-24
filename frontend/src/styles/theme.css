@@ -837,6 +837,16 @@ pre.code {
 .heal-cands summary, .step details summary { cursor: pointer; color: var(--text-2); }
 details > ul { margin-top: var(--s-2); }
 
+/* ── Unified diff (fix patches) ──────────────────────────── */
+.udiff { margin: 0; padding: var(--s-2) 0; font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.6; overflow-x: auto; max-height: 420px; background: var(--surface); }
+.udiff > span { display: block; padding: 0 var(--s-4); white-space: pre; min-width: max-content; }
+.ud-add { background: var(--success-soft); color: var(--success-fg); }
+.ud-del { background: var(--danger-soft); color: var(--danger-fg); }
+.ud-hunk { color: var(--accent); background: var(--accent-soft); }
+.ud-file { color: var(--muted); }
+.ud-ctx { color: var(--text-2); }
+.approval-note { padding: var(--s-2) var(--s-4); }
+
 /* ── Security sub-tabs ───────────────────────────────────── */
 .subnav { width: 100%; max-width: var(--page-max); margin: 0 auto; padding: var(--s-6) var(--gutter) 0; }
 .subnav + .page { padding-top: var(--s-5); }

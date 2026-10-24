@@ -22,6 +22,7 @@ from backend.models import (
     APPLICATIONS,
     AUDIT_EVENTS,
     BLUEPRINTS,
+    FIX_PATCHES,
     PIPELINE_RUNS,
     PROJECTS,
     SECURITY_FINDINGS,
@@ -36,7 +37,7 @@ router = APIRouter(prefix="/me", tags=["Profile"])
 
 # Every collection whose documents carry owner_uid
 OWNED_COLLECTIONS = (PROJECTS, APPLICATIONS, TEST_CASES, TEST_EXECUTIONS, SECURITY_FINDINGS,
-                     AUDIT_EVENTS, BLUEPRINTS, PIPELINE_RUNS)
+                     AUDIT_EVENTS, BLUEPRINTS, PIPELINE_RUNS, FIX_PATCHES)
 
 
 class ProfileUpdate(BaseModel):

@@ -94,7 +94,7 @@ export const LOOP_STAGES = [
   { id: 'report', num: '3', title: 'Unified Reporting', short: 'Report', runKeys: ['report'], built: 'built', page: 'reports',
     about: 'Test results, regressions since the previous run and security findings in one report.' },
   { id: 'remediate', num: '4', title: 'AI Remediation', short: 'Fix', runKeys: [], built: 'partial', page: 'remediation',
-    about: 'Proposes header and cookie fixes for a human to approve. Source-code patches are not built yet.' },
+    about: 'Proposes fixes for a human to approve, and turns header, CORS and cookie findings into a patch against your repository.' },
   { id: 'validate', num: '5', title: 'Validation Engine', short: 'Verify', runKeys: [], built: 'built', page: 'validation',
     about: 'Re-runs the original check after a fix. A failed retest goes back to remediation.' },
   { id: 'deploy', num: '6', title: 'Verified Deploy', short: 'Deploy', runKeys: [], built: 'planned', page: 'validation',
