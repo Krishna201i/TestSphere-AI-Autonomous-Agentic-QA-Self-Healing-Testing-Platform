@@ -129,7 +129,7 @@ function Hub({ model, onNavigate }) {
           : `${cycles} cycle${cycles === 1 ? '' : 's'} completed · ${run.project_name}`}
       </span>
       <div className="row">
-        <button type="button" className="btn btn-sm" onClick={() => onNavigate('autopilot')}>Open run</button>
+        <button type="button" className="btn btn-sm" onClick={() => onNavigate('runs', { tab: String(run.id) })}>Open run</button>
         {attention[0] && (
           <button type="button" className="btn btn-primary btn-sm" onClick={() => onNavigate(attention[0].page)}>
             Go to {attention[0].short.toLowerCase()}

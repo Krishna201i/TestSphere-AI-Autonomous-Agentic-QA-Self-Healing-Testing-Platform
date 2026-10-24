@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from agents.analyzer.analyzer import FailureAnalyzerAgent
@@ -51,6 +53,8 @@ from agents.schemas.member3_contract import (
     DashboardWorkflowSummary,
     build_dashboard_summary,
 )
+from backend.artifacts import persist_run_artifacts
+from backend.config import settings
 from backend.database.store import Store, StoreUnavailableError
 from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
 from backend.models.test_execution import TestExecutionStatus
@@ -60,6 +64,7 @@ from backend.orchestration.converters import (
 )
 from engine.runner import run_test
 from engine.schemas import (
+    EngineConfig,
     RunOptions,
     StepStatus,
     TestStatus,
@@ -103,6 +108,33 @@ def apply_healed_selector(
             step_copy.target.primary_locator = healed_selector
         steps.append(step_copy)
     return plan.model_copy(update={"steps": steps})
+
+
+_STEP_VERBS = {
+    "goto": "Open", "click": "Click", "fill": "Type into", "press": "Press", "select": "Choose in",
+    "assert_text": "Check the text of", "assert_visible": "Check that it shows", "wait_for": "Wait for",
+}
+
+
+def describe_step(step: EngineStep) -> str:
+    """A readable line for the run view, e.g. 'Click "Log in" button' or 'Open https://shop.example/'."""
+    action = getattr(step.action, "value", str(step.action))
+    verb = _STEP_VERBS.get(action, action.replace("_", " ").capitalize())
+    if action == "goto":
+        return f"{verb} {step.value or 'the page'}"
+    target = ""
+    if step.target:
+        # Generated assertions carry a placeholder description; the locator says more
+        generic = not step.target.description or step.target.description.lower().startswith("assertion target")
+        target = step.target.primary_locator if generic else step.target.description
+    line = f"{verb} {target}".strip()
+    if action == "fill" and step.value:
+        line += f" ({len(step.value)} characters)"  # never echo what was typed (it may be a password)
+    elif action == "assert_text" and step.expected:
+        line += f' contains "{step.expected[:80]}"'
+    elif action in ("press", "select") and step.value:
+        line += f" {step.value[:40]}"
+    return line
 
 
 def create_memory_store() -> MemoryStore:
@@ -328,9 +360,12 @@ class PlatformWorkflowOrchestrator:
             )
             self.ai_orchestrator._workflows[workflow_id] = state
 
-        # Run test via Member 2
+        # Run test via Member 2 (traced, so the dashboard can offer the trace)
         run_opts = options or RunOptions(headless=True)
+        if run_opts.tracing_enabled is None and settings.ARTIFACT_TRACES:
+            run_opts = run_opts.model_copy(update={"tracing_enabled": True})
         engine_result: EngineTestResult = await run_test(engine_plan, options=run_opts)
+        shown_result = engine_result  # the run whose steps the dashboard shows
 
         exec_result = engine_result_to_execution_result(
             engine_result=engine_result,
@@ -400,6 +435,7 @@ class PlatformWorkflowOrchestrator:
                 state = await self.ai_orchestrator.submit_healing_result(state, feedback)
 
                 if validation_success:
+                    shown_result = validation_result
                     final_status = TestExecutionStatus.PASSED.value
                     error_msg = f"Self-healed selector: {recommendation.target_selector}"
                 else:
@@ -430,11 +466,17 @@ class PlatformWorkflowOrchestrator:
                 f"Details: {error_msg}"
             )
 
+        # Step results and artifacts (screenshots, DOM, trace) for the run view
+        descriptions = {st.step_id: describe_step(st) for st in engine_plan.steps}
+        evidence = persist_run_artifacts(shown_result, execution.get("owner_uid") or "local-dev", execution.id, descriptions)
+        self._discard_local_artifacts(engine_result, shown_result)
+
         # Update database execution record
         end_time = datetime.now(UTC)
         execution = db.update(
             TEST_EXECUTIONS, execution.id,
             status=final_status, completed_at=end_time, duration_ms=duration_ms, error_message=error_msg,
+            steps=evidence["steps"], trace=evidence["trace"],
         )
 
         # Retrieve AI state & dashboard summary
@@ -461,6 +503,15 @@ class PlatformWorkflowOrchestrator:
             "engine_steps": [st.model_dump(mode="json") for st in engine_result.steps],
             "analysis": analysis_data,
         }
+
+    @staticmethod
+    def _discard_local_artifacts(*results: Any) -> None:
+        """Remove the engine's working copies once stored (they would fill the disk)."""
+        root = Path(EngineConfig().artifacts_dir).resolve()
+        for res in results:
+            run_dir = Path(getattr(res, "artifacts_dir", "") or "").resolve()
+            if run_dir != root and root in run_dir.parents:
+                shutil.rmtree(run_dir, ignore_errors=True)
 
     def _fail_unreadable_steps(self, db: Store, execution: Any, test_case: Any, exc: Exception) -> dict[str, Any]:
         """Record a run that could not start because its stored steps are malformed."""

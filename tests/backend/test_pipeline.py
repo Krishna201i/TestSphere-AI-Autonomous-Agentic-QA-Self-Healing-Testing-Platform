@@ -164,6 +164,38 @@ def test_second_run_reuses_generated_tests_and_reports_regressions(fresh_store, 
     assert second["summary"]["previous_run_id"] == first["id"]
 
 
+def test_flaky_tests_are_flagged_after_flipping_twice(fresh_store, stub_network):
+    project = make_project(fresh_store)
+    outcomes = [{}, {"Smoke": ("FAILED", "Timeout")}, {}]  # pass, fail, pass: two flips
+    runs = [run_once(fresh_store, project, FakeOrchestrator(o), OutOfScope()) for o in outcomes]
+    smoke = next(t for t in runs[-1]["tests"] if t["name"].startswith("Smoke"))
+    assert smoke["flaky"] is True
+    assert runs[-1]["summary"]["flaky"] == 1
+    assert not any(t["flaky"] for t in runs[1]["tests"])  # one flip is a regression, not yet flaky
+    assert all(not t["flaky"] for t in runs[-1]["tests"] if t is not smoke)
+
+
+def test_flaky_tests_ignore_steady_results():
+    steady = [[{"test_case_id": 1, "status": "PASSED"}]] * 4
+    flipping = [[{"test_case_id": 1, "status": s}] for s in ("PASSED", "FAILED", "HEALED")]
+    assert runner.flaky_tests(steady, [{"test_case_id": 1, "status": "FAILED"}]) == set()
+    assert runner.flaky_tests(flipping, [{"test_case_id": 1, "status": "HEALED"}]) == {1}
+
+
+def test_a_quarantined_failure_is_reported_but_does_not_fail_the_run(fresh_store, stub_network):
+    project = make_project(fresh_store)
+    first = run_once(fresh_store, project, FakeOrchestrator({}), OutOfScope())
+    smoke_id = next(t["test_case_id"] for t in first["tests"] if t["name"].startswith("Smoke"))
+    fresh_store.update(TEST_CASES, smoke_id, quarantined=True)
+
+    run = run_once(fresh_store, project, FakeOrchestrator({"Smoke": ("FAILED", "Timeout")}), OutOfScope())
+    smoke = next(t for t in run["tests"] if t["test_case_id"] == smoke_id)
+    assert smoke["status"] == "FAILED" and smoke["quarantined"] is True
+    assert run["status"] == "passed"
+    assert run["summary"]["failed"] == 0 and run["summary"]["quarantined_failed"] == 1
+    assert stage(run, "execute")["status"] == "done"
+
+
 def test_unreachable_target_stops_before_planning(fresh_store, stub_network):
     stub_network["analysis"] = analysis(success=False, status_code=404)
     run = run_once(fresh_store, make_project(fresh_store), FakeOrchestrator({}), OutOfScope())

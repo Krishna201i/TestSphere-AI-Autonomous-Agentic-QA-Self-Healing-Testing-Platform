@@ -7,13 +7,15 @@ Does not launch Playwright, execute browser tests, or invoke AI agents.
 """
 
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from backend.api.schemas import (
     TestExecutionCreate,
+    TestExecutionDetail,
     TestExecutionResponse,
     TestExecutionUpdate,
 )
+from backend.artifacts import delete_execution_artifacts, get_artifact_store
 from backend.auth import User, ensure_owned, get_current_user, scope
 from backend.database.session import get_db
 from backend.database.store import Record, Store
@@ -72,14 +74,55 @@ def test_execution_stats(db: Store = Depends(get_db), user: User = Depends(get_c
     return {"total": sum(counts.values()), **counts}
 
 
-@router.get("/{execution_id}", response_model=TestExecutionResponse)
+@router.get("/{execution_id}", response_model=TestExecutionDetail)
 def get_test_execution(
     execution_id: int,
     db: Store = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Record:
-    """Retrieve a single test execution record by ID."""
+    """Retrieve a single test execution with its step results and artifact keys."""
     return owned_execution(db, user, execution_id)
+
+
+def artifact_keys(execution: Record) -> set[str]:
+    """Every artifact key recorded on *execution* (the only ones it may serve)."""
+    keys = {execution.get("trace")}
+    for step in execution.get("steps") or []:
+        keys.update((step.get("screenshot"), step.get("dom")))
+    return {k for k in keys if k}
+
+
+@router.get("/{execution_id}/artifact")
+def get_execution_artifact(
+    execution_id: int,
+    key: str = Query(..., max_length=500, description="An artifact key from the execution's steps or trace"),
+    db: Store = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """A screenshot (shown inline), DOM snapshot or Playwright trace (downloads)."""
+    execution = owned_execution(db, user, execution_id)
+    if key not in artifact_keys(execution):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such artifact on this execution.")
+    found = get_artifact_store().get(key)
+    if not found:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="This artifact has expired or was removed.")
+    data, content_type = found
+    name = key.rsplit("/", 2)
+    filename = f"execution-{execution_id}-{'-'.join(name[-2:])}" if len(name) >= 2 else f"execution-{execution_id}"
+    headers = {
+        "Cache-Control": "private, max-age=3600",
+        "X-Content-Type-Options": "nosniff",
+        # A saved page is someone else's HTML: never render it on this origin
+        "Content-Security-Policy": "sandbox",
+    }
+    if content_type == "image/png":
+        headers["Content-Disposition"] = f'inline; filename="{filename}"'
+    else:
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        if content_type.startswith("text/"):
+            content_type = "text/plain; charset=utf-8"
+    return Response(content=data, media_type=content_type, headers=headers)
 
 
 @router.put("/{execution_id}", response_model=TestExecutionResponse)
@@ -115,6 +158,7 @@ def delete_test_execution(
     user: User = Depends(get_current_user),
 ) -> None:
     """Delete a test execution record."""
-    owned_execution(db, user, execution_id)
+    execution = owned_execution(db, user, execution_id)
     TestExecutionService.delete_execution(db=db, execution_id=execution_id)
+    delete_execution_artifacts(execution.get("owner_uid") or user.uid, execution_id)
     return None

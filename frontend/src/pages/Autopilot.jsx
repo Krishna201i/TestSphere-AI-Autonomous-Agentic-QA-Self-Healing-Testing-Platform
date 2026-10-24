@@ -19,7 +19,7 @@ const SCHEDULES = [
 const TRIGGER_LABEL = { manual: 'Manual', schedule: 'Scheduled', webhook: 'GitHub push' };
 const ACTIVE = ['queued', 'running'];
 
-function StageIcon({ status }) {
+export function StageIcon({ status }) {
   if (status === 'done') return <CheckCircle2 size={18} className="ok-text" />;
   if (status === 'failed') return <XCircle size={18} className="bad-text" />;
   if (status === 'running') return <Loader2 size={18} className="spin" />;
@@ -84,7 +84,7 @@ function QuickRun({ onStarted }) {
   );
 }
 
-function RunDetail({ run }) {
+function RunDetail({ run, onOpen }) {
   if (!run) {
     return (
       <section className="card">
@@ -98,7 +98,10 @@ function RunDetail({ run }) {
     <section className="card">
       <div className="card-head">
         <h3>Run #{run.id} · {run.project_name}</h3>
-        <span><RunStatus status={run.status} /> <span className="muted small">{TRIGGER_LABEL[run.trigger] || run.trigger}{run.trigger_detail ? ` · ${run.trigger_detail}` : ''} · {timeAgo(run.started_at || run.created_at)}</span></span>
+        <span className="row"><RunStatus status={run.status} /> <span className="muted small">{TRIGGER_LABEL[run.trigger] || run.trigger}{run.trigger_detail ? ` · ${run.trigger_detail}` : ''} · {timeAgo(run.started_at || run.created_at)}</span></span>
+      </div>
+      <div className="row">
+        <button type="button" className="btn btn-sm" onClick={() => onOpen(run.id)}>Open run: steps, screenshots and trace</button>
       </div>
       {run.error && <div className="subbox small cell-wrap bad-text">{run.error}</div>}
 
@@ -141,9 +144,9 @@ function RunDetail({ run }) {
             <thead><tr><th>Test</th><th>Result</th><th>Details</th></tr></thead>
             <tbody>
               {run.tests.map((t) => (
-                <tr key={t.execution_id}>
+                <tr key={t.execution_id} className="selectable" {...selectableRow(() => onOpen(run.id, t.execution_id), false)}>
                   <td className="cell-wrap">{t.name}<div className="small muted">{t.category || 'saved'} · execution #{t.execution_id}</div></td>
-                  <td><span className={`status ${t.status}`}>{t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}</span></td>
+                  <td><span className="row"><span className={`status ${t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}`}>{t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}</span>{t.flaky && <span className="status FLAKY">Flaky</span>}</span></td>
                   <td className="small cell-wrap">{t.error ? t.error.split('\n')[0] : '—'}</td>
                 </tr>
               ))}
@@ -241,7 +244,7 @@ function ProjectRow({ project, latest, onRun, onChanged }) {
   );
 }
 
-export default function Autopilot() {
+export default function Autopilot({ onNavigate }) {
   const { projects, refresh, system, pipelineRuns, refreshRuns } = useWorkspace();
   const runs = pipelineRuns || [];
   const [selectedId, setSelectedId] = useState(null);
@@ -278,7 +281,7 @@ export default function Autopilot() {
       </div>
 
       <QuickRun onStarted={started} />
-      <RunDetail run={shown} />
+      <RunDetail run={shown} onOpen={(id, exec) => onNavigate('runs', { tab: exec ? `${id}/${exec}` : String(id) })} />
 
       <section className="card">
         <div className="card-head"><h3>Projects</h3><span className="muted small">{projects.length}</span></div>

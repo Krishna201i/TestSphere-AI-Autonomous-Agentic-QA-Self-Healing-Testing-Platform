@@ -302,3 +302,17 @@ async def test_full_dashboard_assertions(demo_server: str) -> None:
     result = await run_test(plan)
     assert result.status == TestStatus.PASSED
     assert result.passed_count == 7
+
+
+
+async def test_a_passing_run_keeps_a_screenshot_of_the_final_page(demo_server: str, tmp_path) -> None:
+    """The run view always has at least the page the test ended on."""
+    plan = TestPlan(
+        test_id="final-shot",
+        name="Final screenshot",
+        base_url=demo_server,
+        steps=[Step(step_id="goto", action=ActionType.GOTO, value=f"{demo_server}/index.html")],
+    )
+    result = await run_test(plan, RunOptions(artifacts_dir=str(tmp_path)))
+    assert result.status == TestStatus.PASSED
+    assert result.steps[-1].screenshot_path and Path(result.steps[-1].screenshot_path).exists()

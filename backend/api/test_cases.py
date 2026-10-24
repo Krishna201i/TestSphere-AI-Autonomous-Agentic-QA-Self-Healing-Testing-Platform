@@ -86,6 +86,7 @@ def update_test_case(
         category=payload.category,
         priority=payload.priority,
         version=payload.version,
+        quarantined=payload.quarantined,
     )
 
 
