@@ -41,16 +41,16 @@ class PlanAndExecuteRequest(BaseModel):
     app_name: str | None = Field(None, max_length=255)
     app_url: str | None = Field(None, max_length=1024, description="Page to test; required unless test_case_id is given")
     test_case_id: int | None = None
-    test_case_name: str | None = None
-    prompt: str | None = None
-    steps: list[dict[str, Any]] | None = None
+    test_case_name: str | None = Field(None, max_length=255)
+    prompt: str | None = Field(None, max_length=2000, description="What to test, in plain words")
+    steps: list[dict[str, Any]] | None = Field(None, max_length=100, description="At most 100 hand-written steps")
     headless: bool = True
 
 
 class AnalyzeURLRequest(BaseModel):
     url: str = Field(..., min_length=1, max_length=1024)
-    prompt: str | None = None
-    test_case_name: str | None = None
+    prompt: str | None = Field(None, max_length=2000)
+    test_case_name: str | None = Field(None, max_length=255)
 
 
 @router.post("/analyze", status_code=status.HTTP_200_OK)

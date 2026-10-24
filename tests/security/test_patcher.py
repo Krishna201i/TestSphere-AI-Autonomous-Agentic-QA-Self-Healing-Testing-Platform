@@ -250,3 +250,57 @@ def test_inserted_hook_is_separated_from_following_code_and_names_only_its_check
     text = (root / "main.py").read_text()
     assert "    return response\n\n\napp.add_middleware" in text
     assert "(SEC-HDR-FRAME)" in text and "SEC-TRANSPORT-HTTP" not in text
+
+
+def test_flask_app_factory_gets_a_nested_hook(tmp_path):
+    root = write(tmp_path / "repo", {"app/__init__.py": """
+        from flask import Flask
+
+
+        def create_app(config_class=None):
+            app = Flask(__name__)
+            app.config.from_object(config_class)
+
+            @app.route("/")
+            def home():
+                return "ok"
+
+            return app
+    """})
+    result = build_patch(root, HEADERS, SITE)
+    assert result.frameworks == ["flask"] and result.files[0].verified is True
+    assert "+    @app.after_request" in result.patch
+    git_apply(root, result.patch)
+    if importlib.util.find_spec("flask"):
+        module = load(root / "app" / "__init__.py", "patched_flask_factory")
+        client = module.create_app().test_client()
+        assert client.get("/").headers["X-Frame-Options"] == "DENY"
+
+
+def test_fastapi_get_application_factory(tmp_path):
+    root = write(tmp_path / "repo", {"app/main.py": """
+        from fastapi import FastAPI
+
+
+        def get_application() -> FastAPI:
+            application = FastAPI(title="Conduit")
+
+            @application.get("/")
+            def home():
+                return {"ok": True}
+
+            return application
+
+
+        app = get_application()
+    """})
+    result = build_patch(root, HEADERS, SITE)
+    assert result.frameworks == ["fastapi"] and result.files[0].verified is True
+    git_apply(root, result.patch)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(load(root / "app" / "main.py", "patched_fastapi_factory").app)
+    assert client.get("/").headers["x-content-type-options"] == "nosniff"
+    # a second patch extends the nested hook instead of adding another
+    again = build_patch(root, [finding("SEC-HDR-CSP")], SITE)
+    assert "@application.middleware" not in again.patch and "Content-Security-Policy" in again.patch

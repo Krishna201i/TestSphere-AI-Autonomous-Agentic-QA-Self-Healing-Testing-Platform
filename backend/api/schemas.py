@@ -100,14 +100,14 @@ class ProjectCreate(_ProjectPipelineFields):
     """Payload to create a new testing project."""
 
     name: str = Field(..., min_length=1, max_length=255, description="Project name")
-    description: str | None = Field(None, description="Optional project description")
+    description: str | None = Field(None, max_length=5000, description="Optional project description")
 
 
 class ProjectUpdate(_ProjectPipelineFields):
     """Payload to update an existing project (send null/\"\" to clear a pipeline field)."""
 
     name: str | None = Field(None, min_length=1, max_length=255, description="Updated project name")
-    description: str | None = Field(None, description="Updated description")
+    description: str | None = Field(None, max_length=5000, description="Updated description")
 
 
 class ProjectResponse(BaseModel):
@@ -150,7 +150,7 @@ class ApplicationCreate(BaseModel):
     project_id: int = Field(..., description="Foreign key to Project")
     name: str = Field(..., min_length=1, max_length=255, description="Application name")
     base_url: str = Field(..., min_length=1, max_length=1024, description="Base URL of application under test")
-    description: str | None = Field(None, description="Optional application description")
+    description: str | None = Field(None, max_length=5000, description="Optional application description")
 
 
 class ApplicationUpdate(BaseModel):
@@ -158,7 +158,7 @@ class ApplicationUpdate(BaseModel):
 
     name: str | None = Field(None, min_length=1, max_length=255, description="Updated name")
     base_url: str | None = Field(None, min_length=1, max_length=1024, description="Updated base URL")
-    description: str | None = Field(None, description="Updated description")
+    description: str | None = Field(None, max_length=5000, description="Updated description")
 
 
 class ApplicationResponse(BaseModel):
