@@ -908,6 +908,11 @@ details > ul { margin-top: var(--s-2); }
   .table-wrap { overflow: visible; }
 }
 
+/* ── Spacing utilities win over component defaults ───────── */
+.section-title.mt-3, .mt-3.mt-3 { margin-top: var(--s-5); }
+.mt-2.mt-2 { margin-top: var(--s-2); }
+.m-0.m-0 { margin: 0; }
+
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 1200px) {
   .cards-row, .grid-main-side, .grid-side-main { grid-template-columns: 1fr; }
