@@ -119,3 +119,13 @@ def test_junit_export_marks_failures_and_quarantine():
     assert cases["Legacy"].find("skipped").get("message") == "quarantined: Boom"
     assert cases["Smoke"].find("failure") is None
     assert "self-healed" in cases["Smoke"].find("system-out").text
+
+
+def test_junit_stays_valid_xml_with_terminal_colours_and_markup():
+    from backend.api.pipelines import junit_xml
+
+    run = {"id": 1, "project_name": "A&B <shop>", "tests": [
+        {"name": 'x<y "q"', "status": "FAILED", "error": "Timeout \x1b[31mred\x1b[0m & <b>"}]}
+    case = ET.fromstring(junit_xml(run)).find("testsuite/testcase")
+    assert case.get("name") == 'x<y "q"'
+    assert case.find("failure").text == "Timeout [31mred[0m & <b>"
