@@ -253,6 +253,12 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
     # ── plan ──
     state.stage("plan", "running")
     application, test_cases, plan_detail = await _plan(db, project, analysis, blueprint)
+    goal_untested = bool((project.get("prompt") or "").strip()) and not any(
+        str(tc.get("external_id", "")).endswith("-interaction") for tc in test_cases)
+    if goal_untested:
+        plan_detail += (" · Your goal was not tested: no form fields or buttons were found on the page"
+                        + ("" if analysis.get("rendered_in_browser") else " (even before scripts ran)"))
+    state.save(goal_untested=goal_untested)
     state.stage("plan", "done", plan_detail)
 
     # ── execute (with AI analysis + healing inside the orchestrator) ──
@@ -461,6 +467,7 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
     # A quarantined test still runs and is reported, but cannot fail the run
     failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value and not r.get("quarantined"))
     summary = {
+        "goal_untested": bool(state.doc.get("goal_untested")),
         "total": len(results),
         "passed": counts.get(TestExecutionStatus.PASSED.value, 0) + counts.get(TestExecutionStatus.HEALED.value, 0),
         "failed": failed,

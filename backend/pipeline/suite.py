@@ -65,7 +65,7 @@ def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict
     tests.append({"slug": "smoke", "name": f"Smoke: {title[:50] or url}", "category": "smoke", "steps": smoke})
 
     synthesized = (analysis.get("synthesized_test_case") or {}).get("steps") or []
-    if any(str(s.get("action", "")).upper() in ("FILL", "CLICK") for s in synthesized):
+    if any(str(s.get("action", "")).upper() in ("FILL", "CLICK", "PRESS") for s in synthesized):
         name = f"Scenario: {prompt.strip()[:60]}" if prompt and prompt.strip() else f"Interaction: {title[:50] or url}"
         tests.append({"slug": "interaction", "name": name, "category": "functional", "steps": synthesized})
 

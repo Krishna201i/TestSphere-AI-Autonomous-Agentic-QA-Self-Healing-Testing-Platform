@@ -21,7 +21,25 @@ class BlockedTargetError(ValueError):
     """The URL points at an address this server may not contact."""
 
 
+# IPv6 forms that carry an IPv4 address: NAT64 (IPv6-only networks reach
+# public IPv4 sites through 64:ff9b::a.b.c.d) and IPv4-mapped (::ffff:a.b.c.d)
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _embedded_ipv4(ip: ipaddress._BaseAddress) -> ipaddress.IPv4Address | None:
+    if ip.version != 6:
+        return None
+    if ip.ipv4_mapped:
+        return ip.ipv4_mapped
+    if ip in _NAT64:
+        return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    return None
+
+
 def _blocked(ip: ipaddress._BaseAddress) -> bool:
+    inner = _embedded_ipv4(ip)
+    if inner is not None:
+        return _blocked(inner)  # judge the IPv4 site it stands for
     return (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
             or ip.is_multicast or ip.is_unspecified)
 
