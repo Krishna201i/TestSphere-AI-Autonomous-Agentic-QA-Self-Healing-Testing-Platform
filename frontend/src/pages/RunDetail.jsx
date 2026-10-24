@@ -8,7 +8,7 @@ import {
   ArrowLeft, ArrowRight, Download, ExternalLink, FileCode2, Link2, ShieldOff, Shield, Wand2, X,
 } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
-import { getArtifact, getPipelineRun, getTestExecution, updateTestCase } from '../services/api';
+import { getArtifact, getPipelineRun, getRunJunit, getTestExecution, updateTestCase } from '../services/api';
 import { timeAgo, toDate } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
 import { Skeleton } from '../components/charts';
@@ -196,6 +196,7 @@ export default function RunDetail({ params, onNavigate }) {
   const [run, setRun] = useState(null);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [notice, setNotice] = useState(null); // e.g. a download that failed
   const selectedExec = Number(execParam) || null;
 
   useEffect(() => {
@@ -263,11 +264,17 @@ export default function RunDetail({ params, onNavigate }) {
           </p>
         </div>
         <div className="page-actions">
+          {tests.length > 0 && (
+            <button type="button" className="btn" onClick={() => getRunJunit(run.id).then((b) => saveBlob(b, `testsphere-run-${run.id}.xml`)).catch((err) => setNotice(err.message))}>
+              <Download size={16} /> JUnit XML
+            </button>
+          )}
           <button type="button" className="btn" onClick={copyLink}><Link2 size={16} /> {copied ? 'Link copied' : 'Copy link'}</button>
         </div>
       </div>
 
       {run.error && <div className="alert-banner inline cell-wrap">{run.error}</div>}
+      {notice && <div className="alert-banner inline" role="alert">{notice}</div>}
 
       <ol className="stage-list" aria-label="Stages">
         {run.stages.map((st) => (

@@ -90,3 +90,19 @@ describe('loopModel', () => {
     expect(state(m, 'ingest')).toBe('idle');
   });
 });
+
+describe('usePersistentState', () => {
+  it('remembers a value across mounts and survives bad stored data', async () => {
+    const { renderHook, act } = await import('@testing-library/react');
+    const { default: usePersistentState } = await import('../lib/usePersistentState');
+    localStorage.setItem('testsphere.t.bad', '{not json');
+    const bad = renderHook(() => usePersistentState('t.bad', 'all'));
+    expect(bad.result.current[0]).toBe('all');
+
+    const first = renderHook(() => usePersistentState('t.filter', 'all'));
+    act(() => first.result.current[1]('FAILED'));
+    first.unmount();
+    const second = renderHook(() => usePersistentState('t.filter', 'all'));
+    expect(second.result.current[0]).toBe('FAILED');
+  });
+});

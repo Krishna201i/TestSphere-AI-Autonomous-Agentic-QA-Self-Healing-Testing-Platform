@@ -62,6 +62,7 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `ENGINE_MAX_BROWSERS` | `2` | Chromium instances that may run at once; further runs wait for a slot |
 | `PIPELINE_EXECUTION` | `inline` | `inline`: pipeline runs execute in the API process. `worker`: the API only queues them and a separate `python -m backend.worker` service executes them (and runs the scheduler). Requires Firestore. See §3.1 |
 | `WORKER_POLL_SECONDS` / `WORKER_HEARTBEAT_SECONDS` / `WORKER_STALE_SECONDS` | `5` / `30` / `600` | Worker queue polling; heartbeat while a run executes; a running run silent for longer than the stale limit is marked interrupted |
+| `DASHBOARD_URL` | Render's `RENDER_EXTERNAL_URL`, else `""` | Public address of the dashboard, used for "Open run" links in Slack alerts |
 | `PRIVACY_CONTACT` | `""` | E-mail or URL users contact about their data, shown on the dashboard's privacy notice (`#/privacy`, readable before sign-in). Without it the notice says "the operator of this server" |
 | `LOG_LEVEL` | `INFO` | Level for the app's own loggers |
 | `LOG_FORMAT` | `json` when hosted, `text` locally | `json` = one JSON object per line (ts, level, logger, message, request_id, extras), searchable in Render's log viewer |
@@ -75,7 +76,20 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `BROWSER_TIMEOUT_MS`| `10000` | Default element locator wait timeout in milliseconds |
 | `CAPTURE_SCREENSHOTS`| `True` | Whether to capture PNG screenshots on step completion/failure |
 | `CAPTURE_DOM_SNAPSHOT`| `True`| Whether to serialize DOM snapshot upon failure for healing |
-| `ARTIFACTS_DIR` | `./artifacts` | Local directory path where run artifacts are stored |
+| `ARTIFACTS_DIR` | `./data/artifacts` | With `ARTIFACT_STORE=local`: where screenshots, DOM snapshots and traces are kept per execution (the engine's own working copies under `./artifacts` are removed once stored) |
+
+### 2.3a Run evidence and integrations
+| Variable | Default Value | Description |
+| :--- | :--- | :--- |
+| `ARTIFACT_STORE` | `local` | `local` keeps run artifacts on this server's disk (lost on redeploy on most hosts; not shared with a separate worker). `gcs` stores them in a Cloud Storage bucket: use it in production |
+| `ARTIFACT_BUCKET` | `""` | With `gcs`: the bucket, e.g. the Firebase project's default `<project-id>.appspot.com` (Firebase console → Storage). The service account in `FIREBASE_CREDENTIALS` needs *Storage Object Admin* on it. Artifacts live under `testsphere-artifacts/` |
+| `ARTIFACT_TRACES` | `true` | Record a Playwright trace (`.zip`, typically 1–5 MB) for every test run, downloadable from the run page |
+| `ARTIFACT_RETENTION_DAYS` | `30` | Delete artifacts after this many days (`0` keeps them until the execution or account is deleted). On GCS this is a bucket lifecycle rule set on first use (needs `storage.buckets.update`; otherwise add the rule in the console) |
+
+Slack alerts are set per project in Autopilot → project → Settings: paste a Slack incoming-webhook URL
+(Slack → Apps → *Incoming Webhooks*; only `https://hooks.slack.com/services/...` is accepted) and choose
+"when a run fails or regresses" or "after every run". Each run page also offers a **JUnit XML** download
+(`GET /api/pipelines/runs/{id}/junit`) for CI test dashboards.
 
 ---
 
