@@ -325,6 +325,7 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
 
 async def _stage_codebase(state: _RunState, project: Record) -> dict[str, Any] | None:
     from backend.api.ingest import ingest_source, save_blueprint
+    from backend.api.integrations import git_auth
     from ingestion import SourceError
 
     db = state.db
@@ -340,7 +341,7 @@ async def _stage_codebase(state: _RunState, project: Record) -> dict[str, Any] |
         return latest
     state.stage("codebase", "running")
     try:
-        blueprint = await asyncio.to_thread(ingest_source, repo)
+        blueprint = await asyncio.to_thread(ingest_source, repo, git_auth(db, project.get("owner_uid"), repo))
     except (SourceError, NotADirectoryError) as exc:
         state.stage("codebase", "failed", f"{exc}" + (" — using the previous blueprint" if latest else ""))
         return latest

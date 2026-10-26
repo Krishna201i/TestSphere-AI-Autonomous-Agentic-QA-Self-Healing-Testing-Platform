@@ -25,7 +25,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 import subprocess
 import time
 from collections.abc import Awaitable, Callable
@@ -34,6 +33,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from backend.api.integrations import git_auth
 from backend.config import git_hosts, settings
 from backend.database.session import get_store
 from backend.database.store import Record, Store, StoreUnavailableError, now_iso
@@ -47,7 +47,7 @@ from backend.pipeline.deploy_config import (
 )
 from backend.services.security_service import record_audit
 from backend.services.test_execution_service import TestExecutionService
-from ingestion.source import SourceError, validate_git_url
+from ingestion.source import GitAuth, SourceError, git_env, validate_git_url
 
 logger = logging.getLogger("testsphere.deploy")
 
@@ -57,7 +57,7 @@ ACTIVE = ("queued", "deploying", "verifying", "rolling_back")
 _tasks: set = set()
 
 
-def remote_head(repo_url: str | None) -> str | None:
+def remote_head(repo_url: str | None, auth: GitAuth | None = None) -> str | None:
     """Commit at the tip of the repository's default branch (None if unknown)."""
     if not repo_url:
         return None
@@ -67,7 +67,7 @@ def remote_head(repo_url: str | None) -> str | None:
         return None
     try:
         res = subprocess.run(["git", "ls-remote", repo_url, "HEAD"], capture_output=True, text=True, timeout=20,
-                             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+                             env=git_env(repo_url, auth))
     except (OSError, subprocess.TimeoutExpired):
         return None
     line = res.stdout.strip().split("\t", 1)[0] if res.returncode == 0 else ""
@@ -291,7 +291,8 @@ async def _deploy(state: _State, project: Record, transport, orchestrator, sleep
     async with hooks, site:
         state.save(status="deploying", started_at=now_iso())
         before = await _probe(site, health_url)
-        commit = await asyncio.to_thread(remote_head, project.get("repo_url"))
+        commit = await asyncio.to_thread(remote_head, project.get("repo_url"),
+                                         git_auth(state.db, project.get("owner_uid"), project.get("repo_url")))
         previous = last_verified(state.db, project["id"], before=state.id)
         state.save(commit=commit, rollback_to=previous.get("commit") if previous else None)
 

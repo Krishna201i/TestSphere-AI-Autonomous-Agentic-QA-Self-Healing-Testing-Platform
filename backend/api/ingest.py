@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from backend.api.integrations import git_auth
 from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
 from backend.config import git_hosts, settings
 from backend.database.session import get_db
@@ -22,6 +23,7 @@ from backend.models import BLUEPRINTS
 from backend.ratelimit import limit_runs
 from backend.services.security_service import record_audit, save_scan
 from ingestion import (
+    GitAuth,
     SourceError,
     analyze_repo,
     as_findings,
@@ -61,10 +63,13 @@ def _summary(row: Record) -> dict[str, Any]:
     }
 
 
-def ingest_source(source: str) -> dict[str, Any]:
-    """Clone (or resolve) and analyze *source*; raises ``SourceError`` with a readable cause."""
+def ingest_source(source: str, auth: GitAuth | None = None) -> dict[str, Any]:
+    """Clone (or resolve) and analyze *source*; raises ``SourceError`` with a readable cause.
+
+    *auth* fetches a private repository (``backend.api.integrations.git_auth``).
+    """
     if is_git_url(source):
-        root = clone(source, Path(settings.INGEST_WORKSPACE), _git_hosts())
+        root = clone(source, Path(settings.INGEST_WORKSPACE), _git_hosts(), auth=auth)
     elif settings.INGEST_ALLOW_LOCAL_PATHS:
         root = resolve_local(source)
     else:
@@ -112,7 +117,7 @@ def ingest(req: IngestRequest, db: Store = Depends(get_db), user: User = Depends
     if not source:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Source is required.")
     try:
-        blueprint = ingest_source(source)
+        blueprint = ingest_source(source, git_auth(db, user.uid, source) if is_git_url(source) else None)
     except (SourceError, NotADirectoryError) as exc:
         record_audit(db, actor=actor, kind="ingest", level="error", message=f"Ingestion failed for {source}: {exc}",
                      owner_uid=user.uid)
