@@ -226,6 +226,8 @@ def report_commit_status(db: Store, project: Record, run: Record) -> bool:
     text = (f"{s.get('passed', 0)}/{s.get('total', 0)} tests passed" if s else (run.get("error") or run.get("status", "")))
     if s.get("goal_untested"):
         text += " (goal not tested)"
+    elif s.get("goal_untested_parts"):
+        text += " (goal partly tested)"
     try:
         with GitHubClient(token) as gh:
             gh.set_commit_status(*repo, run["commit_sha"], state, f"Run #{run['id']}: {text}", run_url(run["id"]))
@@ -285,7 +287,12 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
     if goal_untested:
         plan_detail += (" · Your goal was not tested: no form fields or buttons were found on the page"
                         + ("" if analysis.get("rendered_in_browser") else " (even before scripts ran)"))
-    state.save(goal_untested=goal_untested)
+    # Parts of the goal no step tests ("…and fly to the moon"): say so, never claim them
+    untested_parts = [] if goal_untested else \
+        list(((analysis.get("synthesized_test_case") or {}).get("goal") or {}).get("untested") or [])
+    if untested_parts:
+        plan_detail += " · Not tested from your goal: " + "; ".join(f"“{p[:80]}”" for p in untested_parts)
+    state.save(goal_untested=goal_untested, goal_untested_parts=untested_parts)
     state.stage("plan", "done", plan_detail)
 
     # ── execute (with AI analysis + healing inside the orchestrator) ──
@@ -495,6 +502,7 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
     failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value and not r.get("quarantined"))
     summary = {
         "goal_untested": bool(state.doc.get("goal_untested")),
+        "goal_untested_parts": list(state.doc.get("goal_untested_parts") or []),
         "total": len(results),
         "passed": counts.get(TestExecutionStatus.PASSED.value, 0) + counts.get(TestExecutionStatus.HEALED.value, 0),
         "failed": failed,

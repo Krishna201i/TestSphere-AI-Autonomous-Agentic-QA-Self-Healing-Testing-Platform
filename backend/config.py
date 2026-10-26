@@ -229,6 +229,11 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+def git_hosts() -> frozenset[str]:
+    """Git hosts repositories may be fetched from (INGEST_GIT_HOSTS)."""
+    return frozenset(h.strip().lower() for h in settings.INGEST_GIT_HOSTS.split(",") if h.strip())
+
+
 def pipeline_problem() -> str | None:
     if settings.PIPELINE_EXECUTION not in ("inline", "worker"):
         return f"PIPELINE_EXECUTION must be 'inline' or 'worker', not {settings.PIPELINE_EXECUTION!r}."

@@ -10,6 +10,8 @@
         "select",
         "assert_text",
         "assert_visible",
+        "assert_hidden",
+        "assert_url",
         "wait_for"
       ],
       "title": "ActionType",

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
-from backend.config import settings
+from backend.config import git_hosts, settings
 from backend.database.session import get_db
 from backend.database.store import Record, Store
 from backend.models import BLUEPRINTS
@@ -39,7 +39,7 @@ class IngestRequest(BaseModel):
 
 
 def _git_hosts() -> frozenset:
-    return frozenset(h.strip().lower() for h in settings.INGEST_GIT_HOSTS.split(",") if h.strip())
+    return git_hosts()
 
 
 def _summary(row: Record) -> dict[str, Any]:

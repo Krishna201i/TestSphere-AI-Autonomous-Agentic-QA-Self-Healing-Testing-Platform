@@ -316,3 +316,40 @@ async def test_a_passing_run_keeps_a_screenshot_of_the_final_page(demo_server: s
     result = await run_test(plan, RunOptions(artifacts_dir=str(tmp_path)))
     assert result.status == TestStatus.PASSED
     assert result.steps[-1].screenshot_path and Path(result.steps[-1].screenshot_path).exists()
+
+
+# ---------------------------------------------------------------------------
+# Outcome checks (a failed sign-in must fail the test, never pass or heal)
+# ---------------------------------------------------------------------------
+
+
+def outcome_plan(base: str, password: str) -> TestPlan:
+    steps = login_plan(base, bad_creds=password != "password").steps[:4]
+    return TestPlan(test_id="outcome", name="Sign-in outcome", base_url=base, steps=[
+        *steps,
+        Step(step_id="form-gone", action=ActionType.ASSERT_HIDDEN,
+             target=Target(description="the sign-in form", primary_locator="#password")),
+        Step(step_id="on-dashboard", action=ActionType.ASSERT_URL, expected="dashboard"),
+    ])
+
+
+async def test_outcome_checks_pass_after_a_real_sign_in(demo_server: str) -> None:
+    result = await run_test(outcome_plan(demo_server, "password"))
+    assert result.status == TestStatus.PASSED, [(s.step_id, s.error) for s in result.steps]
+
+
+async def test_a_failed_sign_in_fails_the_outcome_check_and_is_never_healed(demo_server: str, monkeypatch) -> None:
+    import engine.runner as runner
+
+    calls = []
+
+    async def would_heal(page, step, config, exc):  # a healer that always "finds" something
+        calls.append(step.step_id)
+        return None
+
+    monkeypatch.setattr(runner, "_attempt_healing", would_heal)
+    result = await run_test(outcome_plan(demo_server, "wrong"))
+    step = {s.step_id: s for s in result.steps}["form-gone"]
+    assert result.status == TestStatus.FAILED
+    assert step.status == StepStatus.FAILED and "still visible" in (step.error or "")
+    assert "form-gone" not in calls  # a failed check is a result, not a broken locator

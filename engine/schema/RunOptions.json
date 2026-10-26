@@ -89,6 +89,19 @@
       ],
       "default": null,
       "title": "Max Candidates"
+    },
+    "min_action_timeout_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Min Action Timeout Ms"
     }
   },
   "title": "RunOptions",
