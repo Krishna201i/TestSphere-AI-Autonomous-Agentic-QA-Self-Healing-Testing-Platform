@@ -31,6 +31,7 @@ from typing import Any
 
 import httpx
 
+from backend import dbsource
 from backend.config import settings
 from backend.database.session import get_store
 from backend.database.store import Record, Store, StoreUnavailableError, now_iso
@@ -296,7 +297,11 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
     state.stage("plan", "done", plan_detail)
 
     # ── execute (with AI analysis + healing inside the orchestrator) ──
+    db_check = await asyncio.to_thread(dbsource.start_check, project)
     results = await _stage_execute(state, test_cases, orchestrator, owner)
+    goal_text = URLAnalyzerService.prompt_values(project.get("prompt")).get("text")
+    database = await asyncio.to_thread(dbsource.finish_check, db_check, [goal_text] if goal_text else [])
+    state.save(database=database)
 
     # ── heal ──
     healed = [r for r in results if r["healed"]]
@@ -526,13 +531,15 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
         "findings": dict(Counter(f["severity"] for f in (security or {}).get("findings", []))) if security else None,
         "previous_run_id": previous["id"] if previous else None,
         "visual_changes": sum(1 for r in results if r.get("visual_changed")),
+        "database": state.doc.get("database"),
     }
     status = "failed" if failed else "passed"
     state.stage("report", "done", f"{summary['passed']}/{summary['total']} passed"
                                   + (f" · {len(regressions)} regression(s)" if regressions else "")
                                   + (f" · {summary['visual_changes']} visual change(s) to review"
                                      if summary["visual_changes"] else "")
-                                  + (f" · compared with run #{previous['id']}" if previous else " · first run"))
+                                  + (f" · compared with run #{previous['id']}" if previous else " · first run")
+                                  + (f" · {line}" if (line := dbsource.summary_line(summary["database"])) else ""))
     state.save(status=status, summary=summary, regressions=regressions, tests=results, finished_at=now_iso())
     _finish_project(db, project, state)
     record_audit(
