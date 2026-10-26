@@ -384,6 +384,11 @@ class TestResult(BaseModel):
         ...,
         description="Root directory where all artifacts for this run were written",
     )
+    visual: dict[str, Any] | None = Field(
+        None,
+        description="Visual check of a passing run: current screenshot path and, against a baseline, "
+                    "the changed share of pixels and a diff image path",
+    )
 
     @property
     def passed_count(self) -> int:

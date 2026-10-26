@@ -171,6 +171,15 @@ class Settings(BaseSettings):
         default_factory=lambda: os.getenv("INGEST_GIT_HOSTS", "github.com,gitlab.com,bitbucket.org")
     )
     INGEST_ALLOW_LOCAL_PATHS: bool = Field(default_factory=lambda: _default_allow_local_paths())
+    # Visual regression: compare each passing test's final screen with its baseline;
+    # more than VISUAL_DIFF_THRESHOLD (share of pixels) changed = a visual change
+    VISUAL_REGRESSION: bool = Field(default_factory=lambda: os.getenv("VISUAL_REGRESSION", "true").lower() in ("true", "1"))
+    VISUAL_DIFF_THRESHOLD: float = Field(default_factory=lambda: float(os.getenv("VISUAL_DIFF_THRESHOLD", "0.02")))
+    # LLM Test Planner in the pipeline: "auto" (when LLM_PROVIDER is a real model), "on" or "off"
+    PIPELINE_AI_PLANNER: str = Field(default_factory=lambda: os.getenv("PIPELINE_AI_PLANNER", "auto").lower())
+    PIPELINE_AI_PLANNER_TIMEOUT: float = Field(default_factory=lambda: float(os.getenv("PIPELINE_AI_PLANNER_TIMEOUT", "120")))
+    # Check pinned dependency versions against OSV.dev (sends package names and versions, never code)
+    DEPENDENCY_SCAN: bool = Field(default_factory=lambda: os.getenv("DEPENDENCY_SCAN", "true").lower() in ("true", "1"))
 
     # Whether tests and page analysis may target private/internal addresses
     # (localhost, 10.x, 169.254.x ...). Off on hosted servers (SSRF), on in local development.

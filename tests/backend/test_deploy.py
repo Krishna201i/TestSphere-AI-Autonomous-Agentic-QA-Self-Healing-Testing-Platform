@@ -32,7 +32,7 @@ def fast(monkeypatch):
     monkeypatch.setattr(settings, "DEPLOY_HEALTHY_CHECKS", 2)
     monkeypatch.setattr(settings, "DEPLOY_SETTLE_SECONDS", 0)
     monkeypatch.setattr(settings, "DEPLOY_TIMEOUT_SECONDS", 2)
-    monkeypatch.setattr(deploy, "remote_head", lambda repo: "b" * 40 if repo else None)
+    monkeypatch.setattr(deploy, "remote_head", lambda repo, auth=None: "b" * 40 if repo else None)
 
 
 class Site:

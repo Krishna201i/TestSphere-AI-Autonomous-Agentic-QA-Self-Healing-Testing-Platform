@@ -10,11 +10,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import {
+  GithubAuthProvider,
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   getAuth,
   getRedirectResult,
+  linkWithPopup,
   onAuthStateChanged,
+  reauthenticateWithPopup,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -37,9 +40,13 @@ const FIREBASE_ERRORS = {
   'auth/weak-password': 'Use a password of at least 6 characters.',
   'auth/invalid-email': 'That email address is not valid.',
   'auth/missing-password': 'Enter your password.',
-  'auth/popup-closed-by-user': 'The Google window was closed before signing in.',
-  'auth/cancelled-popup-request': 'The Google window was closed before signing in.',
-  'auth/popup-blocked': 'The browser blocked the Google window. Allow pop-ups for this site and try again.',
+  'auth/popup-closed-by-user': 'The sign-in window was closed before finishing.',
+  'auth/cancelled-popup-request': 'The sign-in window was closed before finishing.',
+  'auth/popup-blocked': 'The browser blocked the sign-in window. Allow pop-ups for this site and try again.',
+  'auth/account-exists-with-different-credential':
+    'An account with this email already exists with another sign-in method. Sign in with Google or your email, '
+    + 'then connect GitHub in Profile → Integrations.',
+  'auth/credential-already-in-use': 'This GitHub account is already linked to another TestSphere account.',
   'auth/too-many-requests': 'Too many attempts. Wait a minute, or reset your password.',
   'auth/network-request-failed': 'Cannot reach Firebase. Check your internet connection.',
   'auth/operation-not-allowed':
@@ -139,15 +146,33 @@ export function AuthProvider({ children }) {
     recordLogin().catch(() => {});
   }, []);
 
-  const signInWithGoogle = useCallback(async () => {
+  const signInWithProvider = useCallback(async (makeProvider) => {
     try {
-      await signInWithPopup(authRef.current, new GoogleAuthProvider());
+      await signInWithPopup(authRef.current, makeProvider());
     } catch (err) {
       if (!NEEDS_REDIRECT.includes(err?.code)) throw err;
-      await signInWithRedirect(authRef.current, new GoogleAuthProvider());
+      await signInWithRedirect(authRef.current, makeProvider());
       return;
     }
     recordLogin().catch(() => {});
+  }, []);
+  const signInWithGoogle = useCallback(() => signInWithProvider(() => new GoogleAuthProvider()), [signInWithProvider]);
+  // Identity only: repository access is asked for separately (githubRepoToken)
+  const signInWithGitHub = useCallback(() => signInWithProvider(() => new GithubAuthProvider()), [signInWithProvider]);
+
+  /**
+   * A GitHub token with repository access, from a GitHub window: links GitHub to
+   * this account, or re-confirms it when the account already signs in with GitHub.
+   * Null when sign-in is off (local mode: paste a token instead).
+   */
+  const githubRepoToken = useCallback(async () => {
+    const user = authRef.current?.currentUser;
+    if (!user) return null;
+    const provider = new GithubAuthProvider();
+    provider.addScope('repo');
+    const linked = user.providerData.some((p) => p.providerId === 'github.com');
+    const result = linked ? await reauthenticateWithPopup(user, provider) : await linkWithPopup(user, provider);
+    return GithubAuthProvider.credentialFromResult(result)?.accessToken || null;
   }, []);
 
   /** Everything needed to tell why sign-in fails, checked live. */
@@ -182,8 +207,9 @@ export function AuthProvider({ children }) {
 
   const value = useMemo(() => ({
     ...state, notice, clearNotice: () => setNotice(null), diagnose,
-    retry: start, signIn, signUp, signInWithGoogle, resetPassword, signOut,
-  }), [state, notice, diagnose, start, signIn, signUp, signInWithGoogle, resetPassword, signOut]);
+    retry: start, signIn, signUp, signInWithGoogle, signInWithGitHub, githubRepoToken, resetPassword, signOut,
+  }), [state, notice, diagnose, start, signIn, signUp, signInWithGoogle, signInWithGitHub, githubRepoToken,
+    resetPassword, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

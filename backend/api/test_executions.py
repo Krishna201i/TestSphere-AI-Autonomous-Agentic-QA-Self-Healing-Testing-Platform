@@ -7,6 +7,8 @@ Does not launch Playwright, execute browser tests, or invoke AI agents.
 """
 
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from backend.api.schemas import (
@@ -15,12 +17,18 @@ from backend.api.schemas import (
     TestExecutionResponse,
     TestExecutionUpdate,
 )
-from backend.artifacts import delete_execution_artifacts, get_artifact_store
-from backend.auth import User, ensure_owned, get_current_user, scope
+from backend.artifacts import (
+    accept_baseline,
+    baseline_key,
+    delete_execution_artifacts,
+    get_artifact_store,
+)
+from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
 from backend.database.session import get_db
 from backend.database.store import Record, Store
 from backend.models import TEST_CASES, TEST_EXECUTIONS
 from backend.services.exceptions import InvalidExecutionStatusError
+from backend.services.security_service import record_audit
 from backend.services.test_execution_service import TestExecutionService
 
 router = APIRouter(prefix="/test-executions", tags=["Test Executions"])
@@ -89,6 +97,10 @@ def artifact_keys(execution: Record) -> set[str]:
     keys = {execution.get("trace")}
     for step in execution.get("steps") or []:
         keys.update((step.get("screenshot"), step.get("dom")))
+    visual = execution.get("visual") or {}
+    keys.update((visual.get("current"), visual.get("diff")))
+    if visual:  # the baseline it was compared with (the test case's current one)
+        keys.add(baseline_key(execution.get("owner_uid") or "local-dev", execution["test_case_id"]))
     return {k for k in keys if k}
 
 
@@ -123,6 +135,26 @@ def get_execution_artifact(
         if content_type.startswith("text/"):
             content_type = "text/plain; charset=utf-8"
     return Response(content=data, media_type=content_type, headers=headers)
+
+
+@router.post("/{execution_id}/accept-visual")
+def accept_visual_change(
+    execution_id: int,
+    db: Store = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """The screen changed on purpose: make this execution's screenshot the test's new baseline."""
+    execution = owned_execution(db, user, execution_id)
+    owner = execution.get("owner_uid") or "local-dev"
+    if not (execution.get("visual") or {}).get("current") or \
+            not accept_baseline(owner, execution_id, execution["test_case_id"]):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="This execution has no screenshot to accept (it failed, or its artifacts expired).")
+    visual = {**execution["visual"], "changed": False, "accepted": True}
+    db.update(TEST_EXECUTIONS, execution_id, visual=visual)
+    record_audit(db, actor=actor_for(user, "dev_active"), kind="visual", ref=str(execution_id), owner_uid=user.uid,
+                 message=f"New visual baseline for test case #{execution['test_case_id']} from execution #{execution_id}")
+    return {"accepted": True, "visual": visual}
 
 
 @router.put("/{execution_id}", response_model=TestExecutionResponse)

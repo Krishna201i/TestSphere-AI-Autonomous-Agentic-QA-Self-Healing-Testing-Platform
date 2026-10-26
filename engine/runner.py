@@ -45,6 +45,7 @@ except ImportError:
     Page = object  # type: ignore
     PLAYWRIGHT_INSTALLED = False
 
+from . import visual as visual_diff
 from .artifacts import write_dom_snapshot, write_screenshot
 from .browser import BrowserSession
 from .detector import build_fingerprint
@@ -76,6 +77,9 @@ log = logging.getLogger(__name__)
 async def run_test(
     plan: TestPlan,
     options: RunOptions | None = None,
+    *,
+    visual: bool = False,
+    visual_baseline: bytes | None = None,
 ) -> TestResult:
     """
     Execute *plan* sequentially and return a ``TestResult``.
@@ -87,6 +91,9 @@ async def run_test(
     options:
         Optional per-run overrides for ``EngineConfig``.  Any ``None`` field
         inherits the engine default.
+    visual / visual_baseline:
+        Take a settled viewport screenshot when the run passes, and compare it
+        with *visual_baseline* (PNG bytes) when given (``engine/visual.py``).
 
     Returns
     -------
@@ -100,6 +107,7 @@ async def run_test(
 
     step_results: list[StepResult] = []
     artifacts_dir = str(Path(config.artifacts_dir) / plan.test_id)
+    visual_result: dict | None = None
 
     try:
         async with BrowserSession(config, trace_path=f"{artifacts_dir}/_trace.zip") as session:
@@ -122,6 +130,8 @@ async def run_test(
             if last and last.status != StepStatus.FAILED and not last.screenshot_path:
                 shot = await write_screenshot(page, plan.test_id, last.step_id, artifacts_dir)
                 step_results[-1] = last.model_copy(update={"screenshot_path": shot})
+            if visual and step_results and all(s.status != StepStatus.FAILED for s in step_results):
+                visual_result = await _visual_check(page, artifacts_dir, visual_baseline)
     except Exception as exc:  # noqa: BLE001 - the engine reports failures in its result and never raises
         log.error("[%s] Browser session error: %s", plan.test_id, exc)
         step_results.append(
@@ -143,7 +153,28 @@ async def run_test(
         duration_ms=duration_ms,
         steps=step_results,
         artifacts_dir=artifacts_dir,
+        visual=visual_result,
     )
+
+
+async def _visual_check(page: Page, artifacts_dir: str, baseline: bytes | None) -> dict | None:
+    """Screenshot the page the test ended on and compare it with the baseline; None if it fails."""
+    try:
+        current = await visual_diff.screenshot(page)
+        folder = Path(artifacts_dir) / "_visual"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "current.png").write_bytes(current)
+        out: dict = {"current": str((folder / "current.png").resolve())}
+        if baseline:
+            res = await visual_diff.compare(page.context, baseline, current)
+            if res["diff_png"]:
+                (folder / "diff.png").write_bytes(res["diff_png"])
+                out["diff"] = str((folder / "diff.png").resolve())
+            out.update(ratio=res["ratio"], changed_pixels=res["changed"], size_changed=res["size_changed"])
+        return out
+    except Exception as exc:  # noqa: BLE001 - a visual check never fails a functional test
+        log.warning("Visual check failed: %s", exc)
+        return None
 
 
 # ---------------------------------------------------------------------------

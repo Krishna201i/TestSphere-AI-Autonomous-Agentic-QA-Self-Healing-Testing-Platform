@@ -118,6 +118,22 @@ Then **Open pull request** on a fix patch creates a branch `testsphere/fix-<id>`
 built against, with one commit of the patched files, and a pull request to the default branch. Runs started
 by a GitHub push set a `TestSphere` commit status (success / failure / error) linking to the run page.
 
+**Private repositories.** Fetching a repository (ingestion, pipeline runs, fix patches, the commit a deploy
+ships) uses the owner's credentials for that host: the connected GitHub token for `github.com`, or a Git
+credential saved for another allowed host with `PUT /api/integrations/git-credentials`
+(`{"host": "gitlab.com", "token": "glpat-…"}`; Bitbucket app passwords also take `"username"`). The token is
+stored encrypted, sent as an `Authorization` header scoped to that one host (never in the URL, `.git/config`
+or error messages, and not after a redirect to another host), and used only for its owner's projects.
+A GitHub token needs *Contents: Read* on the repository to clone it.
+
+**GitHub sign-in.** With the GitHub provider enabled in Firebase (Authentication → Sign-in method → GitHub, using
+a GitHub OAuth App whose callback URL is `https://<project>.firebaseapp.com/__/auth/handler`), the sign-in page
+offers *Continue with GitHub*. Sign-in asks GitHub only for the user's identity. Repository access is separate:
+**Connect with GitHub** in Profile → Integrations opens a GitHub window asking for the `repo` scope, links GitHub
+to the account (or re-confirms it), and stores the token like a pasted one. Users who want access to only some
+repositories can paste a fine-grained token instead. An email that already has an account with Google or a
+password must sign in that way first; Firebase does not merge accounts by itself.
+
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `TOKEN_ENCRYPTION_KEY` | generated in `data/.token_key` locally; **required when hosted** | Fernet key for stored integration tokens. Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Changing it disconnects every user's GitHub |

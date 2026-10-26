@@ -10,10 +10,16 @@ Safety:
 - Clones are shallow, time-limited, run with hooks and credential prompts
   disabled, and land in a dedicated workspace directory.
 - Local paths are only accepted when explicitly enabled (development).
+- Private repositories: a ``GitAuth`` (user name + token) is sent as an
+  ``Authorization`` header scoped to that one host (``http.<url>.extraHeader``,
+  passed through the environment).  The token is never part of the URL, so it
+  is not written to ``.git/config``, shown in errors or sent after a redirect
+  to another host.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import re
@@ -21,6 +27,7 @@ import shutil
 import stat
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -30,6 +37,44 @@ CLONE_TIMEOUT_S = 120
 
 class SourceError(ValueError):
     """The source cannot be ingested (invalid, not allowed, or fetch failed)."""
+
+
+@dataclass(frozen=True)
+class GitAuth:
+    """Credentials for one Git host: a token (or app password) and the user name the host expects."""
+
+    username: str
+    token: str
+
+    def __repr__(self) -> str:  # never print the token
+        return f"GitAuth(username={self.username!r}, token='…')"
+
+
+def git_env(url: str, auth: GitAuth | None) -> dict[str, str]:
+    """Environment for a git command on *url*: no prompts, and *auth* for that host only."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo", "GCM_INTERACTIVE": "never"}
+    if auth:
+        parts = urlsplit(url)
+        basic = base64.b64encode(f"{auth.username}:{auth.token}".encode()).decode()
+        env.update(GIT_CONFIG_COUNT="2",
+                   GIT_CONFIG_KEY_0=f"http.{parts.scheme}://{parts.netloc}/.extraHeader",
+                   GIT_CONFIG_VALUE_0=f"Authorization: Basic {basic}",
+                   GIT_CONFIG_KEY_1="credential.helper", GIT_CONFIG_VALUE_1="")
+    return env
+
+
+_AUTH_FAILED = re.compile(r"authentication failed|could not read username|repository not found|"
+                          r"403|401|terminal prompts disabled|access denied|not found", re.IGNORECASE)
+
+
+def _clone_error(detail: str, auth: GitAuth | None, host: str) -> str:
+    if not _AUTH_FAILED.search(detail):
+        return f"Clone failed: {detail}"
+    if auth:
+        return (f"Clone failed: {host} refused the saved credentials ({detail}). Check that the token has not "
+                "expired and can read this repository (GitHub: Contents read access).")
+    return (f"Clone failed: {detail}. If the repository is private, connect GitHub (Profile → Integrations) "
+            f"or add a Git credential for {host}.")
 
 
 def is_git_url(source: str) -> bool:
@@ -70,11 +115,14 @@ def _remove_tree(path: Path) -> bool:
     return not path.exists()
 
 
-def clone(url: str, workspace: Path, allowed_hosts: frozenset[str] = DEFAULT_GIT_HOSTS) -> Path:
+def clone(url: str, workspace: Path, allowed_hosts: frozenset[str] = DEFAULT_GIT_HOSTS,
+          auth: GitAuth | None = None) -> Path:
     """Shallow-clone *url* into *workspace* and return the checkout directory."""
     url = validate_git_url(url, allowed_hosts)
     workspace.mkdir(parents=True, exist_ok=True)
-    target = workspace / f"{repo_name(url)}-{hashlib.sha1(url.encode(), usedforsecurity=False).hexdigest()[:8]}"  # nosemgrep: insecure-hash-algorithm-sha1 - folder name, not security
+    # A private checkout gets its own folder per credential, never one shared with other users
+    key = url + (f"|{auth.username}|{hashlib.sha256(auth.token.encode()).hexdigest()}" if auth else "")
+    target = workspace / f"{repo_name(url)}-{hashlib.sha1(key.encode(), usedforsecurity=False).hexdigest()[:8]}"  # nosemgrep: insecure-hash-algorithm-sha1 - folder name, not security
     try:
         removed = _remove_tree(target)  # re-ingest: start from a fresh checkout
     except OSError:
@@ -82,7 +130,7 @@ def clone(url: str, workspace: Path, allowed_hosts: frozenset[str] = DEFAULT_GIT
     if not removed:  # e.g. a file is locked by another process
         target = target.with_name(f"{target.name}-{int(time.time())}")
 
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
+    env = git_env(url, auth)
     cmd = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.longpaths=true", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
            "clone", "--depth", "1", "--single-branch", "--no-tags", url, str(target)]
     try:
@@ -95,7 +143,9 @@ def clone(url: str, workspace: Path, allowed_hosts: frozenset[str] = DEFAULT_GIT
     if result.returncode != 0:
         _remove_tree(target)
         detail = (result.stderr.strip().splitlines() or ["unknown error"])[-1]
-        raise SourceError(f"Clone failed: {detail}")
+        if auth:
+            detail = detail.replace(auth.token, "…")
+        raise SourceError(_clone_error(detail, auth, urlsplit(url).hostname or "the host"))
     return target
 
 

@@ -31,6 +31,7 @@ from typing import Any
 
 import httpx
 
+from backend import dbsource
 from backend.config import settings
 from backend.database.session import get_store
 from backend.database.store import Record, Store, StoreUnavailableError, now_iso
@@ -44,7 +45,7 @@ from backend.models import (
 )
 from backend.models.test_execution import TestExecutionStatus
 from backend.notify import notify_run
-from backend.pipeline import suite
+from backend.pipeline import ai_plan, suite
 from backend.services.security_service import record_audit
 from backend.services.test_case_service import TestCaseService
 from backend.services.test_execution_service import TestExecutionService
@@ -296,7 +297,11 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
     state.stage("plan", "done", plan_detail)
 
     # ── execute (with AI analysis + healing inside the orchestrator) ──
+    db_check = await asyncio.to_thread(dbsource.start_check, project)
     results = await _stage_execute(state, test_cases, orchestrator, owner)
+    goal_text = URLAnalyzerService.prompt_values(project.get("prompt")).get("text")
+    database = await asyncio.to_thread(dbsource.finish_check, db_check, [goal_text] if goal_text else [])
+    state.save(database=database)
 
     # ── heal ──
     healed = [r for r in results if r["healed"]]
@@ -320,6 +325,7 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
 
 async def _stage_codebase(state: _RunState, project: Record) -> dict[str, Any] | None:
     from backend.api.ingest import ingest_source, save_blueprint
+    from backend.api.integrations import git_auth
     from ingestion import SourceError
 
     db = state.db
@@ -335,7 +341,7 @@ async def _stage_codebase(state: _RunState, project: Record) -> dict[str, Any] |
         return latest
     state.stage("codebase", "running")
     try:
-        blueprint = await asyncio.to_thread(ingest_source, repo)
+        blueprint = await asyncio.to_thread(ingest_source, repo, git_auth(db, project.get("owner_uid"), repo))
     except (SourceError, NotADirectoryError) as exc:
         state.stage("codebase", "failed", f"{exc}" + (" — using the previous blueprint" if latest else ""))
         return latest
@@ -343,8 +349,12 @@ async def _stage_codebase(state: _RunState, project: Record) -> dict[str, Any] |
                    project_id=project["id"])
     langs = blueprint.get("languages", {})
     primary = max(langs, key=lambda k: langs[k]["lines"]) if langs else "no code"
+    deps = blueprint.get("dependency_scan") or {}
+    dep_note = (f" · dependencies not checked: {deps['error']}" if deps.get("error") else
+                f" · {deps['vulnerable']} of {deps['checked']} pinned packages have known vulnerabilities"
+                if deps.get("vulnerable") else f" · {deps['checked']} pinned packages, none known vulnerable" if deps else "")
     state.stage("codebase", "done", f"{blueprint.get('files_total', 0)} files, {primary}, "
-                                    f"{len(blueprint.get('routes', []))} routes, {len(blueprint.get('risks', []))} risks")
+                                    f"{len(blueprint.get('routes', []))} routes, {len(blueprint.get('risks', []))} risks{dep_note}")
     return blueprint
 
 
@@ -374,6 +384,8 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
                                 base_url=app_url, description="Created by the automated pipeline", owner_uid=owner)
 
     planned = suite.page_tests(analysis, project.get("prompt"))
+    extra, ai_note = await ai_plan.ai_tests(analysis, project.get("prompt"), (blueprint or {}).get("frameworks"))
+    planned += extra
     candidates = suite.candidate_pages(analysis, blueprint)
     codes = await _reachable([c["url"] for c in candidates]) if candidates else {}
     left_out = [f"{c['label']} ({codes[c['url']] or 'unreachable'})" for c in candidates
@@ -390,6 +402,9 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
                 db, application_id=application["id"], external_id=external_id, name=test["name"][:255],
                 description=description, category=test["category"], priority="normal", owner_uid=owner,
             )
+            if test["category"] == "ai":
+                # A model wrote it: it runs and reports, but cannot fail a run until someone un-quarantines it
+                row = db.update(TEST_CASES, row["id"], quarantined=True)
             created += 1
         elif row.get("description") != description or row.get("name") != test["name"][:255]:
             row = db.update(TEST_CASES, row["id"], name=test["name"][:255], description=description,
@@ -403,6 +418,8 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
         detail += f", {len(saved)} saved"
     if left_out:
         detail += f" · left out {len(left_out)} page(s) that did not load: " + ", ".join(left_out[:4])
+    if ai_note:
+        detail += f" · {ai_note}"
     return application, generated + saved, detail
 
 
@@ -418,9 +435,11 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
     for idx, tc in enumerate(test_cases, start=1):
         state.stage("execute", "running", f"Running {idx} of {len(test_cases)}: {tc['name']}")
         execution = TestExecutionService.create_execution(db, test_case_id=tc["id"], owner_uid=owner)
+        visual = None
         try:
             res = await orch.execute_test_run(db=db, execution_id=execution["id"], options=RunOptions(headless=True))
             status, error = res.get("status", "FAILED"), res.get("error_message")
+            visual = res.get("visual")
         except StoreUnavailableError:
             raise
         except Exception as exc:
@@ -431,7 +450,8 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
             status == TestExecutionStatus.PASSED.value and str(error or "").startswith("Self-healed"))
         results.append({"test_case_id": tc["id"], "name": tc["name"], "category": tc.get("category"),
                         "execution_id": execution["id"], "status": status, "error": error, "healed": healed,
-                        "quarantined": bool(tc.get("quarantined"))})
+                        "quarantined": bool(tc.get("quarantined")),
+                        "visual_changed": bool((visual or {}).get("changed"))})
         state.save(tests=results)
     failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value and not r.get("quarantined"))
     state.stage("execute", "failed" if failed else "done",
@@ -511,11 +531,16 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
         "quarantined_failed": counts.get(TestExecutionStatus.FAILED.value, 0) - failed,
         "findings": dict(Counter(f["severity"] for f in (security or {}).get("findings", []))) if security else None,
         "previous_run_id": previous["id"] if previous else None,
+        "visual_changes": sum(1 for r in results if r.get("visual_changed")),
+        "database": state.doc.get("database"),
     }
     status = "failed" if failed else "passed"
     state.stage("report", "done", f"{summary['passed']}/{summary['total']} passed"
                                   + (f" · {len(regressions)} regression(s)" if regressions else "")
-                                  + (f" · compared with run #{previous['id']}" if previous else " · first run"))
+                                  + (f" · {summary['visual_changes']} visual change(s) to review"
+                                     if summary["visual_changes"] else "")
+                                  + (f" · compared with run #{previous['id']}" if previous else " · first run")
+                                  + (f" · {line}" if (line := dbsource.summary_line(summary["database"])) else ""))
     state.save(status=status, summary=summary, regressions=regressions, tests=results, finished_at=now_iso())
     _finish_project(db, project, state)
     record_audit(

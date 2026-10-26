@@ -53,7 +53,7 @@ from agents.schemas.member3_contract import (
     DashboardWorkflowSummary,
     build_dashboard_summary,
 )
-from backend.artifacts import persist_run_artifacts
+from backend.artifacts import load_baseline, persist_run_artifacts, record_visual
 from backend.config import settings
 from backend.database.store import Store, StoreUnavailableError
 from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
@@ -375,7 +375,10 @@ class PlatformWorkflowOrchestrator:
         run_opts = options or RunOptions(headless=True)
         if run_opts.tracing_enabled is None and settings.ARTIFACT_TRACES:
             run_opts = run_opts.model_copy(update={"tracing_enabled": True})
-        engine_result: EngineTestResult = await run_test(engine_plan, options=run_opts)
+        owner = execution.get("owner_uid") or "local-dev"
+        baseline = load_baseline(owner, test_case.id) if settings.VISUAL_REGRESSION else None
+        engine_result: EngineTestResult = await run_test(engine_plan, options=run_opts,
+                                                         visual=settings.VISUAL_REGRESSION, visual_baseline=baseline)
         shown_result = engine_result  # the run whose steps the dashboard shows
 
         exec_result = engine_result_to_execution_result(
@@ -479,7 +482,9 @@ class PlatformWorkflowOrchestrator:
 
         # Step results and artifacts (screenshots, DOM, trace) for the run view
         descriptions = {st.step_id: describe_step(st) for st in engine_plan.steps}
-        evidence = persist_run_artifacts(shown_result, execution.get("owner_uid") or "local-dev", execution.id, descriptions)
+        evidence = persist_run_artifacts(shown_result, owner, execution.id, descriptions)
+        visual = record_visual(engine_result.visual, owner, execution.id, test_case.id, baseline,
+                               passed=final_status == TestExecutionStatus.PASSED.value)
         self._discard_local_artifacts(engine_result, shown_result)
 
         # Update database execution record
@@ -487,7 +492,7 @@ class PlatformWorkflowOrchestrator:
         execution = db.update(
             TEST_EXECUTIONS, execution.id,
             status=final_status, completed_at=end_time, duration_ms=duration_ms, error_message=error_msg,
-            steps=evidence["steps"], trace=evidence["trace"],
+            steps=evidence["steps"], trace=evidence["trace"], visual=visual,
         )
 
         # Retrieve AI state & dashboard summary
@@ -512,6 +517,7 @@ class PlatformWorkflowOrchestrator:
             "dashboard_summary": dashboard_summary.model_dump(),
             "events": [e.model_dump() for e in (state.events if state else [])],
             "engine_steps": [st.model_dump(mode="json") for st in engine_result.steps],
+            "visual": visual,
             "analysis": analysis_data,
         }
 
