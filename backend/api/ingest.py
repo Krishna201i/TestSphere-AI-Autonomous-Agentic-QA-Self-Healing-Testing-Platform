@@ -23,12 +23,12 @@ from backend.ratelimit import limit_runs
 from backend.services.security_service import record_audit, save_scan
 from ingestion import (
     SourceError,
+    analyze_repo,
     as_findings,
     check_dependencies,
-    pinned_packages,
-    analyze_repo,
     clone,
     is_git_url,
+    pinned_packages,
     repo_name,
     resolve_local,
 )
