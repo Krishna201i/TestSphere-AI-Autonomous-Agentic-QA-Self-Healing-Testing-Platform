@@ -139,6 +139,10 @@ def approve_finding(
 
 
 async def _retest(row, scanner: PassiveScanner, db: Store, actor: str, owner_uid: str | None) -> dict[str, Any]:
+    if row.check_id.startswith("SEC-DEP-"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="A vulnerable dependency is retested by ingesting the repository again "
+                                   "(it is checked on every push, or run the pipeline).")
     finding = Finding.model_validate(json.loads(row.data))
     store.record_audit(db, actor=actor, kind="retest", ref=row.key, message=f"Retest started for {row.check_id} on {row.target_url}",
                        owner_uid=owner_uid)

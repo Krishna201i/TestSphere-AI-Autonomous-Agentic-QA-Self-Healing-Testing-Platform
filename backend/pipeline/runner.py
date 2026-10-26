@@ -343,8 +343,12 @@ async def _stage_codebase(state: _RunState, project: Record) -> dict[str, Any] |
                    project_id=project["id"])
     langs = blueprint.get("languages", {})
     primary = max(langs, key=lambda k: langs[k]["lines"]) if langs else "no code"
+    deps = blueprint.get("dependency_scan") or {}
+    dep_note = (f" · dependencies not checked: {deps['error']}" if deps.get("error") else
+                f" · {deps['vulnerable']} of {deps['checked']} pinned packages have known vulnerabilities"
+                if deps.get("vulnerable") else f" · {deps['checked']} pinned packages, none known vulnerable" if deps else "")
     state.stage("codebase", "done", f"{blueprint.get('files_total', 0)} files, {primary}, "
-                                    f"{len(blueprint.get('routes', []))} routes, {len(blueprint.get('risks', []))} risks")
+                                    f"{len(blueprint.get('routes', []))} routes, {len(blueprint.get('risks', []))} risks{dep_note}")
     return blueprint
 
 

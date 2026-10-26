@@ -13,6 +13,8 @@ os.environ.setdefault("AUTH_REQUIRED", "false")
 os.environ.setdefault("SCHEDULER_ENABLED", "false")
 # Real-browser tests run without Playwright tracing unless a test turns it on
 os.environ.setdefault("ARTIFACT_TRACES", "false")
+# No calls to OSV.dev from tests (dependency tests use a mock transport)
+os.environ.setdefault("DEPENDENCY_SCAN", "false")
 
 
 @pytest.fixture(autouse=True)

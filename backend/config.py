@@ -171,6 +171,8 @@ class Settings(BaseSettings):
         default_factory=lambda: os.getenv("INGEST_GIT_HOSTS", "github.com,gitlab.com,bitbucket.org")
     )
     INGEST_ALLOW_LOCAL_PATHS: bool = Field(default_factory=lambda: _default_allow_local_paths())
+    # Check pinned dependency versions against OSV.dev (sends package names and versions, never code)
+    DEPENDENCY_SCAN: bool = Field(default_factory=lambda: os.getenv("DEPENDENCY_SCAN", "true").lower() in ("true", "1"))
 
     # Whether tests and page analysis may target private/internal addresses
     # (localhost, 10.x, 169.254.x ...). Off on hosted servers (SSRF), on in local development.
