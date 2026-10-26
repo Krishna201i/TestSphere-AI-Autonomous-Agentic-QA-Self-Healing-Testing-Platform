@@ -34,7 +34,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from backend.config import settings
+from backend.config import git_hosts, settings
 from backend.database.session import get_store
 from backend.database.store import Record, Store, StoreUnavailableError, now_iso
 from backend.models import APPLICATIONS, DEPLOYMENTS, PROJECTS, TEST_CASES
@@ -47,6 +47,7 @@ from backend.pipeline.deploy_config import (
 )
 from backend.services.security_service import record_audit
 from backend.services.test_execution_service import TestExecutionService
+from ingestion.source import SourceError, validate_git_url
 
 logger = logging.getLogger("testsphere.deploy")
 
@@ -58,7 +59,11 @@ _tasks: set = set()
 
 def remote_head(repo_url: str | None) -> str | None:
     """Commit at the tip of the repository's default branch (None if unknown)."""
-    if not repo_url or not repo_url.startswith("https://"):
+    if not repo_url:
+        return None
+    try:  # projects saved before the schema checked hosts; git must not reach internal addresses
+        validate_git_url(repo_url, git_hosts())
+    except SourceError:
         return None
     try:
         res = subprocess.run(["git", "ls-remote", repo_url, "HEAD"], capture_output=True, text=True, timeout=20,

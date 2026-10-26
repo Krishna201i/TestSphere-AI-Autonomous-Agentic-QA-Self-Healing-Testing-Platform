@@ -197,3 +197,22 @@ def test_a_clean_pipeline_run_deploys_when_the_project_asks(fresh_store, monkeyp
     runner._deploy_if_green(fresh_store, proj, {"id": 5, "status": "failed", "regressions": []})
     runner._deploy_if_green(fresh_store, proj, {"id": 6, "status": "passed", "regressions": [{"kind": "test"}]})
     assert started == [{"actor": "me", "trigger": "pipeline", "run_id": 4}]
+
+
+# The deploy step ran `git ls-remote` on any https repository URL (R2-01)
+
+@pytest.mark.parametrize("url", ["https://169.254.169.254/latest/meta-data", "https://127.0.0.1:9/x",
+                                 "https://github.com/../..", "http://github.com/a/b"])
+def test_repository_urls_must_be_on_an_allowed_git_host(url):
+    resp = TestClient(app).post("/api/projects", json={"name": "x", "repo_url": url})
+    assert resp.status_code == 422 and "Repository URL" in resp.text
+
+
+REAL_REMOTE_HEAD = deploy.remote_head  # the autouse fixture stubs it out
+
+
+def test_the_deploy_never_runs_git_against_other_hosts(monkeypatch):
+    ran = []
+    monkeypatch.setattr(deploy.subprocess, "run", lambda *a, **k: ran.append(a))
+    assert REAL_REMOTE_HEAD("https://127.0.0.1:9/internal") is None  # e.g. saved before hosts were checked
+    assert ran == []

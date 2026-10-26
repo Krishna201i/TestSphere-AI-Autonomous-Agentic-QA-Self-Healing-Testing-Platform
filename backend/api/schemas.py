@@ -10,9 +10,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.config import git_hosts
 from backend.models.test_execution import TestExecutionStatus
 from backend.notify import NOTIFY_CHOICES, check_slack_webhook
 from backend.pipeline.deploy_config import check_hook_url
+from ingestion.source import SourceError, validate_git_url
 
 # ============================================================================
 # Project Schemas
@@ -84,7 +86,13 @@ class _ProjectPipelineFields(BaseModel):
     @field_validator("repo_url")
     @classmethod
     def _repo_url(cls, v: str | None) -> str | None:
-        return _check_http_url(v, "Repository URL")
+        v = _check_http_url(v, "Repository URL")
+        if v:
+            try:
+                validate_git_url(v, git_hosts())
+            except SourceError as exc:
+                raise ValueError(f"Repository URL: {exc}") from exc
+        return v
 
     @field_validator("schedule_minutes")
     @classmethod

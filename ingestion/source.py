@@ -53,7 +53,8 @@ def validate_git_url(url: str, allowed_hosts: frozenset[str] = DEFAULT_GIT_HOSTS
         raise SourceError(f"Git host {host or '?'} is not allowed ({', '.join(sorted(allowed_hosts))}).")
     if parts.username or parts.password:
         raise SourceError("Do not put credentials in the URL; only public repositories are supported.")
-    if not re.fullmatch(r"/[\w.-]+/[\w.-]+(?:\.git)?/?", parts.path):
+    if not re.fullmatch(r"/[\w.-]+/[\w.-]+(?:\.git)?/?", parts.path) or any(
+            set(seg) == {"."} for seg in parts.path.strip("/").split("/")):
         raise SourceError("Expected a repository URL like https://github.com/owner/repo.")
     return url
 

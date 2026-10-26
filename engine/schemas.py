@@ -48,6 +48,8 @@ class ActionType(str, Enum):
     SELECT = "select"
     ASSERT_TEXT = "assert_text"
     ASSERT_VISIBLE = "assert_visible"
+    ASSERT_HIDDEN = "assert_hidden"
+    ASSERT_URL = "assert_url"
     WAIT_FOR = "wait_for"
 
 

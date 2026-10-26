@@ -18,12 +18,15 @@ Design notes
   healing event is fully auditable.
 - When a step's primary locator fails, ``_attempt_healing`` (engine/healer.py)
   tries stored fallbacks, then a fingerprint scan of the live DOM; an accepted
-  locator is retried and the step is reported as HEALED.
+  locator is retried and the step is reported as HEALED.  Locators are
+  healed, assertions never: when an assertion found its element and the
+  check itself failed (``AssertionError``), that is the test's result.
 - No database access; all output is returned as a ``TestResult`` value.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from datetime import UTC, datetime
@@ -197,8 +200,10 @@ async def _execute_step(
         duration_ms = _elapsed_ms(step_start)
         error_msg = str(exc)
 
-        # Healing hook — engine/healer.py (module-level name so it can be swapped out)
-        healing = await _attempt_healing(page, step, config, exc)
+        # Healing hook — engine/healer.py (module-level name so it can be swapped out).
+        # A failed check is a result, not a broken locator: healing it onto
+        # another element would turn a real failure into a pass.
+        healing = None if isinstance(exc, AssertionError) else await _attempt_healing(page, step, config, exc)
 
         if healing and healing.selected_locator:
             # Healing succeeded — retry the action with the healed locator
@@ -280,6 +285,12 @@ async def _perform_action(page: Page, step: Step, config: EngineConfig) -> str |
             await page.goto(url, timeout=nav_timeout, wait_until="domcontentloaded")
         except Exception:  # noqa: BLE001 - any failure: retry with the looser "commit" wait
             await page.goto(url, timeout=nav_timeout, wait_until="commit")
+        # Act like a person: wait for the page to finish loading.  Acting while
+        # its own requests are in flight loses races a user never sees (a login
+        # whose session cookie a late analytics response overwrites).
+        for state, wait_ms in (("load", 10_000), ("networkidle", 2_000)):
+            with contextlib.suppress(PlaywrightTimeoutError, PlaywrightError):
+                await page.wait_for_load_state(state, timeout=wait_ms)
         return None
 
     # ---- element-less wait --------------------------------------------
@@ -291,6 +302,16 @@ async def _perform_action(page: Page, step: Step, config: EngineConfig) -> str |
         except ValueError:
             # treat as a CSS/XPath selector
             await page.wait_for_selector(value, timeout=timeout)
+        return None
+
+    # ---- page URL check -----------------------------------------------
+    if action == ActionType.ASSERT_URL:
+        expected = step.expected or step.value or ""
+        deadline = time.monotonic() + max(timeout or 5000, 1000) / 1000
+        while expected.lower() not in page.url.lower():
+            if time.monotonic() >= deadline:
+                raise AssertionError(f"assert_url failed: expected {expected!r} in {page.url!r}")
+            await page.wait_for_timeout(200)
         return None
 
     # ---- element actions: all need a locator --------------------------
@@ -328,7 +349,7 @@ async def _perform_action_with_locator(
     elif action == ActionType.ASSERT_TEXT:
         expected = step.expected or ""
         actual = (await loc.inner_text(timeout=timeout)).strip()
-        assert expected in actual, (
+        assert expected.casefold() in actual.casefold(), (
             f"assert_text failed: expected {expected!r} in {actual!r}"
         )
 
@@ -336,6 +357,14 @@ async def _perform_action_with_locator(
         await loc.wait_for(state="visible", timeout=timeout)
         is_visible = await loc.is_visible()
         assert is_visible, f"assert_visible failed: {locator_str!r} is not visible"
+
+    elif action == ActionType.ASSERT_HIDDEN:
+        # Passes once no element matches or the match is hidden.  Still
+        # visible at the deadline = a failed check (never a locator to heal).
+        try:
+            await loc.wait_for(state="hidden", timeout=timeout)
+        except PlaywrightTimeoutError:
+            raise AssertionError(f"assert_hidden failed: {locator_str!r} is still visible") from None
 
     else:
         raise ValueError(f"Unhandled action {action!r} in _perform_action_with_locator")

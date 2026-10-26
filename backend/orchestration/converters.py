@@ -6,6 +6,8 @@ Maintains bidirectional fidelity without modifying shared models or third-party 
 """
 
 
+import re
+
 from agents.analyzer.schemas import FailureContext
 from agents.orchestration.workflow_schemas import (
     ExecutionResult,
@@ -65,9 +67,11 @@ def map_action_to_engine(action: TestAction) -> ActionType:
 
 def map_assertion_to_engine(assertion: Assertion) -> EngineStep:
     """Map Member 1 Assertion to Member 2 assertion EngineStep."""
+    # A written description ("the cart shows a count") reads better than the selector
+    written = assertion.description if assertion.description and not re.fullmatch(r"Assert \d+", assertion.description) else None
     target = create_engine_target(
         assertion.target,
-        description=f"Assertion target for {assertion.type.value}",
+        description=f"Check: {written}" if written else f"Assertion target for {assertion.type.value}",
     )
 
     if assertion.type in (
@@ -78,6 +82,20 @@ def map_assertion_to_engine(assertion: Assertion) -> EngineStep:
             step_id=f"assert-{assertion.type.value}",
             action=ActionType.ASSERT_TEXT,
             target=target,
+            expected=assertion.expected,
+        )
+
+    if assertion.type == AssertionType.ELEMENT_NOT_VISIBLE:
+        return EngineStep(
+            step_id=f"assert-{assertion.type.value}",
+            action=ActionType.ASSERT_HIDDEN,
+            target=target,
+        )
+
+    if assertion.type in (AssertionType.URL_CONTAINS, AssertionType.URL_EQUALS):
+        return EngineStep(
+            step_id=f"assert-{assertion.type.value}",
+            action=ActionType.ASSERT_URL,
             expected=assertion.expected,
         )
 

@@ -113,6 +113,7 @@ def apply_healed_selector(
 _STEP_VERBS = {
     "goto": "Open", "click": "Click", "fill": "Type into", "press": "Press", "select": "Choose in",
     "assert_text": "Check the text of", "assert_visible": "Check that it shows", "wait_for": "Wait for",
+    "assert_hidden": "Check that it's gone:", "assert_url": "Check the page address",
 }
 
 
@@ -122,6 +123,10 @@ def describe_step(step: EngineStep) -> str:
     verb = _STEP_VERBS.get(action, action.replace("_", " ").capitalize())
     if action == "goto":
         return f"{verb} {step.value or 'the page'}"
+    if action == "assert_url":
+        return f'{verb} contains "{(step.expected or "")[:80]}"'
+    if step.target and step.target.description.startswith("Check: "):
+        return step.target.description  # a check written for people ("Check: the cart shows a count")
     target = ""
     if step.target:
         # Generated assertions carry a placeholder description; the locator says more
@@ -277,11 +282,15 @@ class PlatformWorkflowOrchestrator:
                         act_raw = str(s.get("action", "navigate")).strip().lower()
                         if "assert" in act_raw or act_raw in ("element_visible", "element_not_visible", "element_contains_text"):
                             as_type = AssertionType.ELEMENT_VISIBLE
-                            if "text" in act_raw:
+                            if "url" in act_raw:
+                                as_type = AssertionType.URL_CONTAINS
+                            elif "text" in act_raw:
                                 as_type = AssertionType.ELEMENT_CONTAINS_TEXT
-                            elif "not" in act_raw:
+                            elif "not" in act_raw or "hidden" in act_raw:
                                 as_type = AssertionType.ELEMENT_NOT_VISIBLE
-                            m1_assertions.append(
+                            # A check belongs where it was written: right after the step
+                            # before it (an outcome check mid-scenario), not at the end
+                            (m1_steps[-1].assertions if m1_steps else m1_assertions).append(
                                 Assertion(
                                     type=as_type,
                                     target=s.get("target") or s.get("target_selector") or "",
