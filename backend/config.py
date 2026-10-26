@@ -171,6 +171,9 @@ class Settings(BaseSettings):
         default_factory=lambda: os.getenv("INGEST_GIT_HOSTS", "github.com,gitlab.com,bitbucket.org")
     )
     INGEST_ALLOW_LOCAL_PATHS: bool = Field(default_factory=lambda: _default_allow_local_paths())
+    # LLM Test Planner in the pipeline: "auto" (when LLM_PROVIDER is a real model), "on" or "off"
+    PIPELINE_AI_PLANNER: str = Field(default_factory=lambda: os.getenv("PIPELINE_AI_PLANNER", "auto").lower())
+    PIPELINE_AI_PLANNER_TIMEOUT: float = Field(default_factory=lambda: float(os.getenv("PIPELINE_AI_PLANNER_TIMEOUT", "120")))
     # Check pinned dependency versions against OSV.dev (sends package names and versions, never code)
     DEPENDENCY_SCAN: bool = Field(default_factory=lambda: os.getenv("DEPENDENCY_SCAN", "true").lower() in ("true", "1"))
 

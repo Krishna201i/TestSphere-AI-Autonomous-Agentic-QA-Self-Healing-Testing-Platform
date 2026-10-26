@@ -44,7 +44,7 @@ from backend.models import (
 )
 from backend.models.test_execution import TestExecutionStatus
 from backend.notify import notify_run
-from backend.pipeline import suite
+from backend.pipeline import ai_plan, suite
 from backend.services.security_service import record_audit
 from backend.services.test_case_service import TestCaseService
 from backend.services.test_execution_service import TestExecutionService
@@ -378,6 +378,8 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
                                 base_url=app_url, description="Created by the automated pipeline", owner_uid=owner)
 
     planned = suite.page_tests(analysis, project.get("prompt"))
+    extra, ai_note = await ai_plan.ai_tests(analysis, project.get("prompt"), (blueprint or {}).get("frameworks"))
+    planned += extra
     candidates = suite.candidate_pages(analysis, blueprint)
     codes = await _reachable([c["url"] for c in candidates]) if candidates else {}
     left_out = [f"{c['label']} ({codes[c['url']] or 'unreachable'})" for c in candidates
@@ -394,6 +396,9 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
                 db, application_id=application["id"], external_id=external_id, name=test["name"][:255],
                 description=description, category=test["category"], priority="normal", owner_uid=owner,
             )
+            if test["category"] == "ai":
+                # A model wrote it: it runs and reports, but cannot fail a run until someone un-quarantines it
+                row = db.update(TEST_CASES, row["id"], quarantined=True)
             created += 1
         elif row.get("description") != description or row.get("name") != test["name"][:255]:
             row = db.update(TEST_CASES, row["id"], name=test["name"][:255], description=description,
@@ -407,6 +412,8 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
         detail += f", {len(saved)} saved"
     if left_out:
         detail += f" · left out {len(left_out)} page(s) that did not load: " + ", ".join(left_out[:4])
+    if ai_note:
+        detail += f" · {ai_note}"
     return application, generated + saved, detail
 
 
