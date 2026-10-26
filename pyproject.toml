@@ -24,6 +24,9 @@ dependencies = [
     "sentry-sdk>=2.0,<3.0",
 ]
 
+[project.scripts]
+testsphere-mcp = "backend.mcp_server:main"
+
 [project.optional-dependencies]
 engine = [
     "playwright>=1.40,<2.0",
