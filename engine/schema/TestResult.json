@@ -274,6 +274,20 @@
       "description": "Root directory where all artifacts for this run were written",
       "title": "Artifacts Dir",
       "type": "string"
+    },
+    "visual": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Visual check of a passing run: current screenshot path and, against a baseline, the changed share of pixels and a diff image path",
+      "title": "Visual"
     }
   },
   "required": [

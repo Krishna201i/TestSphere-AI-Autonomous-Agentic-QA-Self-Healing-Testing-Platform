@@ -429,9 +429,11 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
     for idx, tc in enumerate(test_cases, start=1):
         state.stage("execute", "running", f"Running {idx} of {len(test_cases)}: {tc['name']}")
         execution = TestExecutionService.create_execution(db, test_case_id=tc["id"], owner_uid=owner)
+        visual = None
         try:
             res = await orch.execute_test_run(db=db, execution_id=execution["id"], options=RunOptions(headless=True))
             status, error = res.get("status", "FAILED"), res.get("error_message")
+            visual = res.get("visual")
         except StoreUnavailableError:
             raise
         except Exception as exc:
@@ -442,7 +444,8 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
             status == TestExecutionStatus.PASSED.value and str(error or "").startswith("Self-healed"))
         results.append({"test_case_id": tc["id"], "name": tc["name"], "category": tc.get("category"),
                         "execution_id": execution["id"], "status": status, "error": error, "healed": healed,
-                        "quarantined": bool(tc.get("quarantined"))})
+                        "quarantined": bool(tc.get("quarantined")),
+                        "visual_changed": bool((visual or {}).get("changed"))})
         state.save(tests=results)
     failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value and not r.get("quarantined"))
     state.stage("execute", "failed" if failed else "done",
@@ -522,10 +525,13 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
         "quarantined_failed": counts.get(TestExecutionStatus.FAILED.value, 0) - failed,
         "findings": dict(Counter(f["severity"] for f in (security or {}).get("findings", []))) if security else None,
         "previous_run_id": previous["id"] if previous else None,
+        "visual_changes": sum(1 for r in results if r.get("visual_changed")),
     }
     status = "failed" if failed else "passed"
     state.stage("report", "done", f"{summary['passed']}/{summary['total']} passed"
                                   + (f" · {len(regressions)} regression(s)" if regressions else "")
+                                  + (f" · {summary['visual_changes']} visual change(s) to review"
+                                     if summary["visual_changes"] else "")
                                   + (f" · compared with run #{previous['id']}" if previous else " · first run"))
     state.save(status=status, summary=summary, regressions=regressions, tests=results, finished_at=now_iso())
     _finish_project(db, project, state)
