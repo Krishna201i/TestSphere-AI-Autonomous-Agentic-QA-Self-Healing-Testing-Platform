@@ -171,6 +171,10 @@ def test_unknown_backend_is_reported() -> None:
     ("PermissionDenied: 403 Missing or insufficient permissions.", "lacks Firestore access"),
     ("RefreshError: invalid_grant: Invalid JWT Signature.", "rejected the credentials"),
     ("DeadlineExceeded: 504 Deadline Exceeded", "did not respond"),
+    ("ResourceExhausted: 429 Quota exceeded.", "daily quota"),
+    ("PermissionDenied: 403 The firestore.googleapis.com API requires a quota project, which is not set by default.",
+     "lacks Firestore access"),
+    ("PermissionDenied: 403 Cloud Firestore API has not been used in project 842917365012", "API is disabled"),
 ])
 def test_firestore_errors_are_explained(error: str, expected: str) -> None:
     assert expected in describe_firestore_error(Exception(error))
@@ -232,6 +236,16 @@ def test_concurrent_update_if_has_exactly_one_winner(store) -> None:
         t.join()
     assert len(wins) == 1
     assert store.get("projects", row["id"])["next_run_at"] == f"claimed-{wins[0]}"
+
+
+def test_find_at_most_reads_only_documents_at_or_below_the_value(store) -> None:
+    store.insert("projects", name="past", next_run_at="2026-01-01T00:00:00+00:00")
+    store.insert("projects", name="now", next_run_at="2026-01-02T00:00:00+00:00")
+    store.insert("projects", name="future", next_run_at="2026-01-03T00:00:00+00:00")
+    store.insert("projects", name="unscheduled")
+    store.insert("projects", name="cleared", next_run_at=None)
+    found = store.find_at_most("projects", "next_run_at", "2026-01-02T00:00:00+00:00")
+    assert sorted(p["name"] for p in found) == ["now", "past"]
 
 
 def test_count_matches_find(store) -> None:

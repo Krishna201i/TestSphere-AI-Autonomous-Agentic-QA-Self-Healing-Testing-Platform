@@ -35,9 +35,11 @@ def _parse(value: str | None) -> datetime | None:
 
 
 def due_projects(db: Store, now: datetime) -> list:
+    # Only projects whose next run time has passed are read: a tick every minute must not
+    # read every project (each read counts against the Firestore quota)
     return [
-        p for p in db.find(PROJECTS)
-        if p.get("schedule_minutes") and p.get("app_url")
+        p for p in db.find_at_most(PROJECTS, "next_run_at", now.isoformat())
+        if p.get("schedule_minutes")
         and (_parse(p.get("next_run_at")) or now) <= now
     ]
 
@@ -56,6 +58,9 @@ async def tick(db: Store | None = None, now: datetime | None = None) -> list[int
                                next_run_at=next_run_after(project["schedule_minutes"], now))
         if not claimed:
             logger.info("Project %s: slot already claimed by another scheduler", project["id"])
+            continue
+        if not project.get("app_url"):
+            # Nothing to run yet; the slot still moves forward so the project is not re-read every tick
             continue
         if active_run(db, project["id"]):
             logger.info("Project %s: previous run still active, skipping this slot", project["id"])

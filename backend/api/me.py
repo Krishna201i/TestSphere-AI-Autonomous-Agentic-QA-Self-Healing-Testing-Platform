@@ -68,7 +68,8 @@ def _profile(db: Store, user: User) -> Record:
 
 def _view(db: Store, user: User, row: Record) -> dict[str, Any]:
     owned = scope(user)
-    runs = db.find(PIPELINE_RUNS, order_by="id", descending=True, **owned)
+    # Counts are aggregations and the last run is one document: the history itself is not read
+    last = db.find(PIPELINE_RUNS, order_by="id", descending=True, limit=1, **owned)
     return {
         "uid": row["uid"],
         "email": row.get("email"),
@@ -81,11 +82,11 @@ def _view(db: Store, user: User, row: Record) -> dict[str, Any]:
         "member_since": row.get("created_at"),
         "last_login_at": row.get("last_login_at"),
         "stats": {
-            "projects": len(db.find(PROJECTS, **owned)),
-            "pipeline_runs": len(runs),
-            "test_executions": len(db.find(TEST_EXECUTIONS, **owned)),
-            "open_findings": len(db.find(SECURITY_FINDINGS, status="open", **owned)),
-            "last_run": {k: runs[0].get(k) for k in ("id", "status", "project_name", "finished_at")} if runs else None,
+            "projects": db.count(PROJECTS, **owned),
+            "pipeline_runs": db.count(PIPELINE_RUNS, **owned),
+            "test_executions": db.count(TEST_EXECUTIONS, **owned),
+            "open_findings": db.count(SECURITY_FINDINGS, status="open", **owned),
+            "last_run": {k: last[0].get(k) for k in ("id", "status", "project_name", "finished_at")} if last else None,
         },
     }
 

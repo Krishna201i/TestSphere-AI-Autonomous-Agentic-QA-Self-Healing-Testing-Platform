@@ -33,15 +33,55 @@ import {
 import { toDate } from '../lib/derive';
 
 const STORAGE_KEY = 'testsphere.workspace.v2';
-const HEALTH_INTERVAL_MS = 3000;
+const HEALTH_INTERVAL_MS = 5000;
 const HEALTH_SAMPLES = 40;
-const DATA_INTERVAL_MS = 15000;
+// Every list the dashboard reloads costs one database read per record (Firestore
+// bills them), so records refresh once a minute and only while the tab is visible
+const DATA_INTERVAL_MS = 60000;
 const RUNS_ACTIVE_MS = 2000;
+// While followed closely only the newest few are fetched (each record is a database read)
+const ACTIVE_FETCH = 5;
 const RUNS_LIMIT = 40;
 const ACTIVE_RUN = ['queued', 'running'];
 const ACTIVE_DEPLOY = ['queued', 'deploying', 'verifying', 'rolling_back'];
 const OPERATOR_KEY = 'testsphere.operator';
 export const DEFAULT_OPERATOR = 'dev_active';
+
+/**
+ * Run *fn* every *ms* while the page is visible. Polling stops while it is hidden; on return
+ * *fn* runs at once only if a full *ms* has passed since the last run (switching tabs back
+ * and forth must not reload everything each time), otherwise when the interval is up.
+ */
+function useVisibleInterval(fn, ms) {
+  useEffect(() => {
+    let last = 0;
+    let timer;
+    const tick = () => {
+      if (document.hidden) return;
+      last = Date.now();
+      fn();
+      timer = setTimeout(tick, ms);
+    };
+    const onShow = () => {
+      if (document.hidden) return;
+      clearTimeout(timer);
+      timer = setTimeout(tick, Math.max(0, last + ms - Date.now()));
+    };
+    tick();
+    document.addEventListener('visibilitychange', onShow);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onShow);
+    };
+  }, [fn, ms]);
+}
+
+/** *fresh* rows replace same-id rows in *prev*; newest (highest id) first, at most *limit*. */
+function mergeById(prev, fresh, limit) {
+  const byId = new Map((prev || []).map((r) => [r.id, r]));
+  fresh.forEach((r) => byId.set(r.id, r));
+  return [...byId.values()].sort((a, b) => b.id - a.id).slice(0, limit);
+}
 
 function loadOperator() {
   try {
@@ -117,19 +157,16 @@ export function WorkspaceProvider({ children }) {
   }, []);
 
   // ── Health pulse ────────────────────────────────────────────
+  const alive = useRef(true);
   useEffect(() => {
-    let alive = true;
-    async function tick() {
-      const sample = await probeHealth();
-      if (alive) setHealth((prev) => [...prev, { ...sample, t: Date.now() }].slice(-HEALTH_SAMPLES));
-    }
-    tick();
-    const id = setInterval(tick, HEALTH_INTERVAL_MS);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
+    alive.current = true; // StrictMode mounts twice: the first cleanup must not stick
+    return () => { alive.current = false; };
   }, []);
+  const healthTick = useCallback(async () => {
+    const sample = await probeHealth();
+    if (alive.current) setHealth((prev) => [...prev, { ...sample, t: Date.now() }].slice(-HEALTH_SAMPLES));
+  }, []);
+  useVisibleInterval(healthTick, HEALTH_INTERVAL_MS);
 
   // ── Backend records ─────────────────────────────────────────
   const refresh = useCallback(async () => {
@@ -148,29 +185,35 @@ export function WorkspaceProvider({ children }) {
     if (au) setServerAudit(au);
   }, []);
 
-  useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, DATA_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [refresh]);
+  useVisibleInterval(refresh, DATA_INTERVAL_MS);
 
   // ── Pipeline runs (Autopilot, the loop) ─────────────────────
   // Followed closely while one is queued or running, otherwise at the data pace
+  const runActive = Boolean(pipelineRuns?.some((r) => ACTIVE_RUN.includes(r.status)));
+  const runsRef = useRef(pipelineRuns);
+  runsRef.current = pipelineRuns;
   const refreshRuns = useCallback(async () => {
     try {
+      if (runActive) {
+        const runs = await getPipelineRuns(ACTIVE_FETCH);
+        if (!Array.isArray(runs)) return;
+        // An active run older than the newest few would never be seen to finish: reload the list
+        const fetched = new Set(runs.map((r) => r.id));
+        const missed = (runsRef.current || []).some((r) => ACTIVE_RUN.includes(r.status) && !fetched.has(r.id));
+        if (!missed) {
+          setPipelineRuns((prev) => mergeById(prev, runs, RUNS_LIMIT));
+          return;
+        }
+      }
       const runs = await getPipelineRuns(RUNS_LIMIT);
       if (Array.isArray(runs)) setPipelineRuns(runs);
     } catch {
       setPipelineRuns((prev) => prev || []);
     }
-  }, []);
-  const runActive = Boolean(pipelineRuns?.some((r) => ACTIVE_RUN.includes(r.status)));
-  useEffect(() => {
-    refreshRuns();
-    const id = setInterval(refreshRuns, runActive ? RUNS_ACTIVE_MS : DATA_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [refreshRuns, runActive]);
+  }, [runActive]);
+  useVisibleInterval(refreshRuns, runActive ? RUNS_ACTIVE_MS : DATA_INTERVAL_MS);
   // Deployments: followed every 2 seconds while one is in progress
+  const deployActive = deployments.some((d) => ACTIVE_DEPLOY.includes(d.status));
   const refreshDeployments = useCallback(async () => {
     try {
       const rows = await getDeployments(10);
@@ -179,12 +222,7 @@ export function WorkspaceProvider({ children }) {
       // older backend or outage: the loop shows deploy as not configured
     }
   }, []);
-  const deployActive = deployments.some((d) => ACTIVE_DEPLOY.includes(d.status));
-  useEffect(() => {
-    refreshDeployments();
-    const id = setInterval(refreshDeployments, deployActive ? RUNS_ACTIVE_MS : DATA_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [refreshDeployments, deployActive]);
+  useVisibleInterval(refreshDeployments, deployActive ? RUNS_ACTIVE_MS : DATA_INTERVAL_MS);
 
   // A run finishing changes executions, findings and projects too
   const wasActive = useRef(runActive);

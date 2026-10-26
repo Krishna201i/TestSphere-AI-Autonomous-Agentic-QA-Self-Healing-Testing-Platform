@@ -24,6 +24,7 @@ import copy
 import json
 import logging
 import os
+import re
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
@@ -93,6 +94,10 @@ class Store(ABC):
     @abstractmethod
     def find(self, collection: str, *, order_by: str | None = None, descending: bool = False,
              limit: int | None = None, **equals: Any) -> list[Record]: ...
+
+    @abstractmethod
+    def find_at_most(self, collection: str, field: str, value: Any) -> list[Record]:
+        """Documents whose *field* is set and <= *value* (documents without it are not read)."""
 
     @abstractmethod
     def _update(self, collection: str, doc_id: int, changes: dict) -> Record | None: ...
@@ -185,6 +190,11 @@ class MemoryStore(Store):
                     if all(d.get(k) == v for k, v in equals.items())]
         return _sort_and_limit(rows, order_by, descending, limit)
 
+    def find_at_most(self, collection, field, value):
+        with self._lock:
+            return [Record(copy.deepcopy(d)) for d in self._table(collection).values()
+                    if d.get(field) is not None and d[field] <= value]
+
     def _update(self, collection, doc_id, changes):
         with self._lock:
             doc = self._table(collection).get(_as_int(doc_id))
@@ -261,6 +271,13 @@ def describe_firestore_error(exc: BaseException) -> str:
     """Readable cause + fix for Firestore / credential failures."""
     text = f"{type(exc).__name__}: {exc}"
     lower = text.lower()
+    # 429 as a whole word: project numbers in other errors can contain those digits.  A bare "quota"
+    # is not enough: user ADC fails with a 403 saying the API "requires a quota project"
+    if (re.search(r"\b429\b", lower) or "resourceexhausted" in lower or "resource_exhausted" in lower
+            or "quota exceeded" in lower):
+        return ("Firestore's daily quota for this project is used up (the free Spark plan allows 50,000 reads a day). "
+                "It resets at midnight Pacific time; to keep working now, upgrade the Firebase project to the "
+                "Blaze plan. The credentials are fine.")
     if "defaultcredentialserror" in lower or "could not automatically determine credentials" in lower:
         return ("No Firebase credentials. Set FIREBASE_CREDENTIALS to the service-account JSON "
                 "(Firebase console → Project settings → Service accounts → Generate new private key).")
@@ -438,6 +455,15 @@ class FirestoreStore(Store):
                     self._warn_missing_index(collection, equals, order_by, exc)
             rows = [Record(s.to_dict()) for s in query.stream()]
             return _sort_and_limit(rows, order_by, descending, limit)
+        return self._call(run)
+
+    def find_at_most(self, collection, field, value):
+        def run():
+            from google.cloud.firestore_v1.base_query import FieldFilter
+
+            # Single-field range: served by Firestore's automatic index; only matches are read (and billed)
+            query = self._db.collection(collection).where(filter=FieldFilter(field, "<=", value))
+            return [Record(s.to_dict()) for s in query.stream()]
         return self._call(run)
 
     _warned_indexes: set = set()

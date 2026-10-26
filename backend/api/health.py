@@ -15,7 +15,7 @@ from backend.database.store import StoreUnavailableError
 
 router = APIRouter(tags=["Health"])
 
-_DB_CACHE_SECONDS = 10.0
+_DB_CACHE_SECONDS = 60.0  # each check is a database read
 _db_state: dict[str, object] = {"checked_at": 0.0, "ok": True, "error": None}
 
 

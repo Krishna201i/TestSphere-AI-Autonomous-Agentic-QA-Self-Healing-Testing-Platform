@@ -344,3 +344,11 @@ def test_github_webhook_rejects_bad_signatures_and_ignores_other_pushes(fresh_st
     assert "default branch" in deliver(client, project, push_payload(branch="feature")).json()["ignored"]
     assert "not this project" in deliver(client, project, push_payload(repo="https://github.com/other/repo")).json()["ignored"]
     assert no_background == []
+
+
+def test_scheduler_moves_slot_forward_for_projects_without_app_url(fresh_store, no_background):
+    past = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
+    project = fresh_store.insert(PROJECTS, name="no-url", schedule_minutes=30, next_run_at=past, app_url=None)
+    assert asyncio.run(scheduler.tick(fresh_store)) == []
+    assert fresh_store.get(PROJECTS, project["id"])["next_run_at"] > past
+    assert scheduler.due_projects(fresh_store, datetime.now(UTC)) == []

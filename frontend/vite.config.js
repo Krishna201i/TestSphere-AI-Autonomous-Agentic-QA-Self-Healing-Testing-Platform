@@ -16,6 +16,18 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Libraries in their own files: they change far less often than the
+        // app, so browsers keep them cached across deploys
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('/node_modules/firebase/') || id.includes('/node_modules/@firebase/')) return 'firebase';
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react';
+          return 'vendor';
+        },
+      },
+    },
   },
   test: {
     environment: 'jsdom',
