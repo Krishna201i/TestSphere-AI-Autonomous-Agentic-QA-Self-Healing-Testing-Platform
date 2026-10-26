@@ -44,8 +44,15 @@ def describe_url(url: str) -> str:
     """The URL without credentials, safe to show: ``postgresql://db.example:5432/shop``."""
     p = urlsplit(url)
     if p.scheme == "sqlite":
-        return f"sqlite:///{unquote(p.path.lstrip('/'))}"
+        return f"sqlite:///{sqlite_path(url)}"
     return f"{p.scheme}://{p.hostname or ''}{f':{p.port}' if p.port else ''}{p.path}"
+
+
+def sqlite_path(url: str) -> str:
+    """The file of a SQLite URL, as SQLAlchemy reads them: ``sqlite:///shop.db`` (relative),
+    ``sqlite:////srv/shop.db`` (absolute), ``sqlite:///C:/shop.db`` (Windows)."""
+    path = unquote(urlsplit(url).path)
+    return path[1:] if path.startswith("/") else path
 
 
 def check_url(url: str) -> str:
@@ -88,8 +95,7 @@ class Database:
     def __enter__(self) -> Database:
         try:
             if self.kind == "sqlite":
-                path = unquote(urlsplit(self.url).path)
-                path = path[1:] if re.match(r"^/[A-Za-z]:", path) else path  # sqlite:///C:/x.db on Windows
+                path = sqlite_path(self.url)
                 self._conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=STATEMENT_TIMEOUT_MS / 1000)
             else:
                 import psycopg
