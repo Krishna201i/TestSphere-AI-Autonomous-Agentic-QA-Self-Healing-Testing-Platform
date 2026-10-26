@@ -1,11 +1,14 @@
 /**
- * Integrations: connect GitHub with a fine-grained token so fix patches can
- * become pull requests and pushed commits get TestSphere's status.
+ * Integrations: connect GitHub so private repositories can be fetched, fix
+ * patches become pull requests and pushed commits get TestSphere's status.
+ * Signed-in users connect with a GitHub window; anyone can paste a
+ * fine-grained token (limited to chosen repositories) instead.
  */
 import React, { useEffect, useState } from 'react';
-import { ExternalLink, GitPullRequest, Unplug } from 'lucide-react';
+import { ExternalLink, GitPullRequest, Github, Unplug } from 'lucide-react';
 import { connectGitHub, disconnectGitHub, getIntegrations } from '../services/api';
 import { timeAgo } from '../lib/derive';
+import { authMessage, useAuth } from '../state/Auth';
 
 const NEW_TOKEN_URL = 'https://github.com/settings/personal-access-tokens/new';
 
@@ -14,6 +17,8 @@ export default function Integrations() {
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const { user, githubRepoToken } = useAuth();
+  const canUseWindow = Boolean(user && user.provider !== 'local');
 
   useEffect(() => {
     getIntegrations()
@@ -30,6 +35,20 @@ export default function Integrations() {
       setToken('');
     } catch (err) {
       setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function connectWithWindow() {
+    setBusy(true);
+    setError(null);
+    try {
+      const granted = await githubRepoToken();
+      if (!granted) throw new Error('GitHub did not return access. Try again, or paste a token below.');
+      setGithub(await connectGitHub(granted));
+    } catch (err) {
+      setError(err.code ? authMessage(err) : err.message);
     } finally {
       setBusy(false);
     }
@@ -66,8 +85,17 @@ export default function Integrations() {
       {github && !github.connected && (
         <>
           <p className="card-sub">
-            Connect GitHub to open pull requests from fix patches and show TestSphere's result on pushed commits.
+            Connect GitHub to test private repositories, open pull requests from fix patches and show TestSphere's
+            result on pushed commits.
           </p>
+          {canUseWindow && (
+            <>
+              <button type="button" className="btn btn-primary" onClick={connectWithWindow} disabled={busy}>
+                <Github size={16} aria-hidden="true" /> {busy ? 'Connecting…' : 'Connect with GitHub'}
+              </button>
+              <p className="hint m-0">GitHub asks you to allow access to your repositories. Prefer access to only some of them? Use a token instead:</p>
+            </>
+          )}
           <ol className="list small stack-sm">
             <li>
               <a href={NEW_TOKEN_URL} target="_blank" rel="noreferrer">Create a fine-grained token <ExternalLink size={12} className="icon-inline" /></a>{' '}

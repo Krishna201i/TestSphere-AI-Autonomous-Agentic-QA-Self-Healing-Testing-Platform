@@ -106,6 +106,9 @@ def test_every_page_meets_wcag_21_aa(server, browser, route, selector, scheme):
     assert [f"{v['id']} ({len(v['nodes'])}): {v['help']}" for v in violations] == []
 
 
+SHOTS = Path(os.environ["E2E_SHOTS"]) if os.getenv("E2E_SHOTS") else None
+
+
 def test_privacy_notice_is_reachable_before_sign_in(server, browser):
     page = browser.new_page(bypass_csp=True)
     errors: list[str] = []
@@ -126,6 +129,9 @@ def test_privacy_notice_is_reachable_before_sign_in(server, browser):
     assert page.get_by_role("link", name="dpo@example.org").count() == 1
     page.get_by_role("button", name="Back to sign in").click()
     page.get_by_role("button", name="Continue with Google").wait_for()
+    assert page.get_by_role("button", name="Continue with GitHub").count() == 1
+    if SHOTS:
+        page.screenshot(path=str(SHOTS / "sign-in.png"))
     assert errors == []
     page.close()
 

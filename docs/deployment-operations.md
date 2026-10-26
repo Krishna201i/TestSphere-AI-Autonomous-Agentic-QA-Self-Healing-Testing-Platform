@@ -126,6 +126,13 @@ stored encrypted, sent as an `Authorization` header scoped to that one host (nev
 or error messages, and not after a redirect to another host), and used only for its owner's projects.
 A GitHub token needs *Contents: Read* on the repository to clone it.
 
+**GitHub sign-in.** With the GitHub provider enabled in Firebase (Authentication → Sign-in method → GitHub, using
+a GitHub OAuth App whose callback URL is `https://<project>.firebaseapp.com/__/auth/handler`), the sign-in page
+offers *Continue with GitHub*. Sign-in asks GitHub only for the user's identity. Repository access is separate:
+**Connect with GitHub** in Profile → Integrations opens a GitHub window asking for the `repo` scope, links GitHub
+to the account (or re-confirms it), and stores the token like a pasted one. Users who want access to only some
+repositories can paste a fine-grained token instead. An email that already has an account with Google or a
+password must sign in that way first; Firebase does not merge accounts by itself.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |

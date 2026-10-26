@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckCircle2, LogIn, RefreshCw, ShieldCheck, Stethoscope, UserPlus, Wand2 } from 'lucide-react';
+import { CheckCircle2, Github, LogIn, RefreshCw, ShieldCheck, Stethoscope, UserPlus, Wand2 } from 'lucide-react';
 import { authMessage, useAuth } from '../state/Auth';
 import { Logo } from '../components/TopNav';
 import { API_BASE_LABEL } from '../services/api';
@@ -129,7 +129,7 @@ const HEADINGS = {
 };
 
 function Login() {
-  const { signIn, signUp, signInWithGoogle, resetPassword, notice: sessionNotice, clearNotice } = useAuth();
+  const { signIn, signUp, signInWithGoogle, signInWithGitHub, resetPassword, notice: sessionNotice, clearNotice } = useAuth();
   const [mode, setMode] = useState('signin'); // signin | signup | reset
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [busy, setBusy] = useState(false);
@@ -183,6 +183,9 @@ function Login() {
         <>
           <button type="button" className="btn btn-block" disabled={busy} onClick={() => attempt(signInWithGoogle)}>
             <GoogleMark /> Continue with Google
+          </button>
+          <button type="button" className="btn btn-block" disabled={busy} onClick={() => attempt(signInWithGitHub)}>
+            <Github size={18} aria-hidden="true" /> Continue with GitHub
           </button>
           <div className="auth-or"><span>or with email</span></div>
         </>
