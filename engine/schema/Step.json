@@ -8,10 +8,13 @@
         "fill",
         "press",
         "select",
+        "check",
+        "uncheck",
         "assert_text",
         "assert_visible",
         "assert_hidden",
         "assert_url",
+        "assert_value",
         "wait_for"
       ],
       "title": "ActionType",
@@ -285,8 +288,14 @@
         }
       ],
       "default": null,
-      "description": "Expected value for assert_* actions",
+      "description": "Expected value for assert_* actions; for goto, the HTTP status the page must answer with",
       "title": "Expected"
+    },
+    "exact": {
+      "default": false,
+      "description": "assert_text / assert_url: the whole text or URL must equal expected (default: contains it)",
+      "title": "Exact",
+      "type": "boolean"
     },
     "timeout_ms": {
       "default": 5000,

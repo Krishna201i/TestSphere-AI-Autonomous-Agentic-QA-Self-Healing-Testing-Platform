@@ -46,10 +46,13 @@ class ActionType(str, Enum):
     FILL = "fill"
     PRESS = "press"
     SELECT = "select"
+    CHECK = "check"
+    UNCHECK = "uncheck"
     ASSERT_TEXT = "assert_text"
     ASSERT_VISIBLE = "assert_visible"
     ASSERT_HIDDEN = "assert_hidden"
     ASSERT_URL = "assert_url"
+    ASSERT_VALUE = "assert_value"
     WAIT_FOR = "wait_for"
 
 
@@ -169,7 +172,11 @@ class Step(BaseModel):
     )
     expected: str | None = Field(
         None,
-        description="Expected value for assert_* actions",
+        description="Expected value for assert_* actions; for goto, the HTTP status the page must answer with",
+    )
+    exact: bool = Field(
+        False,
+        description="assert_text / assert_url: the whole text or URL must equal expected (default: contains it)",
     )
     timeout_ms: int = Field(
         5_000,
@@ -361,6 +368,10 @@ class StepResult(BaseModel):
     dom_snapshot_path: str | None = Field(
         None,
         description="Absolute path to saved HTML DOM snapshot",
+    )
+    page_url: str | None = Field(
+        None,
+        description="URL of the page when the step ended (where its element was, or was missing)",
     )
     console_logs: list[str] = Field(
         default_factory=list,

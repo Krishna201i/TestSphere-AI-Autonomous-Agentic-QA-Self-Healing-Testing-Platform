@@ -29,6 +29,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -46,7 +47,7 @@ except ImportError:
     PLAYWRIGHT_INSTALLED = False
 
 from . import visual as visual_diff
-from .artifacts import write_dom_snapshot, write_screenshot
+from .artifacts import safe_segment, write_dom_snapshot, write_screenshot
 from .browser import BrowserSession
 from .detector import build_fingerprint
 from .healer import attempt_healing as _attempt_healing
@@ -106,7 +107,9 @@ async def run_test(
     wall_start = time.monotonic()
 
     step_results: list[StepResult] = []
-    artifacts_dir = str(Path(config.artifacts_dir) / plan.test_id)
+    # One directory per run: concurrent runs of the same test never share (and
+    # wipe) each other's evidence, and the test id cannot point outside it
+    artifacts_dir = str(Path(config.artifacts_dir) / f"{safe_segment(plan.test_id)}-{uuid.uuid4().hex[:12]}")
     visual_result: dict | None = None
 
     try:
@@ -225,6 +228,7 @@ async def _execute_step(
             locator_used=locator_used,
             console_logs=console_logs,
             network_errors=network_errors,
+            page_url=_page_url(page),
         )
 
     except (PlaywrightTimeoutError, PlaywrightError, AssertionError, ValueError) as exc:
@@ -259,6 +263,7 @@ async def _execute_step(
                     dom_snapshot_path=dom_snapshot_path,
                     console_logs=console_logs,
                     network_errors=network_errors,
+                    page_url=_page_url(page),
                 )
             except Exception as retry_exc:  # noqa: BLE001 - the engine reports failures in its result and never raises
                 error_msg = f"Healing failed on retry: {retry_exc}"
@@ -277,6 +282,7 @@ async def _execute_step(
             dom_snapshot_path=dom_snapshot_path,
             console_logs=console_logs,
             network_errors=network_errors,
+            page_url=_page_url(page),
         )
 
     finally:
@@ -313,9 +319,10 @@ async def _perform_action(page: Page, step: Step, config: EngineConfig) -> str |
         url = _require_value(step, "goto")
         nav_timeout = max(timeout or 15000, 15000)
         try:
-            await page.goto(url, timeout=nav_timeout, wait_until="domcontentloaded")
+            response = await page.goto(url, timeout=nav_timeout, wait_until="domcontentloaded")
         except Exception:  # noqa: BLE001 - any failure: retry with the looser "commit" wait
-            await page.goto(url, timeout=nav_timeout, wait_until="commit")
+            response = await page.goto(url, timeout=nav_timeout, wait_until="commit")
+        _check_status(step, url, response)
         # Act like a person: wait for the page to finish loading.  Acting while
         # its own requests are in flight loses races a user never sees (a login
         # whose session cookie a late analytics response overwrites).
@@ -326,7 +333,12 @@ async def _perform_action(page: Page, step: Step, config: EngineConfig) -> str |
 
     # ---- element-less wait --------------------------------------------
     if action == ActionType.WAIT_FOR:
-        value = step.value or ""
+        value = (step.value or "").strip()
+        if not value:
+            # A plain "wait": let the page settle (its requests finish)
+            with contextlib.suppress(PlaywrightTimeoutError, PlaywrightError):
+                await page.wait_for_load_state("networkidle", timeout=min(timeout or 5000, 5000))
+            return None
         try:
             ms = int(value)
             await page.wait_for_timeout(ms)
@@ -339,10 +351,17 @@ async def _perform_action(page: Page, step: Step, config: EngineConfig) -> str |
     if action == ActionType.ASSERT_URL:
         expected = step.expected or step.value or ""
         deadline = time.monotonic() + max(timeout or 5000, 1000) / 1000
-        while expected.lower() not in page.url.lower():
+        while not _url_matches(page.url, expected, step.exact):
             if time.monotonic() >= deadline:
+                if step.exact:
+                    raise AssertionError(f"assert_url failed: expected {expected!r}, got {page.url!r}")
                 raise AssertionError(f"assert_url failed: expected {expected!r} in {page.url!r}")
             await page.wait_for_timeout(200)
+        return None
+
+    # ---- key press on the page (no element) -----------------------------
+    if action == ActionType.PRESS and step.target is None:
+        await page.keyboard.press(_require_value(step, "press"))
         return None
 
     # ---- element actions: all need a locator --------------------------
@@ -377,12 +396,28 @@ async def _perform_action_with_locator(
         value = _require_value(step, "select")
         await loc.select_option(value, timeout=timeout)
 
+    elif action == ActionType.CHECK:
+        await loc.check(timeout=timeout)
+
+    elif action == ActionType.UNCHECK:
+        await loc.uncheck(timeout=timeout)
+
     elif action == ActionType.ASSERT_TEXT:
         expected = step.expected or ""
         actual = (await loc.inner_text(timeout=timeout)).strip()
-        assert expected.casefold() in actual.casefold(), (
-            f"assert_text failed: expected {expected!r} in {actual!r}"
-        )
+        if step.exact:
+            assert " ".join(actual.split()) == " ".join(expected.split()), (
+                f"assert_text failed: expected exactly {expected!r}, got {actual!r}"
+            )
+        else:
+            assert expected.casefold() in actual.casefold(), (
+                f"assert_text failed: expected {expected!r} in {actual!r}"
+            )
+
+    elif action == ActionType.ASSERT_VALUE:
+        expected = step.expected or ""
+        actual = await loc.input_value(timeout=timeout)
+        assert actual == expected, f"assert_value failed: expected {expected!r}, got {actual!r}"
 
     elif action == ActionType.ASSERT_VISIBLE:
         await loc.wait_for(state="visible", timeout=timeout)
@@ -422,6 +457,37 @@ def _require_locator(step: Step) -> str:
             f"Step {step.step_id!r}: action {step.action!r} requires a target"
         )
     return step.target.primary_locator
+
+
+def _check_status(step: Step, url: str, response: object) -> None:
+    """Fail a navigation whose page answered with an error status.
+
+    ``step.expected`` may name the status the page must answer with (e.g.
+    ``"404"`` for a not-found page); otherwise any 4xx/5xx fails.  A failed
+    check is an ``AssertionError``: the page is wrong, not a locator.
+    """
+    status = getattr(response, "status", None)
+    if not isinstance(status, int):
+        return  # same-document navigation or no response (e.g. about:blank)
+    wanted = (step.expected or "").strip()
+    if wanted.isdigit():
+        assert status == int(wanted), f"goto {url!r}: expected HTTP {wanted}, got {status}"
+    else:
+        assert status < 400, f"goto {url!r}: the page answered HTTP {status}"
+
+
+def _url_matches(actual: str, expected: str, exact: bool) -> bool:
+    if exact:
+        return actual.rstrip("/") == expected.rstrip("/")
+    return expected.lower() in actual.lower()
+
+
+def _page_url(page: Page) -> str | None:
+    """The page's current URL, or ``None`` if it cannot be read (closed page)."""
+    try:
+        return page.url or None
+    except Exception:  # noqa: BLE001 - informational only
+        return None
 
 
 def _elapsed_ms(start: float) -> int:
