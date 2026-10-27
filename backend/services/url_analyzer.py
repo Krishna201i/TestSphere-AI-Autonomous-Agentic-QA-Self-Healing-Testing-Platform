@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import httpx
 
 from backend.netguard import guard_request
+from backend.services import goal_plan
 
 logger = logging.getLogger("testsphere.analyzer")
 
@@ -149,7 +150,7 @@ class URLAnalyzerService:
         )
 
         # Synthesize real, customized test steps for this specific site
-        synthesized_steps = cls._synthesize_test_steps(
+        synthesized_steps, goal_coverage = cls._plan_scenario(
             url=normalized_url,
             page_title=page_title,
             inputs=inputs,
@@ -205,6 +206,7 @@ class URLAnalyzerService:
                 "name": resolved_name,
                 "url": normalized_url,
                 "steps": synthesized_steps,
+                "goal": goal_coverage,
             },
             "events": events,
             "error": error_encountered,
@@ -504,14 +506,20 @@ class URLAnalyzerService:
         return values
 
     @classmethod
-    def _synthesize_test_steps(
+    def _synthesize_test_steps(cls, url: str, page_title: str, inputs: list[dict[str, Any]],
+                               buttons: list[dict[str, Any]], prompt: str | None = None) -> list[dict[str, Any]]:
+        return cls._plan_scenario(url, page_title, inputs, buttons, prompt)[0]
+
+    @classmethod
+    def _plan_scenario(
         cls,
         url: str,
         page_title: str,
         inputs: list[dict[str, Any]],
         buttons: list[dict[str, Any]],
         prompt: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+        """Steps for the page's form and the written goal, and which parts of the goal they test."""
         steps = []
         step_num = 1
 
@@ -533,7 +541,10 @@ class URLAnalyzerService:
         # Check if user prompt mentions login or credentials
         p_lower = (prompt or "").lower()
         given = cls.prompt_values(prompt)
-        if inputs:
+        parts = goal_plan.split_goal(prompt)
+        use_form = not parts or goal_plan.is_form_part(parts[0], given) \
+            or not goal_plan.later_part_steps(0, parts[0], given)
+        if inputs and use_form:
             for inp in inputs[:4]:  # the first few real inputs
                 itype = inp.get("type", "text")
                 iname = (inp.get("name") or "").lower()
@@ -565,7 +576,9 @@ class URLAnalyzerService:
                 step_num += 1
 
         # Step 4: Buttons Click / Assertion (if discovered)
-        primary_btn = cls._primary_button(buttons, bool(inputs))
+        primary_btn = cls._primary_button(buttons, bool(inputs)) if use_form else None
+        goal_steps, coverage = goal_plan.plan_goal(
+            prompt, inputs, given, form_used=use_form and bool(inputs or primary_btn), first_step=0)
         if primary_btn:
             steps.append({
                 "step_number": step_num,
@@ -575,17 +588,18 @@ class URLAnalyzerService:
                 "description": f"the '{primary_btn['text']}' button",
             })
             step_num += 1
-        elif any(st["action"] == "FILL" for st in steps):
+        elif any(st["action"] == "FILL" for st in steps) or goal_steps:
             # No button: forms like a to-do entry submit on Enter
-            last_filled = [st for st in steps if st["action"] == "FILL"][-1]
-            steps.append({
-                "step_number": step_num,
-                "action": "PRESS",
-                "target": last_filled["target"],
-                "value": "Enter",
-                "description": last_filled["description"],
-            })
-            step_num += 1
+            filled = [st for st in steps if st["action"] == "FILL"]
+            if filled:
+                steps.append({
+                    "step_number": step_num,
+                    "action": "PRESS",
+                    "target": filled[-1]["target"],
+                    "value": "Enter",
+                    "description": filled[-1]["description"],
+                })
+                step_num += 1
         else:
             # Fallback assertion on page container
             steps.append({
@@ -597,7 +611,11 @@ class URLAnalyzerService:
             })
             step_num += 1
 
-        return steps
+        # What the goal expects after that: outcome checks and its later parts
+        for st in goal_steps:
+            steps.append({**st, "step_number": step_num})
+            step_num += 1
+        return steps, coverage
 
     # -------------------------------------------------------------------------
     # Telemetry Log Synthesizer

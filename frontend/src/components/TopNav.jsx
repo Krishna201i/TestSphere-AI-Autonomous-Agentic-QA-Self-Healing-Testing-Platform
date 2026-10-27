@@ -136,14 +136,16 @@ export default function TopNav({ page, onNavigate }) {
               {system ? (
                 <>
                   <dt>Version</dt><dd>{system.commit || 'unknown'} · API v{system.api_version}</dd>
-                  <dt>Environment</dt><dd>{system.environment} · {system.database}</dd>
-                  <dt>AI model</dt><dd>{system.llm.provider} / {system.llm.model}{system.llm.provider === 'mock' && <span className="muted"> (offline, scripted)</span>}</dd>
-                  <dt>Scan scope</dt><dd>{system.scan_scope.join(', ')}</dd>
-                  <dt>Ingestion</dt><dd>{system.ingestion.git_hosts.join(', ')}{system.ingestion.local_paths ? ' · local folders' : ''}</dd>
-                  <dt>Memory</dt><dd>{system.memory_backend}</dd>
+                  {system.environment && <><dt>Environment</dt><dd>{system.environment} · {system.database}</dd></>}
+                  {system.llm && <><dt>AI model</dt><dd>{system.llm.provider} / {system.llm.model}{system.llm.provider === 'mock' && <span className="muted"> (offline, scripted)</span>}</dd></>}
+                  {system.scan_scope && <><dt>Scan scope</dt><dd>{system.scan_scope.join(', ')}</dd></>}
+                  {system.ingestion && <><dt>Ingestion</dt><dd>{(system.ingestion.git_hosts || []).join(', ')}{system.ingestion.local_paths ? ' · local folders' : ''}</dd></>}
+                  {system.memory_backend && <><dt>Memory</dt><dd>{system.memory_backend}</dd></>}
                 </>
-              ) : (
+              ) : system === false ? (
                 <><dt>Version</dt><dd className="bad-text">This backend has no /api/system, so it is running older code.</dd></>
+              ) : (
+                <><dt>Version</dt><dd className="muted">Not loaded yet</dd></>
               )}
             </dl>
           </Popover>

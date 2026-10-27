@@ -230,7 +230,10 @@ class LLMTestPlanner(TestPlannerAgent):
         """Parse a raw JSON dict into a TestPlan.
 
         Handles the conversion from the LLM's raw JSON output
-        to a validated ``TestPlan`` Pydantic model.
+        to a validated ``TestPlan`` Pydantic model.  Field spellings the
+        model commonly varies (``"high"`` for ``HIGH``) are normalized
+        first; a test case that still does not validate (e.g. an action
+        outside the vocabulary) is dropped and logged, never the whole plan.
 
         Parameters
         ----------
@@ -247,14 +250,37 @@ class LLMTestPlanner(TestPlannerAgent):
         TestPlanValidationError
             If the response cannot be parsed into a valid TestPlan.
         """
+        import copy
+
+        from agents.planner.structured_output import StructuredOutputProcessor
+
+        if not isinstance(data, dict):
+            raise TestPlanValidationError("LLM response is not a JSON object", field="response")
+        data = StructuredOutputProcessor.coerce_fields(copy.deepcopy(data))
+        raw_cases = data.get("test_cases") or []
+        if not isinstance(raw_cases, list):
+            raise TestPlanValidationError("'test_cases' is not a list", field="test_cases")
+
+        cases: list[TestCase] = []
+        for idx, raw in enumerate(raw_cases):
+            try:
+                cases.append(TestCase.model_validate(raw))
+            except Exception as exc:  # noqa: BLE001 - one bad case never loses the others
+                case_id = raw.get("test_id") if isinstance(raw, dict) else None
+                logger.warning("LLMTestPlanner: dropping unparseable test case %s (index %d): %s",
+                               case_id or "?", idx, str(exc).splitlines()[0] if str(exc) else exc)
+        if raw_cases and not cases:
+            raise TestPlanValidationError(
+                f"None of the {len(raw_cases)} test case(s) in the LLM response could be parsed",
+                field="test_cases",
+            )
         try:
-            plan = TestPlan.model_validate(data)
+            return TestPlan.model_validate({**data, "test_cases": []}).model_copy(update={"test_cases": cases})
         except Exception as exc:
             raise TestPlanValidationError(
                 f"Failed to parse LLM response into TestPlan: {exc}",
                 field="response",
             ) from exc
-        return plan
 
     # ── Duplicate Detection ───────────────────────────────────
 

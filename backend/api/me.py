@@ -14,11 +14,22 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from backend.artifacts import delete_owner_artifacts
-from backend.auth import User, get_current_user, scope
+from backend.auth import (
+    API_TOKEN_PREFIX,
+    User,
+    ensure_owned,
+    get_current_user,
+    hash_api_token,
+    new_api_token,
+    remember_display_name,
+    scope,
+)
 from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Record, Store, now_iso
 from backend.models import (
+    AGENT_MEMORY,
+    API_TOKENS,
     APPLICATIONS,
     AUDIT_EVENTS,
     BLUEPRINTS,
@@ -39,13 +50,20 @@ router = APIRouter(prefix="/me", tags=["Profile"])
 
 # Every collection whose documents carry owner_uid
 OWNED_COLLECTIONS = (PROJECTS, APPLICATIONS, TEST_CASES, TEST_EXECUTIONS, SECURITY_FINDINGS,
-                     AUDIT_EVENTS, BLUEPRINTS, PIPELINE_RUNS, FIX_PATCHES, DEPLOYMENTS, INTEGRATIONS)
+                     AUDIT_EVENTS, BLUEPRINTS, PIPELINE_RUNS, FIX_PATCHES, DEPLOYMENTS, INTEGRATIONS,
+                     AGENT_MEMORY, API_TOKENS)
+
+MAX_API_TOKENS = 10
 
 
 class ProfileUpdate(BaseModel):
     display_name: str | None = Field(None, max_length=80)
     organization: str | None = Field(None, max_length=120)
     job_title: str | None = Field(None, max_length=80)
+
+
+class ApiTokenCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=60, description="What uses it, e.g. 'Claude Code MCP'")
 
 
 class AccountDeletion(BaseModel):
@@ -68,7 +86,8 @@ def _profile(db: Store, user: User) -> Record:
 
 def _view(db: Store, user: User, row: Record) -> dict[str, Any]:
     owned = scope(user)
-    runs = db.find(PIPELINE_RUNS, order_by="id", descending=True, **owned)
+    # Counts are aggregations and the last run is one document: the history itself is not read
+    last = db.find(PIPELINE_RUNS, order_by="id", descending=True, limit=1, **owned)
     return {
         "uid": row["uid"],
         "email": row.get("email"),
@@ -81,11 +100,11 @@ def _view(db: Store, user: User, row: Record) -> dict[str, Any]:
         "member_since": row.get("created_at"),
         "last_login_at": row.get("last_login_at"),
         "stats": {
-            "projects": len(db.find(PROJECTS, **owned)),
-            "pipeline_runs": len(runs),
-            "test_executions": len(db.find(TEST_EXECUTIONS, **owned)),
-            "open_findings": len(db.find(SECURITY_FINDINGS, status="open", **owned)),
-            "last_run": {k: runs[0].get(k) for k in ("id", "status", "project_name", "finished_at")} if runs else None,
+            "projects": db.count(PROJECTS, **owned),
+            "pipeline_runs": db.count(PIPELINE_RUNS, **owned),
+            "test_executions": db.count(TEST_EXECUTIONS, **owned),
+            "open_findings": db.count(SECURITY_FINDINGS, status="open", **owned),
+            "last_run": {k: last[0].get(k) for k in ("id", "status", "project_name", "finished_at")} if last else None,
         },
     }
 
@@ -110,7 +129,50 @@ def update_me(payload: ProfileUpdate, db: Store = Depends(get_db), user: User = 
     changes = {k: (v.strip() or None) for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
     if changes:
         row = db.update(USERS, row["id"], **changes)
+    remember_display_name(user.uid, row.get("display_name"))  # approvals, scans and runs show it from now on
     return _view(db, user, row)
+
+
+# ── API tokens (for agents such as the MCP server) ────────────────────────
+
+
+def _token_view(row: Record) -> dict[str, Any]:
+    return {"id": row["id"], "name": row.get("name"), "prefix": row.get("prefix"),
+            "created_at": row.get("created_at"), "last_used_at": row.get("last_used_at")}
+
+
+def _require_account(user: User) -> None:
+    if user.local:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Sign-in is off on this server, so no token is needed: agents connect as you.")
+
+
+@router.get("/tokens")
+def list_api_tokens(db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict[str, Any]]:
+    _require_account(user)
+    # At most MAX_API_TOKENS rows: sorted here, so Firestore needs no composite index
+    return [_token_view(r) for r in sorted(db.find(API_TOKENS, owner_uid=user.uid), key=lambda r: r["id"])]
+
+
+@router.post("/tokens", status_code=status.HTTP_201_CREATED)
+def create_api_token(payload: ApiTokenCreate, db: Store = Depends(get_db),
+                     user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """A token that acts as you until revoked; shown only in this response."""
+    _require_account(user)
+    if db.count(API_TOKENS, owner_uid=user.uid) >= MAX_API_TOKENS:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail=f"You already have {MAX_API_TOKENS} tokens. Revoke one you no longer use.")
+    token = new_api_token()
+    row = db.insert(API_TOKENS, owner_uid=user.uid, name=payload.name.strip(), token_hash=hash_api_token(token),
+                    prefix=token[:len(API_TOKEN_PREFIX) + 6], last_used_at=None)
+    return {**_token_view(row), "token": token}
+
+
+@router.delete("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_api_token(token_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    _require_account(user)
+    ensure_owned(user, db.get(API_TOKENS, token_id), "Token")
+    db.delete(API_TOKENS, token_id)
 
 
 def _delete_sign_in_account(uid: str) -> bool:
@@ -139,6 +201,10 @@ def delete_me(payload: AccountDeletion, db: Store = Depends(get_db),
                             detail="Sign-in is off on this server, so there is no personal account to delete.")
     deleted = {name: len(db.delete_where(name, owner_uid=user.uid)) for name in OWNED_COLLECTIONS}
     deleted[USERS] = len(db.delete_where(USERS, uid=user.uid))
+    if deleted[AGENT_MEMORY]:
+        from backend.orchestration.orchestrator import forget_healing_memory
+
+        forget_healing_memory()  # the running healer's copy of the erased records
     deleted["artifacts"] = delete_owner_artifacts(user.uid)
     sign_in_deleted = _delete_sign_in_account(user.uid)
     logger.info("Account %s erased: %s documents, sign-in account %s",

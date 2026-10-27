@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useWorkspace } from '../state/Workspace';
 import { executionStats, pct, retestStats, timeAgo } from '../lib/derive';
 import { HealthBox, ResultTiles } from '../components/ValidationCard';
@@ -9,7 +9,14 @@ export default function ValidationEngine({ onNavigate }) {
   const ex = executionStats(executions, executionTotals);
   const rt = retestStats(retests);
   const nameOf = (id) => testCases.find((t) => t.id === id)?.name || `Test case #${id}`;
-  const approvedOrTested = findings.filter((f) => retests[f.key]);
+  // Approved fixes are listed before their first retest, so they can get one
+  const approvedOrTested = findings.filter((f) => f.approved_by || retests[f.key]);
+  const [retestErrors, setRetestErrors] = useState({});
+
+  function onRetest(f) {
+    setRetestErrors((prev) => ({ ...prev, [f.key]: null }));
+    retest(f).catch((err) => setRetestErrors((prev) => ({ ...prev, [f.key]: err.message })));
+  }
 
   return (
     <div className="page">
@@ -43,7 +50,7 @@ export default function ValidationEngine({ onNavigate }) {
         <div className="card-head"><h3>Security retests</h3><span className="muted small">{rt.total}</span></div>
         {approvedOrTested.length === 0 ? (
           <div className="empty">
-            <span className="empty-title">No retests yet</span>
+            <span className="empty-title">No approved fixes yet</span>
             Approve a fix in Remediation, apply it on your app, then retest it here.
             <button type="button" className="btn btn-sm" onClick={() => onNavigate('remediation')}>Open Remediation</button>
           </div>
@@ -55,12 +62,17 @@ export default function ValidationEngine({ onNavigate }) {
                 {approvedOrTested.map((f) => (
                   <tr key={f.key}>
                     <td className="cell-wrap">{f.title}<div className="mono small muted">{f.check_id} · {f.component}</div></td>
-                    <td><span className={`status ${retests[f.key].result}`}>{retests[f.key].result}</span></td>
-                    <td className="small muted">{timeAgo(retests[f.key].at)}</td>
+                    <td>
+                      {retests[f.key]
+                        ? <span className={`status ${retests[f.key].result}`}>{retests[f.key].result}</span>
+                        : <span className="muted small">not retested yet</span>}
+                    </td>
+                    <td className="small muted">{retests[f.key] ? timeAgo(retests[f.key].at) : `approved ${timeAgo(f.approved_at)}`}</td>
                     <td className="text-right">
-                      <button type="button" className="btn btn-sm" disabled={retesting === f.key} onClick={() => retest(f).catch(() => {})}>
+                      <button type="button" className="btn btn-sm" disabled={retesting === f.key} onClick={() => onRetest(f)}>
                         {retesting === f.key ? 'Retesting…' : 'Retest'}
                       </button>
+                      {retestErrors[f.key] && <div className="bad-text small cell-wrap" role="alert">{retestErrors[f.key]}</div>}
                     </td>
                   </tr>
                 ))}

@@ -46,8 +46,13 @@ class ActionType(str, Enum):
     FILL = "fill"
     PRESS = "press"
     SELECT = "select"
+    CHECK = "check"
+    UNCHECK = "uncheck"
     ASSERT_TEXT = "assert_text"
     ASSERT_VISIBLE = "assert_visible"
+    ASSERT_HIDDEN = "assert_hidden"
+    ASSERT_URL = "assert_url"
+    ASSERT_VALUE = "assert_value"
     WAIT_FOR = "wait_for"
 
 
@@ -167,7 +172,11 @@ class Step(BaseModel):
     )
     expected: str | None = Field(
         None,
-        description="Expected value for assert_* actions",
+        description="Expected value for assert_* actions; for goto, the HTTP status the page must answer with",
+    )
+    exact: bool = Field(
+        False,
+        description="assert_text / assert_url: the whole text or URL must equal expected (default: contains it)",
     )
     timeout_ms: int = Field(
         5_000,
@@ -360,6 +369,10 @@ class StepResult(BaseModel):
         None,
         description="Absolute path to saved HTML DOM snapshot",
     )
+    page_url: str | None = Field(
+        None,
+        description="URL of the page when the step ended (where its element was, or was missing)",
+    )
     console_logs: list[str] = Field(
         default_factory=list,
         description="Browser console messages collected during this step",
@@ -381,6 +394,11 @@ class TestResult(BaseModel):
     artifacts_dir: str = Field(
         ...,
         description="Root directory where all artifacts for this run were written",
+    )
+    visual: dict[str, Any] | None = Field(
+        None,
+        description="Visual check of a passing run: current screenshot path and, against a baseline, "
+                    "the changed share of pixels and a diff image path",
     )
 
     @property

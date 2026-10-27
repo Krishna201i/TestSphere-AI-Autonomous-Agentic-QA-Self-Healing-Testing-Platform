@@ -40,6 +40,16 @@ All settings can be configured via environment variables or a `.env` file at rep
 
 Firebase console setup for sign-in: **Authentication → Get started**, enable **Email/Password** (and **Google** if wanted)
 under *Sign-in method*, and add the dashboard's domain under *Settings → Authorized domains*.
+
+**Dashboard hosted apart from the API (e.g. Vercel + Render).** Build the dashboard with `VITE_API_URL` set to the
+backend's URL (e.g. `https://your-api.onrender.com`; in Vercel: Project → Settings → Environment Variables, then
+redeploy), and set `CORS_ORIGINS` on the backend to the dashboard's origin. Without `VITE_API_URL` the dashboard
+calls its own host, which answers with the app's HTML page; the dashboard then says so instead of failing to parse
+it. For a local build, `VITE_API_URL` is read from the `.env` at the repository root. Google and GitHub sign-in use a
+pop-up; when the browser blocks it, the dashboard asks the user to allow pop-ups. The redirect fallback is only used
+when `FIREBASE_AUTH_DOMAIN` is the dashboard's own domain (with `/__/auth/*` proxied to
+`<project>.firebaseapp.com`, as in Firebase's *redirect best practices*), because browsers that partition
+third-party storage return from a redirect to another domain signed out.
 GitHub push webhooks are per project: the Automation page shows each project's payload URL and secret.
 
 ### 2.2 AI Agent Settings
@@ -117,6 +127,22 @@ The token is checked with GitHub, encrypted with `TOKEN_ENCRYPTION_KEY` and neve
 Then **Open pull request** on a fix patch creates a branch `testsphere/fix-<id>` from the commit the patch was
 built against, with one commit of the patched files, and a pull request to the default branch. Runs started
 by a GitHub push set a `TestSphere` commit status (success / failure / error) linking to the run page.
+
+**Private repositories.** Fetching a repository (ingestion, pipeline runs, fix patches, the commit a deploy
+ships) uses the owner's credentials for that host: the connected GitHub token for `github.com`, or a Git
+credential saved for another allowed host with `PUT /api/integrations/git-credentials`
+(`{"host": "gitlab.com", "token": "glpat-…"}`; Bitbucket app passwords also take `"username"`). The token is
+stored encrypted, sent as an `Authorization` header scoped to that one host (never in the URL, `.git/config`
+or error messages, and not after a redirect to another host), and used only for its owner's projects.
+A GitHub token needs *Contents: Read* on the repository to clone it.
+
+**GitHub sign-in.** With the GitHub provider enabled in Firebase (Authentication → Sign-in method → GitHub, using
+a GitHub OAuth App whose callback URL is `https://<project>.firebaseapp.com/__/auth/handler`), the sign-in page
+offers *Continue with GitHub*. Sign-in asks GitHub only for the user's identity. Repository access is separate:
+**Connect with GitHub** in Profile → Integrations opens a GitHub window asking for the `repo` scope, links GitHub
+to the account (or re-confirms it), and stores the token like a pasted one. Users who want access to only some
+repositories can paste a fine-grained token instead. An email that already has an account with Google or a
+password must sign in that way first; Firebase does not merge accounts by itself.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |

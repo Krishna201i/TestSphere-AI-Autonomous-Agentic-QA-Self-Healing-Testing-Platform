@@ -1,12 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Circle, Copy, GitBranch, Loader2, MinusCircle, Play, RefreshCw, Rocket, XCircle, Zap } from 'lucide-react';
+import {
+  CheckCircle2, Circle, Copy, Database, GitBranch, Loader2, MinusCircle, Play, RefreshCw, Rocket, Unplug, XCircle, Zap,
+} from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import {
   deployProject,
   getPipelineRun,
+  getProjectDatabase,
+  linkProjectDatabase,
   quickPipeline,
   rotateWebhookSecret,
   runProjectPipeline,
+  unlinkProjectDatabase,
   updateProject,
   webhookUrl,
 } from '../services/api';
@@ -174,6 +179,79 @@ function CopyField({ label, value }) {
   );
 }
 
+/** The app's database as a read-only input: runs report what the tests changed in it. */
+function ProjectDatabase({ project, onChanged }) {
+  const [info, setInfo] = useState(null);
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!project.database) {
+      setInfo({ connected: false, tables: [] });
+      return;
+    }
+    getProjectDatabase(project.id).then(setInfo).catch((err) => setError(err.message));
+  }, [project.id, project.database]);
+
+  async function act(fn) {
+    setBusy(true);
+    setError(null);
+    try {
+      setInfo(await fn());
+      setUrl('');
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="form-stack">
+      <h4 className="section-title"><Database size={14} className="icon-inline" /> App database (read-only)</h4>
+      {info?.connected ? (
+        <>
+          <div className="small">
+            <b>{info.database}</b>
+            {info.checked_at && <span className="muted"> · schema read {timeAgo(info.checked_at)}</span>}
+          </div>
+          {info.tables?.length > 0 && (
+            <ul className="plain-list small">
+              {info.tables.slice(0, 12).map((t) => (
+                <li key={t.name}><span className="mono">{t.name}</span> <span className="muted">· {t.rows} row(s) · {t.columns.length} column(s)</span></li>
+              ))}
+              {info.tables.length > 12 && <li className="muted">and {info.tables.length - 12} more</li>}
+            </ul>
+          )}
+          <p className="hint m-0">Each run reports which rows its tests added or changed, and whether your goal's values were stored.</p>
+          <div>
+            <button type="button" className="btn btn-sm btn-ghost" disabled={busy}
+              onClick={() => act(async () => { await unlinkProjectDatabase(project.id); return { connected: false, tables: [] }; })}>
+              <Unplug size={13} /> Unlink
+            </button>
+          </div>
+        </>
+      ) : (
+        <form className="form-stack" onSubmit={(e) => { e.preventDefault(); act(() => linkProjectDatabase(project.id, url.trim())); }}>
+          <p className="hint m-0">
+            Link the database your app writes to and each run reports what its tests changed there. Use a read-only user;
+            the URL is stored encrypted and never shown again.
+          </p>
+          <label className="field">
+            Connection URL
+            <input className="input mono" type="password" value={url} onChange={(e) => setUrl(e.target.value)} autoComplete="off"
+              spellCheck={false} placeholder="postgresql://reader:password@host:5432/app" minLength={10} required />
+          </label>
+          <div><button type="submit" className="btn btn-sm" disabled={busy || url.trim().length < 10}>{busy ? 'Connecting…' : 'Link database'}</button></div>
+        </form>
+      )}
+      {error && <div className="error-text" role="alert">{error}</div>}
+    </div>
+  );
+}
+
 function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
   const [open, setOpen] = useState(false);
   const fromProject = (p) => ({
@@ -282,6 +360,7 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                   <CopyField label="Payload URL" value={webhookUrl(project.id)} />
                   <CopyField label="Secret" value={project.webhook_secret || ''} />
                   <div><button type="button" className="btn btn-sm" disabled={busy} onClick={() => act(() => rotateWebhookSecret(project.id))}><RefreshCw size={13} /> New secret</button></div>
+                  <ProjectDatabase project={project} onChanged={onChanged} />
                 </div>
               </div>
             )}

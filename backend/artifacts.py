@@ -255,6 +255,66 @@ def persist_run_artifacts(
     return {"steps": steps, "trace": trace}
 
 
+def baseline_key(owner_uid: str, test_case_id: int) -> str:
+    return f"{safe_part(owner_uid)}/baselines/{int(test_case_id)}.png"
+
+
+def load_baseline(owner_uid: str, test_case_id: int) -> bytes | None:
+    """The approved screenshot of a test case, if it has one."""
+    try:
+        found = get_artifact_store().get(baseline_key(owner_uid, test_case_id))
+    except Exception as exc:  # noqa: BLE001 - no baseline means no comparison, never a failed run
+        logger.warning("Could not read the baseline of test case %s: %s", test_case_id, exc)
+        return None
+    return found[0] if found else None
+
+
+def record_visual(visual: dict[str, Any] | None, owner_uid: str, execution_id: int, test_case_id: int,
+                  baseline: bytes | None, *, passed: bool) -> dict[str, Any] | None:
+    """Store a run's visual check; the first passing run's screenshot becomes the baseline.
+
+    Returns what the execution keeps: ``changed`` (more than VISUAL_DIFF_THRESHOLD of the
+    pixels differ), the share of changed pixels and the artifact keys.
+    """
+    if not visual or not visual.get("current"):
+        return None
+    try:
+        store = get_artifact_store()
+        prefix = execution_prefix(owner_uid, execution_id)
+        current = _upload(store, f"{prefix}visual/current.png", visual["current"])
+        key = baseline_key(owner_uid, test_case_id)
+        if baseline is None:
+            if not passed or store.get(key):  # one was accepted while this run went on
+                return None
+            store.put(key, Path(visual["current"]).read_bytes(), "image/png")
+            return {"baseline_created": True, "changed": False, "current": current}
+        # Re-saved on every comparison, so retention never expires a baseline
+        # that is in use, but only while it is still the one compared: a
+        # baseline accepted during this run must not be put back to the old one
+        stored = store.get(key)
+        if stored and stored[0] == baseline:
+            store.put(key, baseline, "image/png")
+        ratio = float(visual.get("ratio") or 0)
+        return {
+            "changed": bool(visual.get("size_changed")) or ratio > settings.VISUAL_DIFF_THRESHOLD,
+            "ratio": ratio, "size_changed": bool(visual.get("size_changed")), "current": current,
+            "diff": _upload(store, f"{prefix}visual/diff.png", visual.get("diff")),
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not store the visual check of execution %s: %s", execution_id, exc)
+        return None
+
+
+def accept_baseline(owner_uid: str, execution_id: int, test_case_id: int) -> bool:
+    """Make an execution's screenshot the test case's baseline (a change that was intended)."""
+    store = get_artifact_store()
+    found = store.get(f"{execution_prefix(owner_uid, execution_id)}visual/current.png")
+    if not found:
+        return False
+    store.put(baseline_key(owner_uid, test_case_id), found[0], "image/png")
+    return True
+
+
 def delete_owner_artifacts(owner_uid: str) -> int:
     """Erase every artifact of one account (account deletion)."""
     try:

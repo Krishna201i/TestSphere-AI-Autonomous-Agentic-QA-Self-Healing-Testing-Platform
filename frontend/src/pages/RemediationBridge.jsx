@@ -154,7 +154,7 @@ export default function RemediationBridge({ onNavigate }) {
                 <div className="subbox">
                   <h4>Manual change required</h4>
                   <p className="m-0">{selected.remediation?.summary || selected.recommendation}</p>
-                  <p className="hint">This needs a code or infrastructure change, which requires repository access (module 5.1 / 5.5 — not built yet). Retest after the change:</p>
+                  <p className="hint">This needs a change in your code or infrastructure. Header, CORS and cookie fixes can be made for you as a patch or pull request in <b>Fix patch for your code</b> below; make anything else by hand. Retest after the change:</p>
                   <ApprovalControls finding={selected} />
                 </div>
               )}

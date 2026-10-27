@@ -32,7 +32,7 @@ def fast(monkeypatch):
     monkeypatch.setattr(settings, "DEPLOY_HEALTHY_CHECKS", 2)
     monkeypatch.setattr(settings, "DEPLOY_SETTLE_SECONDS", 0)
     monkeypatch.setattr(settings, "DEPLOY_TIMEOUT_SECONDS", 2)
-    monkeypatch.setattr(deploy, "remote_head", lambda repo: "b" * 40 if repo else None)
+    monkeypatch.setattr(deploy, "remote_head", lambda repo, auth=None: "b" * 40 if repo else None)
 
 
 class Site:
@@ -197,3 +197,109 @@ def test_a_clean_pipeline_run_deploys_when_the_project_asks(fresh_store, monkeyp
     runner._deploy_if_green(fresh_store, proj, {"id": 5, "status": "failed", "regressions": []})
     runner._deploy_if_green(fresh_store, proj, {"id": 6, "status": "passed", "regressions": [{"kind": "test"}]})
     assert started == [{"actor": "me", "trigger": "pipeline", "run_id": 4}]
+
+
+# The deploy step ran `git ls-remote` on any https repository URL (R2-01)
+
+@pytest.mark.parametrize("url", ["https://169.254.169.254/latest/meta-data", "https://127.0.0.1:9/x",
+                                 "https://github.com/../..", "http://github.com/a/b"])
+def test_repository_urls_must_be_on_an_allowed_git_host(url):
+    resp = TestClient(app).post("/api/projects", json={"name": "x", "repo_url": url})
+    assert resp.status_code == 422 and "Repository URL" in resp.text
+
+
+REAL_REMOTE_HEAD = deploy.remote_head  # the autouse fixture stubs it out
+
+
+def test_the_deploy_never_runs_git_against_other_hosts(monkeypatch):
+    ran = []
+    monkeypatch.setattr(deploy.subprocess, "run", lambda *a, **k: ran.append(a))
+    assert REAL_REMOTE_HEAD("https://127.0.0.1:9/internal") is None  # e.g. saved before hosts were checked
+    assert ran == []
+
+
+# ── Telling the new version from the old one ──────────────────
+
+
+class NoncePage(Site):
+    """A page that differs on every request (a CSRF token) and never changes version."""
+
+    def __init__(self):
+        super().__init__(after_deploy="v1 ok", after_rollback="v1 ok")
+        self.n = 0
+
+    def __call__(self, request):
+        if request.method == "GET":
+            self.n += 1
+            return httpx.Response(200, text=f"v1 page csrf={self.n}")
+        return super().__call__(request)
+
+
+def test_a_page_that_changes_on_every_request_does_not_prove_a_new_version(fresh_store, monkeypatch):
+    monkeypatch.setattr(settings, "DEPLOY_SETTLE_SECONDS", 3600)
+    dep = run(fresh_store, project(fresh_store), NoncePage())
+    assert dep["status"] != "verified"
+    assert "Not healthy within" in step(dep, "health")["detail"]
+
+
+class SlowRollback(Site):
+    """Render keeps serving the bad version for a while after the rollback hook."""
+
+    def __init__(self, polls_until_switch=4):
+        super().__init__(after_deploy="v2 broken", after_rollback="v2 broken")
+        self.switch_in, self.rolled = polls_until_switch, False
+
+    def __call__(self, request):
+        if request.method == "POST" and "ref" in str(request.url):
+            self.rolled = True
+        if request.method == "GET" and self.rolled:
+            self.switch_in -= 1
+            if self.switch_in <= 0:
+                self.body = "v1 ok"
+        return super().__call__(request)
+
+
+def test_rollback_is_reported_only_once_the_old_version_serves(fresh_store, monkeypatch):
+    monkeypatch.setattr(settings, "DEPLOY_SETTLE_SECONDS", 3600)
+    proj = project(fresh_store)
+    fresh_store.insert(DEPLOYMENTS, project_id=proj["id"], owner_uid="local-dev", status="verified", commit=GOOD)
+    site = SlowRollback()
+    dep = run(fresh_store, proj, site, Smoke("FAILED"))
+    assert dep["status"] == "rolled_back", dep
+    assert site.body == "v1 ok" and "page changed" in step(dep, "rollback")["detail"]
+
+    proj2 = project(fresh_store)
+    fresh_store.insert(DEPLOYMENTS, project_id=proj2["id"], owner_uid="local-dev", status="verified", commit=GOOD)
+    dep = run(fresh_store, proj2, SlowRollback(polls_until_switch=10_000), Smoke("FAILED"))
+    assert dep["status"] == "rollback_failed"
+
+
+def test_a_cancelled_deployment_is_not_left_active(fresh_store):
+    proj = project(fresh_store)
+    dep = deploy.create_deployment(fresh_store, proj, actor="tester")
+
+    class Hang(Site):
+        def __call__(self, request):
+            if request.method == "POST":
+                raise asyncio.CancelledError
+            return super().__call__(request)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(deploy.execute_deployment(dep["id"], transport=httpx.MockTransport(Hang()), orchestrator=Smoke()))
+    assert fresh_store.get(DEPLOYMENTS, dep["id"])["status"] == "error"
+    assert deploy.active_deployment(fresh_store, proj["id"]) is None
+
+
+def test_a_dead_process_deployment_stops_blocking_deploys(fresh_store):
+    from datetime import UTC, datetime, timedelta
+
+    proj = project(fresh_store)
+    old = (datetime.now(UTC) - timedelta(seconds=settings.DEPLOY_STALE_SECONDS + 60)).isoformat()
+    stale = fresh_store.insert(DEPLOYMENTS, project_id=proj["id"], status="verifying", executor="worker:1",
+                               heartbeat_at=old)
+    live = fresh_store.insert(DEPLOYMENTS, project_id=proj["id"], status="verifying", executor="worker:2",
+                              heartbeat_at=datetime.now(UTC).isoformat())
+    # the API restarting leaves a live worker deployment alone
+    assert deploy.recover_interrupted(fresh_store) == 1
+    assert fresh_store.get(DEPLOYMENTS, stale["id"])["status"] == "error"
+    assert deploy.active_deployment(fresh_store, proj["id"])["id"] == live["id"]

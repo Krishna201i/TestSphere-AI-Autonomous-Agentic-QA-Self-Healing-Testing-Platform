@@ -193,3 +193,45 @@ def test_a_failed_sign_in_deletion_is_reported(client, monkeypatch):
 def test_local_mode_has_no_account_to_delete():
     resp = TestClient(app).request("DELETE", "/api/me", json={"confirm": "DELETE MY ACCOUNT"})
     assert resp.status_code == 400
+
+
+def test_the_profile_display_name_is_the_name_on_recorded_actions(client):
+    bob = as_user("token-bob")
+    pid = client.post("/api/projects", json={"name": "Bob shop", "app_url": "https://shop.example"}, headers=bob).json()["id"]
+
+    def add_app(name):
+        resp = client.post("/api/applications", json={"project_id": pid, "name": name, "base_url": "https://shop.example"},
+                           headers=bob)
+        assert resp.status_code == 201, resp.text
+        return client.get("/api/audit", headers=bob).json()[0]["actor"]
+
+    assert add_app("One") == "bob@example.com"  # the token has no name; the profile defaults to it
+    client.put("/api/me", json={"display_name": "Krishna"}, headers=bob)
+    assert add_app("Two") == "Krishna"
+
+
+def test_api_tokens_let_an_agent_act_as_the_user_until_revoked(client, fresh_store):
+    alice = as_user("token-alice")
+    created = client.post("/api/me/tokens", json={"name": "Claude Code MCP"}, headers=alice)
+    assert created.status_code == 201, created.text
+    token = created.json()["token"]
+    assert token.startswith("tsk_") and created.json()["prefix"] == token[:10]
+    assert token not in str(fresh_store.find("api_tokens"))  # only its hash is stored
+
+    agent = as_user(token)
+    pid = client.post("/api/projects", json={"name": "From the agent", "app_url": "https://shop.example"},
+                      headers=agent).json()["id"]
+    assert [p["id"] for p in client.get("/api/projects", headers=alice).json()] == [pid]  # acts as Alice
+    assert client.get("/api/projects", headers=as_user("token-bob")).json() == []
+    listed = client.get("/api/me/tokens", headers=alice).json()
+    assert [t["name"] for t in listed] == ["Claude Code MCP"] and listed[0]["last_used_at"]
+    assert "token" not in listed[0]
+
+    # Bob can neither see nor revoke it
+    assert client.get("/api/me/tokens", headers=as_user("token-bob")).json() == []
+    assert client.delete(f"/api/me/tokens/{listed[0]['id']}", headers=as_user("token-bob")).status_code == 404
+
+    assert client.delete(f"/api/me/tokens/{listed[0]['id']}", headers=alice).status_code == 204
+    resp = client.get("/api/projects", headers=agent)
+    assert resp.status_code == 401 and "revoked" in resp.json()["detail"]
+    assert client.get("/api/projects", headers=as_user("tsk_made-up")).status_code == 401
