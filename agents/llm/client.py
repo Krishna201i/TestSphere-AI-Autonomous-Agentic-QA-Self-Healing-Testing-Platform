@@ -462,8 +462,10 @@ class LLMClientSession:
                 provider=response.provider,
             )
 
+        from agents.llm.parser import loads_json_object
+
         try:
-            data = json.loads(text)
+            data = loads_json_object(text)
         except json.JSONDecodeError as exc:
             raise LLMResponseError(
                 f"Response is not valid JSON: {exc}",

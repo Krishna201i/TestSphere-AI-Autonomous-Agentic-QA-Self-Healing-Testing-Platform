@@ -14,18 +14,23 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from backend.api.integrations import git_auth
 from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
-from backend.config import settings
+from backend.config import git_hosts, settings
 from backend.database.session import get_db
 from backend.database.store import Record, Store
 from backend.models import BLUEPRINTS
 from backend.ratelimit import limit_runs
-from backend.services.security_service import record_audit
+from backend.services.security_service import record_audit, save_scan
 from ingestion import (
+    GitAuth,
     SourceError,
     analyze_repo,
+    as_findings,
+    check_dependencies,
     clone,
     is_git_url,
+    pinned_packages,
     repo_name,
     resolve_local,
 )
@@ -39,7 +44,7 @@ class IngestRequest(BaseModel):
 
 
 def _git_hosts() -> frozenset:
-    return frozenset(h.strip().lower() for h in settings.INGEST_GIT_HOSTS.split(",") if h.strip())
+    return git_hosts()
 
 
 def _summary(row: Record) -> dict[str, Any]:
@@ -58,15 +63,31 @@ def _summary(row: Record) -> dict[str, Any]:
     }
 
 
-def ingest_source(source: str) -> dict[str, Any]:
-    """Clone (or resolve) and analyze *source*; raises ``SourceError`` with a readable cause."""
+def ingest_source(source: str, auth: GitAuth | None = None) -> dict[str, Any]:
+    """Clone (or resolve) and analyze *source*; raises ``SourceError`` with a readable cause.
+
+    *auth* fetches a private repository (``backend.api.integrations.git_auth``).
+    """
     if is_git_url(source):
-        root = clone(source, Path(settings.INGEST_WORKSPACE), _git_hosts())
+        root = clone(source, Path(settings.INGEST_WORKSPACE), _git_hosts(), auth=auth)
     elif settings.INGEST_ALLOW_LOCAL_PATHS:
         root = resolve_local(source)
     else:
         raise SourceError("Local folder paths are disabled on this server; use a public https Git URL.")
-    return analyze_repo(root, source=source, name=repo_name(source)).model_dump(mode="json")
+    blueprint = analyze_repo(root, source=source, name=repo_name(source)).model_dump(mode="json")
+    if settings.DEPENDENCY_SCAN:
+        packages = pinned_packages(root)
+        blueprint["dependency_scan"] = check_dependencies(packages) | {"packages": packages[:200]}
+    return blueprint
+
+
+def record_dependency_findings(db: Store, source: str, blueprint: dict[str, Any], owner_uid: str | None) -> int:
+    """Vulnerable dependencies as security findings of the repository; returns how many are open."""
+    scan = blueprint.get("dependency_scan")
+    if not scan or scan.get("error"):
+        return 0  # unknown is not "fixed": leave earlier findings as they are
+    saved = save_scan(db, source, as_findings(scan, source), owner_uid=owner_uid)
+    return len(saved["current"])
 
 
 def save_blueprint(
@@ -77,10 +98,12 @@ def save_blueprint(
     row = db.insert(BLUEPRINTS, source=source, name=blueprint["name"], data=json.dumps(blueprint),
                     owner_uid=owner_uid, project_id=project_id)
     summary = _summary(row)
+    vulnerable = record_dependency_findings(db, source, blueprint, owner_uid)
     record_audit(
-        db, actor=actor, kind="ingest", level="warn" if summary["risks"] else "success", ref=str(row.id),
+        db, actor=actor, kind="ingest", level="warn" if summary["risks"] or vulnerable else "success", ref=str(row.id),
         message=f"Ingested {row.name}: {summary['files_total']} files, {summary['primary_language'] or 'no code'}, "
-                f"{summary['routes']} route(s), {summary['risks']} risk(s)",
+                f"{summary['routes']} route(s), {summary['risks']} risk(s)"
+                + (f", {vulnerable} known-vulnerable dependency advisories" if vulnerable else ""),
         owner_uid=owner_uid,
     )
     return row
@@ -94,7 +117,7 @@ def ingest(req: IngestRequest, db: Store = Depends(get_db), user: User = Depends
     if not source:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Source is required.")
     try:
-        blueprint = ingest_source(source)
+        blueprint = ingest_source(source, git_auth(db, user.uid, source) if is_git_url(source) else None)
     except (SourceError, NotADirectoryError) as exc:
         record_audit(db, actor=actor, kind="ingest", level="error", message=f"Ingestion failed for {source}: {exc}",
                      owner_uid=user.uid)

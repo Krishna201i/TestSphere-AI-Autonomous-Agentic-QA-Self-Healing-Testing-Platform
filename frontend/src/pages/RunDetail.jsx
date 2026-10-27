@@ -1,14 +1,18 @@
 /**
  * One pipeline run, at its own shareable address (#/runs/<id>, or
  * #/runs/<id>/<execution> with a test open): stages, results, and for each
- * test its steps with screenshots, healing evidence and the Playwright trace.
+ * test its steps with screenshots, healing evidence, the Playwright trace and
+ * the visual check (baseline, new screenshot and their difference, with a
+ * button to accept an intended change as the new baseline).
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRight, Download, ExternalLink, FileCode2, Link2, ShieldOff, Shield, Wand2, X,
+  ArrowLeft, ArrowRight, Check, Download, ExternalLink, FileCode2, Image, Link2, ShieldOff, Shield, Wand2, X,
 } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
-import { getArtifact, getPipelineRun, getRunJunit, getTestExecution, updateTestCase } from '../services/api';
+import {
+  acceptVisual, getArtifact, getPipelineRun, getRunJunit, getTestExecution, updateTestCase,
+} from '../services/api';
 import { timeAgo, toDate } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
 import { Skeleton } from '../components/charts';
@@ -89,7 +93,61 @@ export function HealingEvidence({ healing }) {
   );
 }
 
-function ExecutionDetail({ test, onQuarantine }) {
+/** The visual check of an execution: what changed on screen, and accepting it as the new baseline. */
+function VisualCheck({ executionId, visual, onAccepted }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function accept() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await acceptVisual(executionId);
+      onAccepted(res.visual);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const share = visual.ratio != null ? `${(visual.ratio * 100).toFixed(1)}% of the pixels` : null;
+  return (
+    <div className="stack-sm">
+      <h4 className="section-title mt-3"><Image size={14} aria-hidden="true" /> Visual check</h4>
+      <div className="row small">
+        {visual.changed
+          ? <span className="status FAILED">Changed</span>
+          : <span className="status PASSED">{visual.accepted ? 'Accepted as baseline' : visual.baseline_created ? 'Baseline created' : 'Unchanged'}</span>}
+        <span className="muted">
+          {visual.size_changed ? 'The page size changed' : share ? `${share} differ from the baseline` : 'First screenshot of this test'}
+        </span>
+      </div>
+      {visual.changed && (
+        <p className="hint m-0">
+          If the new look is intended, accept it: later runs compare with this screenshot instead.
+        </p>
+      )}
+      <div className="step-artifacts">
+        {visual.baseline && !visual.baseline_created && (
+          <Screenshot executionId={executionId} artifactKey={visual.baseline} alt="Baseline (approved screenshot)" />
+        )}
+        {visual.current && <Screenshot executionId={executionId} artifactKey={visual.current} alt="This run" />}
+        {visual.diff && <Screenshot executionId={executionId} artifactKey={visual.diff} alt="Difference (changed pixels)" />}
+      </div>
+      {visual.changed && (
+        <div className="row">
+          <button type="button" className="btn btn-sm btn-primary" onClick={accept} disabled={busy}>
+            <Check size={14} /> {busy ? 'Accepting…' : 'Accept as new baseline'}
+          </button>
+        </div>
+      )}
+      {error && <div className="error-text" role="alert">{error}</div>}
+    </div>
+  );
+}
+
+function ExecutionDetail({ test, onQuarantine, onVisualAccepted }) {
   const [ex, setEx] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -126,6 +184,7 @@ function ExecutionDetail({ test, onQuarantine }) {
         <span className="muted">Execution #{test.execution_id}{ex?.duration_ms != null ? ` · ${(ex.duration_ms / 1000).toFixed(1)} s` : ''}</span>
         {test.flaky && <span className="status FLAKY" title="Its result flipped between pass and fail at least twice in recent runs">Flaky</span>}
         {test.quarantined && <span className="pill gray">Quarantined</span>}
+        {test.visual_changed && <span className="pill violet">Visual change</span>}
       </div>
       <div className="row">
         {ex?.trace && (
@@ -144,6 +203,10 @@ function ExecutionDetail({ test, onQuarantine }) {
       {ex?.trace && <p className="hint m-0">Download the trace, then drop it on the trace viewer to replay every action with the DOM, network and console.</p>}
       {error && <div className="error-text" role="alert">{error}</div>}
       {!ex && !error && <Skeleton lines={4} block />}
+      {ex?.visual && (
+        <VisualCheck executionId={test.execution_id} visual={ex.visual}
+          onAccepted={(visual) => { setEx((prev) => ({ ...prev, visual: { ...prev.visual, ...visual } })); onVisualAccepted(test); }} />
+      )}
 
       {ex && (ex.steps?.length ? (
         <ol className="step-list">
@@ -223,6 +286,10 @@ export default function RunDetail({ params, onNavigate }) {
     refresh();
   }
 
+  function visualAccepted(test) {
+    setRun((r) => ({ ...r, tests: r.tests.map((t) => (t.execution_id === test.execution_id ? { ...t, visual_changed: false } : t)) }));
+  }
+
   function copyLink() {
     navigator.clipboard?.writeText(window.location.href).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => {});
   }
@@ -244,8 +311,11 @@ export default function RunDetail({ params, onNavigate }) {
 
   const s = run.summary;
   const tests = run.tests || [];
-  const quarantinedIds = new Set(testCases.filter((t) => t.quarantined).map((t) => t.id));
-  const withState = tests.map((t) => ({ ...t, quarantined: t.quarantined ?? quarantinedIds.has(t.test_case_id) }));
+  // Quarantine is the test case's state now (the run only kept a snapshot of it)
+  const caseById = new Map(testCases.map((t) => [t.id, t]));
+  const withState = tests.map((t) => ({
+    ...t, quarantined: caseById.has(t.test_case_id) ? Boolean(caseById.get(t.test_case_id).quarantined) : Boolean(t.quarantined),
+  }));
   const selected = withState.find((t) => t.execution_id === selectedExec) || null;
 
   return (
@@ -302,6 +372,9 @@ export default function RunDetail({ params, onNavigate }) {
           <div className="stat-tile"><div className="v">{s.flaky ?? 0}</div><div className="l">Flaky</div></div>
           <div className="stat-tile"><div className="v">{(run.regressions || []).length}</div><div className="l">Regressions</div></div>
           <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Security findings</div></div>
+          {s.visual_changes > 0 && (
+            <div className="stat-tile"><div className="v">{tests.filter((t) => t.visual_changed).length}</div><div className="l">Visual changes to review</div></div>
+          )}
         </div>
       )}
 
@@ -322,6 +395,7 @@ export default function RunDetail({ params, onNavigate }) {
                           <span className={`status ${testLabel(t)}`}>{testLabel(t)}</span>
                           {t.flaky && <span className="status FLAKY">Flaky</span>}
                           {t.quarantined && <span className="pill gray">Quarantined</span>}
+                          {t.visual_changed && <span className="pill violet">Visual change</span>}
                         </div>
                       </td>
                       {!selected && <td className="small cell-wrap">{t.error ? t.error.split('\n')[0] : '—'}</td>}
@@ -332,7 +406,7 @@ export default function RunDetail({ params, onNavigate }) {
             </div>
           )}
         </section>
-        {selected && <ExecutionDetail key={selected.execution_id} test={selected} onQuarantine={quarantine} />}
+        {selected && <ExecutionDetail key={selected.execution_id} test={selected} onQuarantine={quarantine} onVisualAccepted={visualAccepted} />}
       </div>
 
       {(run.regressions || []).length > 0 && (

@@ -71,14 +71,19 @@ async def github_webhook(
         return {"ignored": f"push to '{branch}' (only the default branch '{repo['default_branch']}' triggers runs)"}
     if not project.get("app_url"):
         return {"ignored": "the project has no app URL to test"}
-    running = active_run(db, project_id)
-    if running:
-        return {"ignored": f"pipeline #{running['id']} is already {running['status']}"}
-
     head = payload.get("head_commit") or {}
     message = (head.get("message") or "").splitlines()[0][:80] if head.get("message") else ""
     detail = f"{(payload.get('after') or '')[:7]} {message}".strip()
     pusher = (payload.get("pusher") or {}).get("name") or "github"
-    run = start_run(db, project, trigger="webhook", actor=f"github:{pusher}", detail=detail or None, ingest=True,
-                    commit_sha=payload.get("after") or None)
+    push = {"actor": f"github:{pusher}", "detail": detail or None, "commit_sha": payload.get("after") or None}
+
+    running = active_run(db, project_id)
+    if running:
+        # Test this commit once the current run ends (a newer push replaces it)
+        db.update(PROJECTS, project_id, pending_push=push)
+        return {"queued_after": running["id"],
+                "message": f"pipeline #{running['id']} is {running['status']}; this commit runs when it ends"}
+
+    run = start_run(db, project, trigger="webhook", actor=push["actor"], detail=push["detail"], ingest=True,
+                    commit_sha=push["commit_sha"])
     return {"started": run["id"]}

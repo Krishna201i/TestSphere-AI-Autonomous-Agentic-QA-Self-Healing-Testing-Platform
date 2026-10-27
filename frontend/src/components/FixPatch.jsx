@@ -72,6 +72,7 @@ function PullRequestButton({ patch, onOpened }) {
 
 function PatchView({ patch, onPullRequest }) {
   const [copied, setCopied] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
   const file = `testsphere-fix-${patch.id}.patch`;
   return (
     <div className="stack">
@@ -83,13 +84,14 @@ function PatchView({ patch, onPullRequest }) {
         {patch.files.length > 0 && (
           <span className="row">
             <PullRequestButton patch={patch} onOpened={onPullRequest} />
-            <button type="button" className="btn btn-sm" onClick={() => downloadFixPatch(patch.id).then((b) => saveBlob(b, file))}><Download size={14} /> Download .patch</button>
+            <button type="button" className="btn btn-sm" onClick={() => { setDownloadError(null); downloadFixPatch(patch.id).then((b) => saveBlob(b, file)).catch((err) => setDownloadError(`Download failed: ${err.message}`)); }}><Download size={14} /> Download .patch</button>
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => navigator.clipboard?.writeText(patch.patch).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}>
               <Copy size={14} /> {copied ? 'Copied' : 'Copy'}
             </button>
           </span>
         )}
       </div>
+      {downloadError && <div className="error-text" role="alert">{downloadError}</div>}
 
       {patch.applied.length > 0 && (
         <ul className="plain-list small">
@@ -189,7 +191,7 @@ export default function FixPatchCard({ targetUrl }) {
           <ul className="plain-list">
             {patches.slice(1).map((p) => (
               <li key={p.id}>
-                <button type="button" className="link-btn" onClick={() => downloadFixPatch(p.id).then((b) => saveBlob(b, `testsphere-fix-${p.id}.patch`))}>
+                <button type="button" className="link-btn" onClick={() => downloadFixPatch(p.id).then((b) => saveBlob(b, `testsphere-fix-${p.id}.patch`)).catch((err) => setError(`Download of patch #${p.id} failed: ${err.message}`))}>
                   #{p.id}
                 </button> · {p.files.length} file(s) · {timeAgo(p.created_at)}
               </li>

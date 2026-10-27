@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -41,6 +42,31 @@ from agents.llm.exceptions import (
 from agents.llm.schemas import LLMResponse
 
 logger = logging.getLogger(__name__)
+
+_FENCED = re.compile(r"```[ \t]*(?:json|JSON)?[ \t]*\n?(.*?)\n?[ \t]*```", re.DOTALL)
+
+
+def loads_json_object(text: str) -> object:
+    """``json.loads`` for model output: also reads JSON wrapped in a markdown
+    code fence or surrounded by prose (the first ``{...}`` block).
+
+    Raises ``json.JSONDecodeError`` (from the plain parse) when none of those
+    forms parse.
+    """
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as first_error:
+        candidates = [m.group(1).strip() for m in _FENCED.finditer(text)]
+        start, end = text.find("{"), text.rfind("}")
+        if 0 <= start < end:
+            candidates.append(text[start:end + 1])
+        for candidate in candidates:
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+        raise first_error
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -110,7 +136,7 @@ class ResponseParser:
                 provider=response.provider,
             )
         try:
-            data = json.loads(text)
+            data = loads_json_object(text)
         except json.JSONDecodeError as exc:
             raise LLMParsingError(
                 f"LLM response is not valid JSON: {exc}",

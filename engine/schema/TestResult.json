@@ -196,6 +196,19 @@
           "description": "Absolute path to saved HTML DOM snapshot",
           "title": "Dom Snapshot Path"
         },
+        "page_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "URL of the page when the step ended (where its element was, or was missing)",
+          "title": "Page Url"
+        },
         "console_logs": {
           "description": "Browser console messages collected during this step",
           "items": {
@@ -274,6 +287,20 @@
       "description": "Root directory where all artifacts for this run were written",
       "title": "Artifacts Dir",
       "type": "string"
+    },
+    "visual": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Visual check of a passing run: current screenshot path and, against a baseline, the changed share of pixels and a diff image path",
+      "title": "Visual"
     }
   },
   "required": [

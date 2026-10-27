@@ -6,14 +6,22 @@ Delegates persistence and business logic to ProjectService.
 """
 
 
-from fastapi import APIRouter, Depends, status
+import asyncio
+import json
+from typing import Any
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+
+from backend import dbsource
 from backend.api.schemas import ProjectCreate, ProjectResponse, ProjectUpdate
-from backend.auth import User, ensure_owned, get_current_user, scope
+from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
 from backend.database.session import get_db
-from backend.database.store import Record, Store
+from backend.database.store import Record, Store, now_iso
 from backend.models import PROJECTS
+from backend.secretbox import SecretBoxError, encrypt
 from backend.services.project_service import PIPELINE_FIELDS, ProjectService
+from backend.services.security_service import record_audit
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
@@ -79,3 +87,59 @@ def delete_project(project_id: int, db: Store = Depends(get_db), user: User = De
     owned_project(db, user, project_id)
     ProjectService.delete_project(db=db, project_id=project_id)
     return None
+
+
+# ── The app's database (read-only input) ───────────────────────────────────
+
+
+class DatabaseLink(BaseModel):
+    url: str = Field(..., min_length=10, max_length=1000,
+                     description="postgresql://user:password@host:5432/db (a read-only user is best), or sqlite:///path in development")
+
+
+def _database_view(project: Record) -> dict[str, Any]:
+    schema = json.loads(project["db_schema"]) if project.get("db_schema") else None
+    return {
+        "connected": bool(project.get("db_url")),
+        "database": project.get("database"),
+        "checked_at": project.get("db_checked_at"),
+        "tables": [{"name": t["name"], "rows": t["rows"], "columns": [c["name"] for c in t["columns"]],
+                    "foreign_keys": t["foreign_keys"]} for t in (schema or {}).get("tables", [])],
+    }
+
+
+@router.put("/{project_id}/database")
+async def link_database(
+    project_id: int, payload: DatabaseLink, db: Store = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Connect read-only, read the schema, and keep the URL encrypted for pipeline runs."""
+    owned_project(db, user, project_id)
+
+    def read() -> dict[str, Any]:
+        with dbsource.Database(payload.url) as conn:
+            return conn.schema()
+
+    try:
+        schema = await asyncio.to_thread(read)
+        sealed = encrypt(payload.url.strip())
+    except dbsource.DatabaseError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except SecretBoxError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    row = db.update(PROJECTS, project_id, db_url=sealed, database=schema["database"], db_schema=json.dumps(schema),
+                    db_checked_at=now_iso())
+    record_audit(db, actor=actor_for(user, "dev_active"), kind="database", ref=str(project_id), owner_uid=user.uid,
+                 message=f"Database {schema['database']} linked to {row['name']}: {len(schema['tables'])} table(s)")
+    return _database_view(row)
+
+
+@router.get("/{project_id}/database")
+def get_database(project_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """The linked database and its schema as last read (the URL is never returned)."""
+    return _database_view(owned_project(db, user, project_id))
+
+
+@router.delete("/{project_id}/database", status_code=status.HTTP_204_NO_CONTENT)
+def unlink_database(project_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    owned_project(db, user, project_id)
+    db.update(PROJECTS, project_id, db_url=None, database=None, db_schema=None, db_checked_at=None)
