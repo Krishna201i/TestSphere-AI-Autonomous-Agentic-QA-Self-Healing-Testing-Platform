@@ -60,7 +60,7 @@ export default function AttackerAgent({ onNavigate }) {
         )}
         {error && <div className="error-text">{error}</div>}
         <div className="hint">
-          In scope on this backend: <b>{ws.system ? ws.system.scan_scope.join(', ') : 'unknown (backend offline or outdated)'}</b>.
+          In scope on this backend: <b>{ws.system?.scan_scope ? ws.system.scan_scope.join(', ') : 'unknown (backend offline or outdated)'}</b>.
           To scan a site you own or are authorized to test, add its host to <code>SECURITY_SCAN_ALLOWED_HOSTS</code> on the backend and restart it.
         </div>
       </section>

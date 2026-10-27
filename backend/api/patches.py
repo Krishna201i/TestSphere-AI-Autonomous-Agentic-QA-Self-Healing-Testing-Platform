@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
 from backend.api.ingest import _git_hosts
+from backend.api.integrations import git_auth
 from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
 from backend.config import settings
 from backend.database.session import get_db
@@ -32,7 +33,7 @@ from backend.models import FIX_PATCHES, PROJECTS
 from backend.ratelimit import limit_runs
 from backend.services import security_service as findings_store
 from backend.services.security_service import record_audit
-from ingestion import SourceError, clone, is_git_url, resolve_local
+from ingestion import GitAuth, SourceError, clone, is_git_url, resolve_local
 from security.patcher import build_patch
 
 router = APIRouter(prefix="/security/patches", tags=["Security Testing"])
@@ -61,11 +62,11 @@ def _repo_for(db: Store, user: User, target_url: str) -> tuple[str | None, Recor
     return None, None
 
 
-def _checkout(repo: str) -> tuple[Path, Path | None]:
+def _checkout(repo: str, auth: GitAuth | None = None) -> tuple[Path, Path | None]:
     """(directory to read, temporary folder to delete afterwards or None)."""
     if is_git_url(repo):
         tmp = Path(tempfile.mkdtemp(prefix="patch-", dir=_workspace()))
-        return clone(repo, tmp, _git_hosts()), tmp
+        return clone(repo, tmp, _git_hosts(), auth=auth), tmp
     if settings.INGEST_ALLOW_LOCAL_PATHS:
         return resolve_local(repo), None
     raise SourceError("Local folder paths are disabled on this server; use a public https Git URL.")
@@ -86,8 +87,8 @@ def _commit(root: Path) -> str | None:
         return None
 
 
-def _generate(repo: str, findings: list[dict[str, Any]], site_url: str) -> dict[str, Any]:
-    root, tmp = _checkout(repo)
+def _generate(repo: str, findings: list[dict[str, Any]], site_url: str, auth: GitAuth | None = None) -> dict[str, Any]:
+    root, tmp = _checkout(repo, auth)
     try:
         result = build_patch(root, findings, site_url)
         return {
@@ -135,7 +136,7 @@ async def create_patch(
                             detail="No repository is linked to this site. Add the repository to its project in "
                                    "Autopilot (Settings → Git repository), or enter one here.")
     try:
-        built = await asyncio.to_thread(_generate, repo, findings, payload.target_url)
+        built = await asyncio.to_thread(_generate, repo, findings, payload.target_url, git_auth(db, user.uid, repo))
     except SourceError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 

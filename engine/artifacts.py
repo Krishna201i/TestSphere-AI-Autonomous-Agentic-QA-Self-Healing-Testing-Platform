@@ -19,6 +19,7 @@ write never masks the original test failure.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from playwright.async_api import Page
@@ -26,9 +27,17 @@ from playwright.async_api import Page
 log = logging.getLogger(__name__)
 
 
+_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def safe_segment(value: str) -> str:
+    """*value* as one path segment that stays inside its parent directory."""
+    return _UNSAFE.sub("_", str(value)).strip("._") or "_"
+
+
 def _step_dir(base_dir: str, test_id: str, step_id: str) -> Path:
     """Return (and create) the artifact directory for one step."""
-    p = Path(base_dir) / test_id / step_id
+    p = Path(base_dir) / safe_segment(test_id) / safe_segment(step_id)
     p.mkdir(parents=True, exist_ok=True)
     return p
 

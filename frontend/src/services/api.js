@@ -34,6 +34,7 @@ export function configureAuth({ getToken, unauthorized }) {
  *   auth     — 401, the session expired (the user is sent back to sign-in)
  *   outdated — endpoint missing (backend runs older code than the dashboard)
  *   refused  — 403 (e.g. target outside the authorized scope)
+ *   misconfigured — a web page came back instead of the API (VITE_API_URL not set)
  *   http     — anything else; `message` is the server's detail
  */
 async function request(path, { method = 'GET', body, raw = false } = {}) {
@@ -51,6 +52,16 @@ async function request(path, { method = 'GET', body, raw = false } = {}) {
   } catch {
     const err = new Error(`Cannot reach the backend at ${API_BASE_LABEL}. Is it running?`);
     err.kind = 'network';
+    throw err;
+  }
+  // An HTML page instead of JSON: the dashboard's host answered (e.g. Vercel's
+  // single-page rewrite), not the backend, so VITE_API_URL is missing or wrong
+  if ((res.headers.get('content-type') || '').includes('text/html') && path.startsWith('/api/')) {
+    const err = new Error(`${API_BASE_LABEL} answered ${path.split('?')[0]} with a web page, not the TestSphere API. `
+      + 'If the dashboard is hosted apart from the backend (e.g. on Vercel), set VITE_API_URL to the backend URL '
+      + '(e.g. https://your-api.onrender.com) and build again.');
+    err.kind = 'misconfigured';
+    err.status = res.status;
     throw err;
   }
   if (!res.ok) {
@@ -103,6 +114,8 @@ export const getTestExecution = (id) => request(`/api/test-executions/${id}`);
 export const getArtifact = (executionId, key) =>
   request(`/api/test-executions/${executionId}/artifact?key=${encodeURIComponent(key)}`, { raw: true });
 export const RECENT_EXECUTIONS = 200;
+/** Make the execution's screenshot its test case's visual baseline (the change was intended). */
+export const acceptVisual = (id) => request(`/api/test-executions/${id}/accept-visual`, { method: 'POST' });
 
 export const planAndExecute = (payload) =>
   request('/api/workflow/plan-and-execute', { method: 'POST', body: payload });
@@ -121,6 +134,11 @@ export const downloadFixPatch = (id) => request(`/api/security/patches/${id}/dow
 export const getIntegrations = () => request('/api/integrations');
 export const connectGitHub = (token) => request('/api/integrations/github', { method: 'PUT', body: { token } });
 export const disconnectGitHub = () => request('/api/integrations/github', { method: 'DELETE' });
+/** Git credentials for private repositories on GitLab, Bitbucket and other allowed hosts (tokens never returned). */
+export const getGitCredentials = () => request('/api/integrations/git-credentials');
+export const saveGitCredential = (payload) => request('/api/integrations/git-credentials', { method: 'PUT', body: payload });
+export const deleteGitCredential = (host) =>
+  request(`/api/integrations/git-credentials/${encodeURIComponent(host)}`, { method: 'DELETE' });
 export const openPullRequest = (patchId) => request(`/api/security/patches/${patchId}/pull-request`, { method: 'POST' });
 export const getAudit = (limit = 300) => request(`/api/audit?limit=${limit}`);
 export const getSystem = () => request('/api/system');
@@ -129,6 +147,10 @@ export const listBlueprints = () => request('/api/ingest');
 export const getBlueprint = (id) => request(`/api/ingest/${id}`);
 
 export const updateProject = (id, payload) => request(`/api/projects/${id}`, { method: 'PUT', body: payload });
+/** The project's app database as a read-only input (the URL is stored encrypted, never returned). */
+export const getProjectDatabase = (id) => request(`/api/projects/${id}/database`);
+export const linkProjectDatabase = (id, url) => request(`/api/projects/${id}/database`, { method: 'PUT', body: { url } });
+export const unlinkProjectDatabase = (id) => request(`/api/projects/${id}/database`, { method: 'DELETE' });
 export const rotateWebhookSecret = (id) => request(`/api/projects/${id}/webhook-secret`, { method: 'POST' });
 export const runProjectPipeline = (projectId, ingest = false) =>
   request('/api/pipelines/run', { method: 'POST', body: { project_id: projectId, ingest } });
@@ -146,6 +168,10 @@ export const recordLogin = () => request('/api/me/login', { method: 'POST' });
 export const updateMe = (payload) => request('/api/me', { method: 'PUT', body: payload });
 // Erases the account and all its data; `confirm` must be exactly "DELETE MY ACCOUNT"
 export const deleteMe = (confirm) => request('/api/me', { method: 'DELETE', body: { confirm } });
+/** API tokens for agents (the MCP server); the token itself is only in createApiToken's answer. */
+export const getApiTokens = () => request('/api/me/tokens');
+export const createApiToken = (name) => request('/api/me/tokens', { method: 'POST', body: { name } });
+export const revokeApiToken = (id) => request(`/api/me/tokens/${id}`, { method: 'DELETE' });
 
 /** Webhook URL GitHub should call for a project (absolute, using the API base). */
 export const webhookUrl = (projectId) =>

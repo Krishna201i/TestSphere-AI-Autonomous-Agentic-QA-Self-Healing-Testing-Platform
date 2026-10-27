@@ -132,7 +132,7 @@ export default function CodebaseIngestion() {
       {error && <div className="error-text">{error}</div>}
       <div className="hint">
         Static analysis only: languages, frameworks, dependencies, test suites, routes and risks such as committed secrets.
-        {system && ` Allowed Git hosts: ${system.ingestion.git_hosts.join(', ')}.`}
+        {system?.ingestion?.git_hosts && ` Allowed Git hosts: ${system.ingestion.git_hosts.join(', ')}.`}
       </div>
 
       {previous.length > 1 && (

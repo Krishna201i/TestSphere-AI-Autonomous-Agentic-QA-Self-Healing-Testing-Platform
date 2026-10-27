@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { WorkspaceProvider, useWorkspace } from './state/Workspace';
 import { AuthProvider, useAuth } from './state/Auth';
 import { healthStats } from './lib/derive';
@@ -24,6 +25,34 @@ function DatabaseBanner() {
       <b>The backend cannot reach its database</b>, so saving and running tests will fail. {h.dbError}
     </div>
   );
+}
+
+/** A page that fails to render shows what happened instead of blanking the whole app. */
+class PageErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('Page failed to render', error, info?.componentStack); // eslint-disable-line no-console
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <section className="card" role="alert">
+        <div className="card-head"><h3><AlertTriangle size={16} aria-hidden="true" /> This page could not be shown</h3></div>
+        <p className="small">{String(this.state.error?.message || this.state.error)}</p>
+        <p className="small muted">The rest of the dashboard still works. Try again, or reload the page.</p>
+        <button type="button" className="btn btn-sm" onClick={() => this.setState({ error: null })}>Try again</button>
+      </section>
+    );
+  }
 }
 
 const VIEWS = {
@@ -86,10 +115,10 @@ function SignedIn() {
     // The privacy notice must be readable before creating an account
     return hash.replace(/^#\/?/, '') === 'privacy' ? <PrivacyStandalone /> : <AuthGate />;
   }
-  return <Dashboard key={auth.user.uid} />;
+  return <Dashboard key={auth.user.uid} uid={auth.user.uid} />;
 }
 
-function Dashboard() {
+function Dashboard({ uid }) {
   const initial = fromHash();
   const [page, setPage] = useState(initial.page);
   const [params, setParams] = useState(initial.tab ? { tab: initial.tab } : null);
@@ -124,11 +153,13 @@ function Dashboard() {
 
   const View = VIEWS[page];
   return (
-    <WorkspaceProvider>
+    <WorkspaceProvider uid={uid}>
       <TopNav page={page} onNavigate={navigate} />
       <DatabaseBanner />
       <main>
-        <View onNavigate={navigate} params={params} />
+        <PageErrorBoundary key={page}>
+          <View onNavigate={navigate} params={params} />
+        </PageErrorBoundary>
       </main>
     </WorkspaceProvider>
   );

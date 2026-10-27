@@ -47,7 +47,7 @@ export function HealthBox() {
         <span>Latency <b>{h.latency == null ? '—' : `${h.latency} ms`}</b> · Uptime <b>{h.successRate == null ? '—' : asPct(h.successRate)}</b></span>
       </div>
       <Sparkline samples={health} />
-      <span className="xsmall muted">{health.length === 1 ? 'First check' : `Last ${health.length} checks`}, every 3 seconds</span>
+      <span className="xsmall muted">{health.length === 1 ? 'First check' : `Last ${health.length} checks`}, every 5 seconds while this tab is open</span>
     </div>
   );
 }

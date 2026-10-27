@@ -47,6 +47,13 @@
       "minimum": 1,
       "title": "Max Candidates",
       "type": "integer"
+    },
+    "min_action_timeout_ms": {
+      "default": 10000,
+      "description": "Least time an action waits for its element before healing starts",
+      "minimum": 0,
+      "title": "Min Action Timeout Ms",
+      "type": "integer"
     }
   },
   "title": "EngineConfig",

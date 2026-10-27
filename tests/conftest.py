@@ -13,16 +13,22 @@ os.environ.setdefault("AUTH_REQUIRED", "false")
 os.environ.setdefault("SCHEDULER_ENABLED", "false")
 # Real-browser tests run without Playwright tracing unless a test turns it on
 os.environ.setdefault("ARTIFACT_TRACES", "false")
+# No calls to OSV.dev from tests (dependency tests use a mock transport)
+os.environ.setdefault("DEPENDENCY_SCAN", "false")
+# Visual baselines only where a test turns them on
+os.environ.setdefault("VISUAL_REGRESSION", "false")
 
 
 @pytest.fixture(autouse=True)
 def fresh_store():
     """Every test gets an empty in-memory store (also used by the API via get_db)."""
+    from backend import auth
     from backend.database.session import set_store
     from backend.database.store import MemoryStore
 
     store = MemoryStore()
     set_store(store)
+    auth._display_names.clear()  # cached profile names belong to the previous test's store
     yield store
     set_store(None)
 

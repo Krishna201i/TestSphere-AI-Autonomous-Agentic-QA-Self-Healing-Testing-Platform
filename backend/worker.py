@@ -13,7 +13,13 @@ queued runs survive API restarts or sleep.  It also runs the scheduler
   worker that died, and is marked interrupted (never silently re-run: a
   half-finished run may already have created tests and executions).
 - One run at a time per worker (each needs a browser); scale by running more
-  workers on separate machines.
+  workers on separate machines.  The auto-deploy after a passing run also
+  executes here, and the worker waits for it before taking the next run or
+  stopping.
+- Polling backs off while the queue stays empty (POLL_SECONDS doubling up to
+  IDLE_POLL_SECONDS) and stale runs are looked for every REAP_SECONDS: an
+  idle worker costs a few thousand database reads a day, not tens of
+  thousands (each query is at least one read on Firestore).
 """
 
 from __future__ import annotations
@@ -40,6 +46,8 @@ from backend.pipeline import runner
 logger = logging.getLogger("testsphere.worker")
 
 POLL_SECONDS = float(os.getenv("WORKER_POLL_SECONDS", "5"))
+IDLE_POLL_SECONDS = float(os.getenv("WORKER_IDLE_POLL_SECONDS", "60"))
+REAP_SECONDS = float(os.getenv("WORKER_REAP_SECONDS", "300"))
 HEARTBEAT_SECONDS = float(os.getenv("WORKER_HEARTBEAT_SECONDS", "30"))
 STALE_SECONDS = float(os.getenv("WORKER_STALE_SECONDS", "600"))
 
@@ -74,11 +82,17 @@ def reap_stale(db: Store, now: datetime | None = None) -> list[int]:
         last = _parse(row.get("heartbeat_at")) or _parse(row.get("started_at"))
         if last and now - last < timedelta(seconds=STALE_SECONDS):
             continue
+        error = "Interrupted: the worker running it stopped before it finished."
         if db.update_if(PIPELINE_RUNS, row["id"], "heartbeat_at", row.get("heartbeat_at"),
-                        status="error", finished_at=now_iso(),
-                        error="Interrupted: the worker running it stopped before it finished."):
+                        status="error", finished_at=now_iso(), error=error):
+            runner.end_interrupted(db, {**row, "status": "error"}, error)
             reaped.append(row["id"])
     return reaped
+
+
+def next_poll(idle_seconds: float) -> float:
+    """Seconds to wait after an empty poll, given the current wait."""
+    return min(max(idle_seconds * 2, POLL_SECONDS), max(IDLE_POLL_SECONDS, POLL_SECONDS))
 
 
 async def _heartbeat(db: Store, run_id: int) -> None:
@@ -91,6 +105,8 @@ async def _heartbeat(db: Store, run_id: int) -> None:
 
 
 async def run_one(db: Store, run: Record) -> None:
+    from backend.pipeline import deploy
+
     beat = asyncio.create_task(_heartbeat(db, run["id"]))
     try:
         logger.info("Executing pipeline run #%s (%s)", run["id"], run.get("project_name"))
@@ -100,26 +116,33 @@ async def run_one(db: Store, run: Record) -> None:
         beat.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await beat
+    await deploy.wait_for_deployments()  # the run's auto-deploy finishes here, never cut off
 
 
 async def work(stop: asyncio.Event, db: Store | None = None) -> None:
     """Claim and execute queued runs until *stop* is set."""
     me = worker_id()
-    logger.info("Worker %s polling every %ss", me, POLL_SECONDS)
+    logger.info("Worker %s polling every %ss (up to %ss while idle)", me, POLL_SECONDS, IDLE_POLL_SECONDS)
+    wait, last_reap = POLL_SECONDS, float("-inf")
+    loop = asyncio.get_running_loop()
     while not stop.is_set():
         db_now = db or get_store()
         try:
-            if reaped := reap_stale(db_now):
-                logger.warning("Marked run(s) %s interrupted (their worker stopped)", reaped)
+            if loop.time() - last_reap >= REAP_SECONDS:
+                last_reap = loop.time()
+                if reaped := reap_stale(db_now):
+                    logger.warning("Marked run(s) %s interrupted (their worker stopped)", reaped)
             run = claim_next(db_now, me)
         except StoreUnavailableError as exc:
             logger.warning("Queue check skipped (database unavailable): %s", exc)
             run = None
         if run:
             await run_one(db_now, run)
+            wait = POLL_SECONDS  # more work may be queued behind it
             continue
         with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=POLL_SECONDS)
+            await asyncio.wait_for(stop.wait(), timeout=wait)
+        wait = next_poll(wait)
 
 
 async def main() -> None:
@@ -133,6 +156,9 @@ async def main() -> None:
     init_db()
 
     from backend.netguard import check_target
+    from backend.pipeline import deploy
+
+    deploy.set_executor(worker_id())
     from engine.browser import set_request_guard
 
     set_request_guard(check_target)  # same SSRF policy for browser runs as in the API
