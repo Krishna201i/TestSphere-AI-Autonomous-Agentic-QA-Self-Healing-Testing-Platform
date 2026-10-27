@@ -4,7 +4,8 @@ import { useWorkspace } from '../state/Workspace';
 import { toDate } from '../lib/derive';
 import usePersistentState from '../lib/usePersistentState';
 
-const KINDS = ['all', 'scan', 'approval', 'retest', 'qa', 'target', 'execution'];
+// Shown first when present; any other kind the server records follows
+const COMMON_KINDS = ['scan', 'approval', 'retest', 'qa', 'pipeline', 'deploy', 'execution'];
 
 export default function AuditLogs({ params }) {
   const { audit, executions, testCases } = useWorkspace();
@@ -33,8 +34,18 @@ export default function AuditLogs({ params }) {
     return [...audit, ...execEntries.filter((e) => !audited.has(e.id))].sort((a, b) => toDate(b.at) - toDate(a.at));
   }, [audit, executions, testCases]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Filter by every kind present (pipeline, deploy, patch, ingest, visual, ...), not a fixed list
+  const kinds = useMemo(() => {
+    const present = new Set(entries.map((e) => e.kind).filter(Boolean));
+    if (kind !== 'all') present.add(kind);
+    return ['all', ...COMMON_KINDS.filter((k) => present.has(k)),
+      ...[...present].filter((k) => !COMMON_KINDS.includes(k)).sort()];
+  }, [entries, kind]);
+
+  // The search covers who did it as well as what ("My activity" searches your name)
   const q = query.trim().toLowerCase();
-  const shown = entries.filter((e) => (kind === 'all' || e.kind === kind) && (!q || e.message.toLowerCase().includes(q)));
+  const shown = entries.filter((e) => (kind === 'all' || e.kind === kind)
+    && (!q || `${e.actor || ''} ${e.message}`.toLowerCase().includes(q)));
 
   function exportJson() {
     const blob = new Blob([JSON.stringify(shown, null, 2)], { type: 'application/json' });
@@ -62,7 +73,7 @@ export default function AuditLogs({ params }) {
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search logs" aria-label="Search logs" />
           </div>
           <div className="tabs" role="tablist" aria-label="Filter by type">
-            {KINDS.map((k) => (
+            {kinds.map((k) => (
               <button key={k} type="button" role="tab" aria-selected={kind === k} className={`tab ${kind === k ? 'active' : ''}`} onClick={() => setKind(k)}>{k}</button>
             ))}
           </div>

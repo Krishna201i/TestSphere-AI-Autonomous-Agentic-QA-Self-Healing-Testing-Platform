@@ -40,6 +40,16 @@ All settings can be configured via environment variables or a `.env` file at rep
 
 Firebase console setup for sign-in: **Authentication → Get started**, enable **Email/Password** (and **Google** if wanted)
 under *Sign-in method*, and add the dashboard's domain under *Settings → Authorized domains*.
+
+**Dashboard hosted apart from the API (e.g. Vercel + Render).** Build the dashboard with `VITE_API_URL` set to the
+backend's URL (e.g. `https://your-api.onrender.com`; in Vercel: Project → Settings → Environment Variables, then
+redeploy), and set `CORS_ORIGINS` on the backend to the dashboard's origin. Without `VITE_API_URL` the dashboard
+calls its own host, which answers with the app's HTML page; the dashboard then says so instead of failing to parse
+it. For a local build, `VITE_API_URL` is read from the `.env` at the repository root. Google and GitHub sign-in use a
+pop-up; when the browser blocks it, the dashboard asks the user to allow pop-ups. The redirect fallback is only used
+when `FIREBASE_AUTH_DOMAIN` is the dashboard's own domain (with `/__/auth/*` proxied to
+`<project>.firebaseapp.com`, as in Firebase's *redirect best practices*), because browsers that partition
+third-party storage return from a redirect to another domain signed out.
 GitHub push webhooks are per project: the Automation page shows each project's payload URL and secret.
 
 ### 2.2 AI Agent Settings

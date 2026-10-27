@@ -26,6 +26,7 @@ import {
   updateProfile,
 } from 'firebase/auth';
 import { API_BASE_LABEL, configureAuth, getMe, getSystem, probeHealth, recordLogin } from '../services/api';
+import { clearSavedWorkspaces } from './Workspace';
 
 const AuthContext = createContext(null);
 
@@ -43,6 +44,10 @@ const FIREBASE_ERRORS = {
   'auth/popup-closed-by-user': 'The sign-in window was closed before finishing.',
   'auth/cancelled-popup-request': 'The sign-in window was closed before finishing.',
   'auth/popup-blocked': 'The browser blocked the sign-in window. Allow pop-ups for this site and try again.',
+  'auth/operation-not-supported-in-this-environment':
+    'This browser cannot open the sign-in window here (e.g. an in-app browser). Open the site in Chrome, Safari or Firefox, or sign in with email.',
+  'auth/web-storage-unsupported':
+    'This browser blocks the storage sign-in needs (private mode or blocked site data). Allow site data, or sign in with email.',
   'auth/account-exists-with-different-credential':
     'An account with this email already exists with another sign-in method. Sign in with Google or your email, '
     + 'then connect GitHub in Profile → Integrations.',
@@ -151,6 +156,10 @@ export function AuthProvider({ children }) {
       await signInWithPopup(authRef.current, makeProvider());
     } catch (err) {
       if (!NEEDS_REDIRECT.includes(err?.code)) throw err;
+      // A redirect only comes back signed in when Firebase's auth domain is this
+      // site's own (browsers partition the storage it needs across domains);
+      // elsewhere it would silently return to the login page, so say what to do
+      if (systemRef.current?.auth?.firebase?.authDomain !== window.location.host) throw err;
       await signInWithRedirect(authRef.current, makeProvider());
       return;
     }
@@ -202,6 +211,7 @@ export function AuthProvider({ children }) {
   const resetPassword = useCallback((email) => sendPasswordResetEmail(authRef.current, email.trim()), []);
 
   const signOut = useCallback(async () => {
+    clearSavedWorkspaces(); // the next person on this browser starts clean
     if (authRef.current) await firebaseSignOut(authRef.current);
   }, []);
 

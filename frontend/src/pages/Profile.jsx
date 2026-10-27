@@ -4,6 +4,7 @@ import { useAuth } from '../state/Auth';
 import { useWorkspace } from '../state/Workspace';
 import { deleteMe, getMe, updateMe } from '../services/api';
 import Integrations from '../components/Integrations';
+import ApiTokens from '../components/ApiTokens';
 import { timeAgo, toDate } from '../lib/derive';
 
 const PROVIDERS = { password: 'Email & password', 'google.com': 'Google', local: 'Local (sign-in off)' };
@@ -178,6 +179,7 @@ export default function Profile({ onNavigate }) {
       </div>
 
       <Integrations />
+      {auth.mode === 'firebase' && <ApiTokens />}
 
       <section className="card">
         <div className="card-head"><h3>Your data</h3></div>

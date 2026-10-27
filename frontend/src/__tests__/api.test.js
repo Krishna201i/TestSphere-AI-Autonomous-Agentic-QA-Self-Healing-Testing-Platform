@@ -45,3 +45,16 @@ describe('API base URL', () => {
     expect(calls).toEqual([`/api/test-executions?limit=${api.RECENT_EXECUTIONS}`, '/api/test-executions/stats']);
   });
 });
+
+describe('A dashboard host answering instead of the API', () => {
+  it('explains that VITE_API_URL is missing, not a JSON parse error', async () => {
+    window.history.replaceState(null, '', '/');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<!doctype html><div id="root"></div>', {
+      status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    })));
+    const api = await import('../services/api');
+    const err = await api.getSystem().catch((e) => e);
+    expect(err.kind).toBe('misconfigured');
+    expect(err.message).toContain('VITE_API_URL');
+  });
+});

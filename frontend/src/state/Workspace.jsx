@@ -5,7 +5,9 @@
  *
  * Findings, approvals, retests and audit events live on the server, so every
  * viewer sees the same trail.  Only view conveniences (which scan is shown,
- * the selected finding, the last run's details) are kept in localStorage.
+ * the selected finding, the last run's details) are kept in localStorage,
+ * under a key per signed-in account: the next account on this browser never
+ * sees them, and signing out or deleting the account removes them.
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -32,8 +34,9 @@ import {
 } from '../services/api';
 import { toDate } from '../lib/derive';
 
-const STORAGE_KEY = 'testsphere.workspace.v2';
-const HEALTH_INTERVAL_MS = 5000;
+const STORAGE_PREFIX = 'testsphere.workspace';
+const STORAGE_VERSION = 'v2';
+export const HEALTH_INTERVAL_MS = 5000;
 const HEALTH_SAMPLES = 40;
 // Every list the dashboard reloads costs one database read per record (Firestore
 // bills them), so records refresh once a minute and only while the tab is visible
@@ -93,24 +96,36 @@ function loadOperator() {
 
 const WorkspaceContext = createContext(null);
 
-function loadPersisted() {
+const storageKey = (uid) => `${STORAGE_PREFIX}.${STORAGE_VERSION}.${uid || 'local'}`;
+
+function loadPersisted(key) {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+    return JSON.parse(localStorage.getItem(key)) || {};
   } catch {
     return {};
   }
 }
 
-function savePersisted(value) {
+function savePersisted(key, value) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // storage full or blocked — the view just won't be restored on reload
   }
 }
 
-export function WorkspaceProvider({ children }) {
-  const persisted = useRef(loadPersisted()).current;
+/** Remove every account's saved view (on sign-out and account deletion). */
+export function clearSavedWorkspaces() {
+  try {
+    Object.keys(localStorage).filter((k) => k.startsWith(STORAGE_PREFIX)).forEach((k) => localStorage.removeItem(k));
+  } catch {
+    // storage blocked: nothing was saved either
+  }
+}
+
+export function WorkspaceProvider({ uid, children }) {
+  const key = storageKey(uid);
+  const persisted = useRef(loadPersisted(key)).current;
 
   const [operator, setOperatorState] = useState(loadOperator);
   const [system, setSystem] = useState(null);
@@ -139,8 +154,8 @@ export function WorkspaceProvider({ children }) {
   const [deployments, setDeployments] = useState([]);
 
   useEffect(() => {
-    savePersisted({ scanMeta, scanHistory, selectedKey, lastRun });
-  }, [scanMeta, scanHistory, selectedKey, lastRun]);
+    savePersisted(key, { scanMeta, scanHistory, selectedKey, lastRun });
+  }, [key, scanMeta, scanHistory, selectedKey, lastRun]);
 
   const setOperator = useCallback((name) => {
     const clean = (name || '').trim().slice(0, 64) || DEFAULT_OPERATOR;
@@ -175,7 +190,8 @@ export function WorkspaceProvider({ children }) {
     ]);
     const [p, a, t, e, f, au, bps] = results.map((r) => (r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : null));
     if (bps) setBlueprints(bps);
-    getSystem().then(setSystem).catch(() => setSystem(null));
+    // A failed refresh keeps what is known; `false` only when the backend has no /api/system
+    getSystem().then(setSystem).catch((err) => setSystem((prev) => (err.kind === 'outdated' ? false : prev)));
     getExecutionStats().then(setExecutionTotals).catch(() => setExecutionTotals(null)); // older backend: count the list
     if (p) setProjects(p);
     if (a) setApplications(a);
@@ -283,7 +299,7 @@ export function WorkspaceProvider({ children }) {
       upsertFinding(updated);
       return updated;
     } catch (err) {
-      if (!err.status) noteError('retest', `Retest of ${finding.check_id} failed: ${err.message}`);
+      noteError('retest', `Retest of ${finding.check_id} failed: ${err.message}`);
       throw err;
     } finally {
       setRetesting(null);

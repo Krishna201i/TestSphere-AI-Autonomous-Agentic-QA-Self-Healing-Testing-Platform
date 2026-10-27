@@ -5,8 +5,10 @@
  * fine-grained token (limited to chosen repositories) instead.
  */
 import React, { useEffect, useState } from 'react';
-import { ExternalLink, GitPullRequest, Github, Unplug } from 'lucide-react';
-import { connectGitHub, disconnectGitHub, getIntegrations } from '../services/api';
+import { ExternalLink, GitPullRequest, Github, KeyRound, Trash2, Unplug } from 'lucide-react';
+import {
+  connectGitHub, deleteGitCredential, disconnectGitHub, getGitCredentials, getIntegrations, saveGitCredential,
+} from '../services/api';
 import { timeAgo } from '../lib/derive';
 import { authMessage, useAuth } from '../state/Auth';
 
@@ -56,9 +58,12 @@ export default function Integrations() {
 
   async function disconnect() {
     setBusy(true);
+    setError(null);
     try {
       await disconnectGitHub();
       setGithub({ connected: false });
+    } catch (err) {
+      setError(`Could not disconnect GitHub: ${err.message}`);
     } finally {
       setBusy(false);
     }
@@ -82,6 +87,7 @@ export default function Integrations() {
       {github?.connected && (
         <p className="hint m-0">Fix patches can now be opened as pull requests, and runs started by a push show their result on the commit.</p>
       )}
+      {github?.connected && error && <div className="error-text" role="alert">{error}</div>}
       {github && !github.connected && (
         <>
           <p className="card-sub">
@@ -117,6 +123,89 @@ export default function Integrations() {
           {error && <div className="error-text" role="alert">{error}</div>}
         </>
       )}
+      <GitCredentials />
     </section>
+  );
+}
+
+/** Tokens for private repositories on GitLab, Bitbucket and other allowed Git hosts. */
+function GitCredentials() {
+  const [rows, setRows] = useState(null);
+  const [form, setForm] = useState({ host: '', username: '', token: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    getGitCredentials().then(setRows).catch(() => setRows([]));
+  }, []);
+
+  async function save(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await saveGitCredential({
+        host: form.host.trim(), username: form.username.trim() || null, token: form.token.trim(),
+      });
+      setRows((prev) => [...(prev || []).filter((r) => r.host !== saved.host), saved]);
+      setForm({ host: '', username: '', token: '' });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(host) {
+    setError(null);
+    try {
+      await deleteGitCredential(host);
+      setRows((prev) => prev.filter((r) => r.host !== host));
+    } catch (err) {
+      setError(`Could not remove the credential for ${host}: ${err.message}`);
+    }
+  }
+
+  return (
+    <div className="stack-sm">
+      <h4 className="section-title mt-3"><KeyRound size={14} aria-hidden="true" /> Other Git hosts</h4>
+      <p className="hint m-0">
+        For private repositories on GitLab, Bitbucket or a self-hosted Git server: save an access token with read access
+        for the host. It is stored encrypted and never shown again.
+      </p>
+      {rows?.length > 0 && (
+        <ul className="plain-list small">
+          {rows.map((r) => (
+            <li key={r.host} className="row-between">
+              <span><b>{r.host}</b> <span className="muted">· {r.username}{r.added_at ? ` · ${timeAgo(r.added_at)}` : ''}</span></span>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => remove(r.host)}>
+                <Trash2 size={14} /> Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form className="form-row" onSubmit={save}>
+        <label className="field">
+          Host
+          <input className="input" value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })}
+            placeholder="gitlab.com" required minLength={3} />
+        </label>
+        <label className="field">
+          User name <span className="muted">(optional)</span>
+          <input className="input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })}
+            autoComplete="off" placeholder="Bitbucket needs yours" />
+        </label>
+        <label className="field wide">
+          Access token
+          <input className="input mono" type="password" value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })}
+            autoComplete="off" spellCheck={false} required minLength={8} />
+        </label>
+        <button type="submit" className="btn" disabled={busy || !form.host.trim() || form.token.trim().length < 8}>
+          {busy ? 'Saving…' : 'Save credential'}
+        </button>
+      </form>
+      {error && <div className="error-text" role="alert">{error}</div>}
+    </div>
   );
 }
