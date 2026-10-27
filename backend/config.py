@@ -7,6 +7,7 @@ Does not hardcode any sensitive information.
 
 import json
 import os
+from pathlib import Path
 from typing import Annotated
 
 from dotenv import load_dotenv
@@ -79,20 +80,43 @@ def _default_auth_required() -> bool:
 
 
 def _default_firebase_project_id() -> str:
-    """FIREBASE_PROJECT_ID, else the project_id inside the service-account JSON."""
+    """FIREBASE_PROJECT_ID, else the project_id inside the service-account JSON.
+
+    The JSON is found the way the database finds it (quoted values, a Render
+    Secret File given by name), so sign-in and Firestore agree on the project.
+    """
     explicit = os.getenv("FIREBASE_PROJECT_ID")
     if explicit:
         return explicit
     raw = (os.getenv("FIREBASE_CREDENTIALS") or "").strip()
     try:
-        if raw.startswith("{"):
-            return json.loads(raw).get("project_id", "")
-        if raw and os.path.isfile(raw):
-            with open(raw, encoding="utf-8") as fh:
-                return json.load(fh).get("project_id", "")
+        source = service_account_info(raw, SECRET_FILES_DIR) if raw else None
+        if isinstance(source, str):
+            with open(source, encoding="utf-8") as fh:
+                source = json.load(fh)
+        return str(source.get("project_id") or "") if isinstance(source, dict) else ""
     except (OSError, ValueError):
-        pass
-    return ""
+        return ""
+
+
+# Where Render mounts Secret Files (a Docker service only has them here)
+SECRET_FILES_DIR = Path("/etc/secrets")
+
+
+def service_account_info(credentials: str, secret_dir: Path) -> dict | str | None:
+    """FIREBASE_CREDENTIALS as the parsed key JSON or the path of the key
+    file; None when it names a file that exists neither as given nor in
+    *secret_dir*.  Tolerates the value being wrapped in quotes.  Raises
+    ``ValueError`` for malformed JSON."""
+    info = credentials.strip()
+    if len(info) >= 2 and info[0] == info[-1] and info[0] in "'\"":
+        info = info[1:-1].strip()
+    if info.startswith("{"):
+        return json.loads(info)
+    if Path(info).is_file():
+        return info
+    secret = secret_dir / Path(info).name
+    return str(secret) if secret.is_file() else None
 
 
 class Settings(BaseSettings):
@@ -207,6 +231,9 @@ class Settings(BaseSettings):
     DEPLOY_SETTLE_SECONDS: int = Field(default_factory=lambda: int(os.getenv("DEPLOY_SETTLE_SECONDS", "90")))
     DEPLOY_POLL_SECONDS: int = Field(default_factory=lambda: int(os.getenv("DEPLOY_POLL_SECONDS", "10")))
     DEPLOY_HEALTHY_CHECKS: int = Field(default_factory=lambda: int(os.getenv("DEPLOY_HEALTHY_CHECKS", "3")))
+    # An active deployment that has not saved progress for this long belongs
+    # to a process that died (e.g. a worker killed mid-deploy) and is ended
+    DEPLOY_STALE_SECONDS: int = Field(default_factory=lambda: int(os.getenv("DEPLOY_STALE_SECONDS", "1200")))
 
     # Fernet key that encrypts stored integration tokens (GitHub).  Required
     # on hosted servers; local development generates data/.token_key.

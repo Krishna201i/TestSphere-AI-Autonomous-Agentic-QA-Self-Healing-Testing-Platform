@@ -88,3 +88,33 @@ def test_the_plan_stage_quarantines_ai_tests(fresh_store, monkeypatch):
     fresh_store.update(TEST_CASES, ai[0]["id"], quarantined=False)
     _, cases, _ = asyncio.run(runner._plan(fresh_store, project, ANALYSIS, None))
     assert [c["quarantined"] for c in cases if c["category"] == "ai"] == [False]
+    # the model reuses the id for different steps: that test was never reviewed
+    changed = case("TC_LOGIN", [(TestAction.FILL, "#user", "bob"), (TestAction.CLICK, "#go", None)])
+
+    async def changed_ai(analysis, prompt, frameworks=None):
+        return ai_plan.to_suite_tests([changed], analysis)[0], "AI planner added 1 test(s)"
+
+    monkeypatch.setattr(ai_plan, "ai_tests", changed_ai)
+    _, cases, _ = asyncio.run(runner._plan(fresh_store, project, ANALYSIS, None))
+    assert [c["quarantined"] for c in cases if c["category"] == "ai"] == [True]
+
+
+def test_checks_and_exact_assertions_are_kept_not_dropped():
+    terms = {**ANALYSIS, "elements_inventory": {**ANALYSIS["elements_inventory"], "inputs": [
+        *ANALYSIS["elements_inventory"]["inputs"], {"selector": "#terms", "type": "checkbox", "id": "terms"}]}}
+    signup = case("TC_SIGNUP", [(TestAction.FILL, "#user", "ann"), (TestAction.CHECK, "#terms", None),
+                                (TestAction.CLICK, "#go", None)],
+                  [Assertion(type=AssertionType.VALUE_EQUALS, target="#user", expected="ann"),
+                   Assertion(type=AssertionType.ELEMENT_HAS_TEXT, target="#go", expected="Log in"),
+                   Assertion(type=AssertionType.URL_EQUALS, expected="http://app.test/account")])
+    tests, dropped = ai_plan.to_suite_tests([signup], terms)
+    assert dropped == 0
+    assert [s["action"] for s in tests[0]["steps"]] == [
+        "NAVIGATE", "FILL", "CHECK", "CLICK", "ASSERT_VALUE", "ASSERT_HAS_TEXT", "ASSERT_URL_EQUALS"]
+
+
+def test_the_mock_planner_answers_with_its_scenarios(monkeypatch):
+    monkeypatch.setattr(settings, "PIPELINE_AI_PLANNER", "on")
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    tests, note = asyncio.run(ai_plan.ai_tests(ANALYSIS, "log in"))
+    assert "skipped" not in (note or ""), note

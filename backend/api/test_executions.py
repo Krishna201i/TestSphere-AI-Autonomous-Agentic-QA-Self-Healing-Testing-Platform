@@ -88,8 +88,13 @@ def get_test_execution(
     db: Store = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Record:
-    """Retrieve a single test execution with its step results and artifact keys."""
-    return owned_execution(db, user, execution_id)
+    """Retrieve a single test execution with its step results and artifact keys
+    (for a visual check, also the key of the baseline it is compared with)."""
+    execution = owned_execution(db, user, execution_id)
+    if execution.get("visual"):
+        baseline = baseline_key(execution.get("owner_uid") or "local-dev", execution["test_case_id"])
+        execution = {**execution, "visual": {**execution["visual"], "baseline": baseline}}
+    return execution
 
 
 def artifact_keys(execution: Record) -> set[str]:

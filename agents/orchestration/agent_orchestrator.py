@@ -445,6 +445,16 @@ class AgentOrchestrator:
         self._workflows[state.workflow_id] = state
         return state
 
+    @property
+    def memory(self) -> MemoryStore:
+        """The healing memory this orchestrator reads and records into."""
+        return self._memory
+
+    def record_healing_feedback(self, feedback: HealingResultFeedback) -> None:
+        """Record a heal validated outside a workflow (e.g. one the engine
+        made mid-run) so later diagnoses and candidates can learn from it."""
+        self._feedback_processor.process_feedback(feedback)
+
     def get_state(self, workflow_id: str) -> AgentState | None:
         """Retrieve the current state for a workflow.
 
@@ -1030,14 +1040,24 @@ class AgentOrchestrator:
     ) -> list[ElementRecord]:
         """Extract current UI elements from the failure context.
 
-        Returns an empty list if no current element is available.
+        Uses the alternative element the execution layer found, if any, and
+        the page's elements from the DOM evidence of the failed step
+        (``dom_evidence["elements"]``).  Returns an empty list if neither
+        is available.
         """
         elements: list[ElementRecord] = []
-        if (
-            state.failure_context is not None
-            and state.failure_context.current_element is not None
-        ):
-            elements.append(state.failure_context.current_element)
+        context = state.failure_context
+        if context is None:
+            return elements
+        if context.current_element is not None:
+            elements.append(context.current_element)
+        for raw in (context.dom_evidence or {}).get("elements") or []:
+            try:
+                element = ElementRecord.model_validate(raw)
+            except ValueError:
+                continue
+            if all(e.selector != element.selector for e in elements):
+                elements.append(element)
         return elements
 
     # ══════════════════════════════════════════════════════════

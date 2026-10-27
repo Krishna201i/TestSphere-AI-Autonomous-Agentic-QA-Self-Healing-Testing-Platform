@@ -311,16 +311,12 @@ def _service_account_source(credentials: str) -> dict | str:
     found raises ``StoreUnavailableError`` naming the file, never the value
     itself in case it is a mangled key.
     """
-    info = credentials.strip()
-    if len(info) >= 2 and info[0] == info[-1] and info[0] in "'\"":
-        info = info[1:-1].strip()
-    if info.startswith("{"):
-        return json.loads(info)
-    if Path(info).is_file():
-        return info
-    secret = SECRET_FILES_DIR / Path(info).name
-    if secret.is_file():
-        return str(secret)
+    from backend.config import service_account_info
+
+    source = service_account_info(credentials, SECRET_FILES_DIR)
+    if source is not None:
+        return source
+    info = credentials.strip().strip("'\"").strip()
     name = Path(info).name if info.lower().endswith(".json") and len(info) < 260 else "key.json"
     raise StoreUnavailableError(
         f"FIREBASE_CREDENTIALS points to a file that does not exist on this server ({name}). "

@@ -114,3 +114,53 @@ def test_worker_mode_requires_a_shared_database(monkeypatch):
     assert "share" in startup_safety_problem()
     monkeypatch.setattr(settings, "DATABASE_BACKEND", "firestore")
     assert startup_safety_problem() is None
+
+
+def test_a_reaped_run_closes_its_stages_and_updates_the_project(fresh_store):
+    from backend.models import PROJECTS
+
+    run = queue_run(fresh_store)
+    old = (datetime.now(UTC) - timedelta(seconds=worker.STALE_SECONDS + 60)).isoformat()
+    stages = [dict(s) for s in run["stages"]]
+    stages[0]["status"] = "running"
+    fresh_store.update(PIPELINE_RUNS, run["id"], status="running", heartbeat_at=old, stages=stages)
+
+    worker.reap_stale(fresh_store)
+
+    reaped = fresh_store.get(PIPELINE_RUNS, run["id"])
+    assert reaped["stages"][0]["status"] == "failed"
+    assert not [s for s in reaped["stages"] if s["status"] in ("running", "pending")]
+    assert fresh_store.get(PROJECTS, run["project_id"])["last_run_status"] == "error"
+
+
+def test_an_idle_worker_polls_less_and_less(monkeypatch):
+    monkeypatch.setattr(worker, "POLL_SECONDS", 5)
+    monkeypatch.setattr(worker, "IDLE_POLL_SECONDS", 60)
+    waits, wait = [], 5
+    for _ in range(6):
+        wait = worker.next_poll(wait)
+        waits.append(wait)
+    assert waits == [10, 20, 40, 60, 60, 60]
+    # a day of idling: a few thousand queries instead of about 35,000
+    assert 86_400 / 60 + 86_400 / worker.REAP_SECONDS < 2_000
+
+
+def test_the_worker_waits_for_the_runs_deployment(fresh_store, monkeypatch):
+    from backend.pipeline import deploy
+
+    finished = []
+
+    async def fake_execute(run_id, *a, **k):
+        async def deployment():
+            await asyncio.sleep(0.05)
+            finished.append("deploy")
+
+        task = asyncio.get_running_loop().create_task(deployment())
+        deploy._tasks.add(task)
+        task.add_done_callback(deploy._tasks.discard)
+        return {"status": "passed"}
+
+    monkeypatch.setattr(runner, "execute_run", fake_execute)
+    queue_run(fresh_store)
+    asyncio.run(worker.run_one(fresh_store, worker.claim_next(fresh_store, "w")))
+    assert finished == ["deploy"]

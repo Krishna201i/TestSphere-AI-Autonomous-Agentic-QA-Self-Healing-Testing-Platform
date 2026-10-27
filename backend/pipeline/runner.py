@@ -128,10 +128,18 @@ def recover_interrupted(db: Store) -> int:
     count = 0
     for status in ACTIVE:
         for row in db.find(PIPELINE_RUNS, status=status):
-            db.update(PIPELINE_RUNS, row["id"], status="error", finished_at=now_iso(),
-                      error="Interrupted: the server restarted before this run finished.")
+            end_interrupted(db, row, "Interrupted: the server restarted before this run finished.")
             count += 1
     return count
+
+
+def end_interrupted(db: Store, run: Record, error: str) -> None:
+    """Close a run that stopped part-way: its running stage failed, the rest
+    were not run, and the project shows this run as its last."""
+    state = _RunState(db, run)
+    state.end(error)
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +181,24 @@ class _RunState:
             if s["status"] == "pending":
                 self.stage(s["key"], "skipped", reason)
 
+    def end(self, error: str) -> None:
+        """End the run as an error: no stage is left running or pending, and
+        the project's last-run status says so."""
+        stages = [dict(s) for s in self.doc.get("stages") or []]
+        for s in stages:
+            if s["status"] in ("running", "pending"):
+                stamp = now_iso()
+                if s["status"] == "running":
+                    s["status"], s["detail"] = "failed", error
+                else:
+                    s["status"], s["detail"] = "skipped", "Not run: the pipeline stopped early"
+                s["finished_at"] = stamp
+                s["started_at"] = s.get("started_at") or stamp
+        self.save(stages=stages, status="error", error=error, finished_at=now_iso())
+        project = self.db.get(PROJECTS, self.doc["project_id"])
+        if project is not None:
+            _finish_project(self.db, project, self)
+
 
 async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None) -> Record | None:
     """Run every stage of pipeline run *run_id*; never raises (failures end up on the run)."""
@@ -192,22 +218,33 @@ async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None
         except StoreUnavailableError as exc:
             logger.error("Pipeline #%s stopped: database unavailable: %s", run_id, exc)
             try:
-                state.save(status="error", error=f"Database unavailable: {exc}", finished_at=now_iso())
+                state.end(f"Database unavailable: {exc}")
             except StoreUnavailableError:
                 pass
         except Exception as exc:  # keep the run's record honest instead of leaving it "running"
             logger.exception("Pipeline #%s crashed", run_id)
-            state.skip_rest("Not run: the pipeline stopped on an internal error")
-            state.save(status="error", error=f"Internal error: {exc}", finished_at=now_iso())
+            state.end(f"Internal error: {exc}")
         finished = db.get(PIPELINE_RUNS, run_id)
         try:
             current = db.get(PROJECTS, project["id"]) or project
             await notify_run(current, finished)
             await asyncio.to_thread(report_commit_status, db, current, finished)
             _deploy_if_green(db, current, finished)
+            _start_pending_push(db, current)
         except StoreUnavailableError:
             pass
         return finished
+
+
+def _start_pending_push(db: Store, project: Record) -> Record | None:
+    """Start the run for a push that arrived while this project's run was active."""
+    push = project.get("pending_push")
+    if not push or not project.get("app_url"):
+        return None
+    if not db.update_if(PROJECTS, project["id"], "pending_push", push, pending_push=None):
+        return None  # another process took it (or a newer push replaced it and will be taken)
+    return start_run(db, project, trigger="webhook", actor=push.get("actor") or "github",
+                     detail=push.get("detail"), ingest=True, commit_sha=push.get("commit_sha"))
 
 
 def report_commit_status(db: Store, project: Record, run: Record) -> bool:
@@ -407,8 +444,13 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
                 row = db.update(TEST_CASES, row["id"], quarantined=True)
             created += 1
         elif row.get("description") != description or row.get("name") != test["name"][:255]:
-            row = db.update(TEST_CASES, row["id"], name=test["name"][:255], description=description,
-                            version=int(row.get("version") or 1) + 1)
+            changes = {"name": test["name"][:255], "description": description,
+                       "version": int(row.get("version") or 1) + 1}
+            if test["category"] == "ai" and row.get("description") != description:
+                # The model reused the id for different steps: what the user
+                # trusted is gone, so the new test starts quarantined again
+                changes["quarantined"] = True
+            row = db.update(TEST_CASES, row["id"], **changes)
         generated.append(row)
 
     saved = [tc for tc in db.find(TEST_CASES, application_id=application["id"], order_by="id")

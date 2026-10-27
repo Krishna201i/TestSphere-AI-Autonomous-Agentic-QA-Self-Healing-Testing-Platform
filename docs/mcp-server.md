@@ -9,7 +9,11 @@ It drives a running TestSphere server through its REST API.
 | Variable | Meaning |
 | --- | --- |
 | `TESTSPHERE_URL` | The TestSphere server (default `http://127.0.0.1:8000`) |
-| `TESTSPHERE_TOKEN` | A sign-in token, when the server requires sign-in (`AUTH_REQUIRED=true`) |
+| `TESTSPHERE_TOKEN` | An API token, when the server requires sign-in (`AUTH_REQUIRED=true`) |
+
+To get an API token, open the dashboard, go to **Profile → API tokens**, name the token (for example
+"Claude Code MCP") and copy it. It starts with `tsk_`, is shown only once, and acts as you until you revoke
+it there. Unlike a sign-in session it does not expire after an hour. Deleting your account revokes it.
 
 ## Tools
 

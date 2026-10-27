@@ -64,6 +64,30 @@ from agents.schemas.enums import (
 logger = logging.getLogger(__name__)
 
 
+# ── Missing-element detection ─────────────────────────────────
+
+
+def _is_missing_element(error_message: str) -> bool:
+    """Whether the error says the target element is not on the page.
+
+    Besides explicit "not found" wording this covers how Playwright reports
+    a locator that matches nothing: an action timeout whose call log only
+    shows it waiting for the locator, never resolving it to an element.
+    """
+    error_lower = error_message.lower()
+    if (
+        "not found" in error_lower
+        or "no element" in error_lower
+        or "element_not_found" in error_lower
+    ):
+        return True
+    return (
+        ("timeout" in error_lower or "exceeded" in error_lower)
+        and "waiting for locator(" in error_lower
+        and "resolved to" not in error_lower
+    )
+
+
 # ── Recommended Action Mapping ────────────────────────────────
 
 _ACTION_MAP: dict[FailureType, RecommendedAction] = {
@@ -331,12 +355,7 @@ class FailureAnalyzerAgent:
         """
         has_previous = historical.previous_element is not None
         has_current_alt = failure.current_element is not None
-        error_lower = failure.error_message.lower()
-        not_found_signal = (
-            "not found" in error_lower
-            or "no element" in error_lower
-            or "element_not_found" in error_lower
-        )
+        not_found_signal = _is_missing_element(failure.error_message)
 
         if has_previous and not_found_signal and has_current_alt:
             # Strong evidence: previous existed + current missing + alternative found
@@ -440,14 +459,7 @@ class FailureAnalyzerAgent:
         evidence: list[FailureEvidence],
     ) -> tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str] | None:
         """Check if the element simply cannot be found."""
-        error_lower = failure.error_message.lower()
-        not_found = (
-            "not found" in error_lower
-            or "no element" in error_lower
-            or "element_not_found" in error_lower
-        )
-
-        if not_found:
+        if _is_missing_element(failure.error_message):
             confidence = ConfidenceLevel.HIGH
             if historical.previous_element is None:
                 confidence = ConfidenceLevel.MEDIUM
@@ -569,7 +581,13 @@ class FailureAnalyzerAgent:
         failure: FailureContext,
         evidence: list[FailureEvidence],
     ) -> tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str] | None:
-        """Check if this is a timeout failure."""
+        """Check if this is a timeout failure.
+
+        A timeout waiting for a locator that never matched is a missing
+        element (left to the element-not-found rule), not a slow page.
+        """
+        if _is_missing_element(failure.error_message):
+            return None
         error_lower = failure.error_message.lower()
         is_timeout = (
             "timeout" in error_lower

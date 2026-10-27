@@ -305,3 +305,19 @@ def test_firestore_falls_back_when_the_composite_index_is_missing(caplog) -> Non
     assert [r["id"] for r in rows] == [10, 9]
     assert "firebase deploy --only firestore:indexes" in caplog.text
     assert "create_composite=abc" in caplog.text
+
+
+def test_the_firebase_project_id_comes_from_every_credential_form_the_store_reads(monkeypatch, tmp_path):
+    from backend import config
+
+    monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
+    monkeypatch.setenv("FIREBASE_CREDENTIALS", "'{\"type\": \"service_account\", \"project_id\": \"demo-proj\"}'")
+    assert config._default_firebase_project_id() == "demo-proj"
+
+    (tmp_path / "key.json").write_text('{"project_id": "from-secret-file"}', encoding="utf-8")
+    monkeypatch.setattr(config, "SECRET_FILES_DIR", tmp_path)
+    monkeypatch.setenv("FIREBASE_CREDENTIALS", "key.json")  # a Render Secret File given by name
+    assert config._default_firebase_project_id() == "from-secret-file"
+
+    monkeypatch.setenv("FIREBASE_CREDENTIALS", "missing.json")
+    assert config._default_firebase_project_id() == ""

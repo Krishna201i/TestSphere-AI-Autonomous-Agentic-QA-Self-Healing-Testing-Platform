@@ -282,13 +282,18 @@ def record_visual(visual: dict[str, Any] | None, owner_uid: str, execution_id: i
         store = get_artifact_store()
         prefix = execution_prefix(owner_uid, execution_id)
         current = _upload(store, f"{prefix}visual/current.png", visual["current"])
+        key = baseline_key(owner_uid, test_case_id)
         if baseline is None:
-            if not passed:
+            if not passed or store.get(key):  # one was accepted while this run went on
                 return None
-            store.put(baseline_key(owner_uid, test_case_id), Path(visual["current"]).read_bytes(), "image/png")
+            store.put(key, Path(visual["current"]).read_bytes(), "image/png")
             return {"baseline_created": True, "changed": False, "current": current}
-        # Re-saved on every comparison, so retention never expires a baseline that is in use
-        store.put(baseline_key(owner_uid, test_case_id), baseline, "image/png")
+        # Re-saved on every comparison, so retention never expires a baseline
+        # that is in use, but only while it is still the one compared: a
+        # baseline accepted during this run must not be put back to the old one
+        stored = store.get(key)
+        if stored and stored[0] == baseline:
+            store.put(key, baseline, "image/png")
         ratio = float(visual.get("ratio") or 0)
         return {
             "changed": bool(visual.get("size_changed")) or ratio > settings.VISUAL_DIFF_THRESHOLD,

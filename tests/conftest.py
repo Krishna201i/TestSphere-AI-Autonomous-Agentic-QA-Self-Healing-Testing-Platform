@@ -22,11 +22,13 @@ os.environ.setdefault("VISUAL_REGRESSION", "false")
 @pytest.fixture(autouse=True)
 def fresh_store():
     """Every test gets an empty in-memory store (also used by the API via get_db)."""
+    from backend import auth
     from backend.database.session import set_store
     from backend.database.store import MemoryStore
 
     store = MemoryStore()
     set_store(store)
+    auth._display_names.clear()  # cached profile names belong to the previous test's store
     yield store
     set_store(None)
 

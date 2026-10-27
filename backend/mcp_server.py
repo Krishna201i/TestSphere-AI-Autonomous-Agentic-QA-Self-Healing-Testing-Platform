@@ -6,7 +6,7 @@ client supports: Antigravity, Claude Code, Cursor, VS Code, Windsurf...  It
 drives a TestSphere server through its REST API:
 
     TESTSPHERE_URL     the server (default http://127.0.0.1:8000)
-    TESTSPHERE_TOKEN   a sign-in token when the server requires sign-in
+    TESTSPHERE_TOKEN   an API token (Profile -> API tokens) when the server requires sign-in
 
 Tools: test_site (the whole loop on a URL, waiting for the result), get_run,
 list_findings, scan_dependencies and get_fix_patch.  Start it with

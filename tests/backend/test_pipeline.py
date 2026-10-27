@@ -352,3 +352,57 @@ def test_scheduler_moves_slot_forward_for_projects_without_app_url(fresh_store, 
     assert asyncio.run(scheduler.tick(fresh_store)) == []
     assert fresh_store.get(PROJECTS, project["id"])["next_run_at"] > past
     assert scheduler.due_projects(fresh_store, datetime.now(UTC)) == []
+
+
+# ── A run that stops part-way never looks unfinished ───────────
+
+
+def test_a_crash_closes_the_running_stage_and_updates_the_project(fresh_store, stub_network, monkeypatch):
+    async def broken_plan(*a, **k):
+        raise RuntimeError("planner exploded")
+
+    monkeypatch.setattr(runner, "_plan", broken_plan)
+    project = make_project(fresh_store)
+    fresh_store.update(PROJECTS, project["id"], last_run_status="passed")
+    run = run_once(fresh_store, project, FakeOrchestrator({}), OutOfScope())
+
+    assert run["status"] == "error" and "planner exploded" in run["error"]
+    assert stage(run, "plan")["status"] == "failed" and "planner exploded" in stage(run, "plan")["detail"]
+    assert not [s for s in run["stages"] if s["status"] in ("running", "pending")]
+    assert fresh_store.get(PROJECTS, project["id"])["last_run_status"] == "error"
+
+
+def test_restart_closes_the_stages_of_unfinished_runs(fresh_store):
+    project = make_project(fresh_store)
+    run = runner.create_run(fresh_store, project, trigger="manual", actor="t")
+    stages = [dict(s) for s in run["stages"]]
+    stages[0]["status"], stages[1]["status"] = "done", "running"
+    fresh_store.update(PIPELINE_RUNS, run["id"], status="running", stages=stages)
+
+    runner.recover_interrupted(fresh_store)
+
+    done = fresh_store.get(PIPELINE_RUNS, run["id"])
+    assert [s["status"] for s in done["stages"]][:3] == ["done", "failed", "skipped"]
+    assert fresh_store.get(PROJECTS, project["id"])["last_run_status"] == "error"
+
+
+def test_a_push_during_a_run_is_tested_when_the_run_ends(fresh_store, no_background):
+    client = TestClient(app)
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    first = runner.create_run(fresh_store, project, trigger="manual", actor="t")
+    fresh_store.update(PIPELINE_RUNS, first["id"], status="running")
+
+    resp = deliver(client, project, push_payload())
+    assert resp.json()["queued_after"] == first["id"]
+    assert fresh_store.get(PROJECTS, project["id"])["pending_push"]["commit_sha"] == "abc1234def"
+
+    fresh_store.update(PIPELINE_RUNS, first["id"], status="passed")
+
+    async def finish():
+        return runner._start_pending_push(fresh_store, fresh_store.get(PROJECTS, project["id"]))
+
+    follow_up = asyncio.run(finish())
+    assert follow_up["commit_sha"] == "abc1234def" and follow_up["ingest"] is True
+    assert follow_up["trigger"] == "webhook" and follow_up["actor"] == "github:krishna"
+    assert fresh_store.get(PROJECTS, project["id"])["pending_push"] is None
+    assert asyncio.run(finish()) is None  # started once

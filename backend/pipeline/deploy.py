@@ -15,19 +15,29 @@ A deployment of a project:
             then check health again
 
 Hooks are only ever sent to allow-listed hosts, without following redirects,
-and the health URL goes through the same SSRF guard as tests.  Deployments
-execute in the API process (they mostly wait on HTTP), also when pipeline runs
-use a separate worker.
+and the health URL goes through the same SSRF guard as tests.  A deployment
+executes in the process that started it: the API for manual deploys, the
+worker for the auto-deploy after a run it executed (the worker waits for it
+before taking the next run or stopping).  Each saves ``heartbeat_at`` as it
+progresses; an active deployment without one for DEPLOY_STALE_SECONDS
+belonged to a process that died and is ended, so it never blocks the
+project's later deploys.
+
+A changed health page counts as the new version only once two probes in a
+row return the same new body: a page that differs on every request (CSRF
+tokens, nonces) proves nothing, so the settle time applies.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import subprocess
 import time
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -56,6 +66,22 @@ ACTIVE = ("queued", "deploying", "verifying", "rolling_back")
 
 _tasks: set = set()
 
+# Which process executes deployments started here: None for the API, the
+# worker's id in the worker (the API's restart recovery leaves those alone)
+_executor: str | None = None
+
+
+def set_executor(name: str | None) -> None:
+    global _executor
+    _executor = name
+
+
+async def wait_for_deployments() -> None:
+    """Wait for the deployments this process started (the worker, before it
+    takes the next run or exits, so none is cut off mid-way)."""
+    while _tasks:
+        await asyncio.gather(*list(_tasks), return_exceptions=True)
+
 
 def remote_head(repo_url: str | None, auth: GitAuth | None = None) -> str | None:
     """Commit at the tip of the repository's default branch (None if unknown)."""
@@ -76,11 +102,29 @@ def remote_head(repo_url: str | None, auth: GitAuth | None = None) -> str | None
 
 # ── Records ────────────────────────────────────────────────────────────────
 
+def _parse(stamp: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(stamp) if isinstance(stamp, str) else None
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed and not parsed.tzinfo else parsed
+
+
+def _end_if_stale(db: Store, row: Record, now: datetime | None = None) -> bool:
+    """End an active deployment whose process stopped saving progress; True if ended."""
+    last = _parse(row.get("heartbeat_at")) or _parse(row.get("started_at"))
+    now = now or datetime.now(UTC)
+    if last is None or now - last < timedelta(seconds=settings.DEPLOY_STALE_SECONDS):
+        return False
+    return db.update_if(DEPLOYMENTS, row["id"], "status", row["status"], status="error", finished_at=now_iso(),
+                        error="Interrupted: the process running this deployment stopped. Check the site.")
+
+
 def active_deployment(db: Store, project_id: int) -> Record | None:
     for status in ACTIVE:
-        row = db.find_one(DEPLOYMENTS, project_id=project_id, status=status)
-        if row:
-            return row
+        for row in db.find(DEPLOYMENTS, project_id=project_id, status=status):
+            if not _end_if_stale(db, row):
+                return row
     return None
 
 
@@ -95,6 +139,7 @@ def create_deployment(db: Store, project: Record, *, actor: str, trigger: str = 
     return db.insert(
         DEPLOYMENTS, project_id=project["id"], project_name=project["name"], owner_uid=project.get("owner_uid"),
         actor=actor, trigger=trigger, run_id=run_id, status="queued", provider=provider_of(project.get("deploy_hook_url")),
+        executor=_executor, heartbeat_at=now_iso(),
         commit=None, rollback_to=None, error=None, health=[],
         steps=[{"key": k, "label": label, "status": "pending", "detail": None, "started_at": None, "finished_at": None}
                for k, label in STEPS],
@@ -114,10 +159,16 @@ def start_deployment(db: Store, project: Record, *, actor: str, trigger: str = "
 
 
 def recover_interrupted(db: Store) -> int:
-    """Deployments left mid-way by a restart can never finish; say so."""
+    """Deployments this kind of process left mid-way by a restart can never
+    finish; say so.  The API leaves a worker's running deployments alone
+    (they end themselves, or as stale once that worker is gone)."""
     count = 0
     for status in ACTIVE:
         for row in db.find(DEPLOYMENTS, status=status):
+            if row.get("executor") and row.get("executor") != _executor:
+                if _end_if_stale(db, row):
+                    count += 1
+                continue
             db.update(DEPLOYMENTS, row["id"], status="error", finished_at=now_iso(),
                       error="Interrupted: the server restarted during this deployment. Check the site.")
             count += 1
@@ -133,6 +184,7 @@ class _State:
         return self.doc["id"]
 
     def save(self, **changes: Any) -> None:
+        changes["heartbeat_at"] = now_iso()  # progress: this deployment's process is alive
         self.doc.update(changes)
         self.db.update(DEPLOYMENTS, self.id, **changes)
 
@@ -181,17 +233,23 @@ async def _probe(client: httpx.AsyncClient, url: str) -> dict[str, Any]:
 
 async def wait_healthy(state: _State, client: httpx.AsyncClient, url: str, before_hash: str | None,
                        sleep: Sleep, settle: bool = True, step: str = "health") -> tuple[bool, str]:
-    """Poll *url* until the new version answers healthily N times in a row (progress on *step*)."""
+    """Poll *url* until the new version answers healthily N times in a row (progress on *step*).
+
+    The new version is live once the page changed from *before_hash* to a
+    body that two probes in a row agree on, or once the settle time passed.
+    """
     deadline = time.monotonic() + settings.DEPLOY_TIMEOUT_SECONDS
     settle_until = time.monotonic() + (settings.DEPLOY_SETTLE_SECONDS if settle else 0)
     changed = not settle or before_hash is None
     streak = 0
     samples = list(state.doc.get("health") or [])
+    previous_hash = None
     while time.monotonic() < deadline:
         sample = await _probe(client, url)
         samples = [*samples, sample][-60:]
         state.save(health=samples)
-        changed = changed or (sample["ok"] and sample["hash"] != before_hash)
+        changed = changed or (sample["ok"] and sample["hash"] != before_hash and sample["hash"] == previous_hash)
+        previous_hash = sample["hash"] if sample["ok"] else None
         live = changed or time.monotonic() >= settle_until
         streak = streak + 1 if sample["ok"] and live else 0
         state.step(step, "running", f"{'New version live' if changed else 'Waiting for the new version'} · "
@@ -255,6 +313,13 @@ async def execute_deployment(deployment_id: int, *, transport: httpx.AsyncBaseTr
             state.save(status="error", error="The project was deleted.", finished_at=now_iso())
             return db.get(DEPLOYMENTS, deployment_id)
         await _deploy(state, project, transport, orchestrator, sleep)
+    except asyncio.CancelledError:
+        # The process is stopping: never leave the deployment active (that
+        # would block every later deploy of the project), then stop as asked
+        with contextlib.suppress(Exception):
+            state.save(status="error", finished_at=now_iso(),
+                       error="Interrupted: the process running this deployment stopped. Check the site.")
+        raise
     except Exception as exc:  # keep the record honest instead of leaving it mid-way
         logger.exception("Deployment #%s crashed", deployment_id)
         try:
@@ -346,11 +411,14 @@ async def _rollback(state: _State, project: Record, hooks: httpx.AsyncClient, si
 
     state.save(status="rolling_back")
     state.step("rollback", "running", f"Calling {how}")
+    # What the bad version serves: until that changes (or the settle time
+    # passes), healthy answers come from it, not from the rolled-back one
+    bad = await _probe(site, health_url)
     ok, detail = await _call_hook(hooks, url)
     if not ok:
         state.step("rollback", "failed", f"{how}: {detail}")
         state.save(status="rollback_failed", error=f"{problem}. Rollback failed: {detail}", finished_at=now_iso())
         return
-    healthy, health_detail = await wait_healthy(state, site, health_url, None, sleep, settle=False, step="rollback")
+    healthy, health_detail = await wait_healthy(state, site, health_url, bad.get("hash"), sleep, step="rollback")
     state.step("rollback", "done" if healthy else "failed", f"{how} · {health_detail}")
     state.save(status="rolled_back" if healthy else "rollback_failed", error=problem, finished_at=now_iso())

@@ -23,10 +23,12 @@ from backend.config import settings
 logger = logging.getLogger("testsphere.ai_plan")
 
 MAX_AI_TESTS = 5
-_ACTIONS = {"navigate": "NAVIGATE", "click": "CLICK", "fill": "FILL", "press": "PRESS", "select": "SELECT", "wait": "WAIT"}
+_ACTIONS = {"navigate": "NAVIGATE", "click": "CLICK", "fill": "FILL", "press": "PRESS", "select": "SELECT",
+            "check": "CHECK", "uncheck": "UNCHECK", "wait": "WAIT"}
 _CHECKS = {"element_visible": "ASSERT_VISIBLE", "element_not_visible": "ASSERT_HIDDEN",
-           "element_contains_text": "ASSERT_CONTAINS_TEXT", "element_has_text": "ASSERT_CONTAINS_TEXT",
-           "url_contains": "ASSERT_URL", "url_equals": "ASSERT_URL"}
+           "element_contains_text": "ASSERT_CONTAINS_TEXT", "element_has_text": "ASSERT_HAS_TEXT",
+           "url_contains": "ASSERT_URL", "url_equals": "ASSERT_URL_EQUALS", "value_equals": "ASSERT_VALUE"}
+_PAGE_CHECKS = {"ASSERT_URL", "ASSERT_URL_EQUALS"}
 _ANY_PAGE = {"body", "head > title", "title", "h1", "main"}
 
 
@@ -60,7 +62,12 @@ def page_context(analysis: dict[str, Any], prompt: str | None, frameworks: list[
 
 
 def to_suite_tests(cases: list[Any], analysis: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
-    """Planner test cases as pipeline tests; returns (kept, dropped for unknown elements)."""
+    """Planner test cases as pipeline tests; returns (kept, dropped).
+
+    A test is dropped, never shortened, when a step or check touches an
+    element the analysis did not find or has no engine equivalent: running
+    what is left would test something else.
+    """
     inv = analysis.get("elements_inventory") or {}
     known = {e["selector"] for e in [*(inv.get("inputs") or []), *(inv.get("buttons") or [])] if e.get("selector")} | _ANY_PAGE
     url = analysis["url"]
@@ -71,7 +78,10 @@ def to_suite_tests(cases: list[Any], analysis: dict[str, Any]) -> tuple[list[dic
         ok = True
         for s in tc.steps:
             action = _ACTIONS.get(s.action.value)
-            if action == "NAVIGATE" or action is None:
+            if action is None:
+                ok = False
+                break
+            if action == "NAVIGATE":
                 continue  # the test starts on the analyzed page; it never leaves the site
             if s.target and s.target not in known:
                 ok = False
@@ -93,8 +103,8 @@ def to_suite_tests(cases: list[Any], analysis: dict[str, Any]) -> tuple[list[dic
 def _add_check(steps: list[dict[str, Any]], assertion: Any, known: set[str]) -> bool:
     action = _CHECKS.get(assertion.type.value)
     if action is None:
-        return True
-    if action != "ASSERT_URL" and assertion.target not in known:
+        return False
+    if action not in _PAGE_CHECKS and assertion.target not in known:
         return False
     steps.append({"step_number": len(steps) + 1, "action": action, "target": assertion.target or None,
                   "value": assertion.expected or None, "description": assertion.description or action.lower()})
@@ -108,10 +118,10 @@ async def ai_tests(analysis: dict[str, Any], prompt: str | None, frameworks: lis
         return [], None
     try:
         if planner is None:
-            from agents.llm.factory import create_llm_client
             from agents.planner.planner import LLMTestPlanner
+            from backend.orchestration.orchestrator import create_platform_llm_client
 
-            planner = LLMTestPlanner(llm_client=create_llm_client())
+            planner = LLMTestPlanner(llm_client=create_platform_llm_client())
         plan = await asyncio.wait_for(
             planner.generate_test_plan(page_context(analysis, prompt, frameworks), max_tests=MAX_AI_TESTS),
             timeout=timeout or settings.PIPELINE_AI_PLANNER_TIMEOUT)

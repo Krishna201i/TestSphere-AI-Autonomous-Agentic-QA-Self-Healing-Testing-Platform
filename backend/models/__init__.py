@@ -5,12 +5,14 @@ Entities are documents in these store collections (Firestore in production):
 
     projects            name, description
     applications        project_id, name, base_url, description
-    test_cases          application_id, external_id, name, description, category, priority, version
+    test_cases          application_id, external_id, name, description, category, priority, version,
+                        healing_targets (fallback locators + fingerprints the engine learned)
     test_executions     test_case_id, status, started_at, completed_at, duration_ms, error_message
     security_findings   key, target_url, check_id, severity, title, data, status, retest_result, ...
     audit_events        at, actor, kind, level, message, ref
     codebase_blueprints source, name, data
-    agent_memory        kind, data
+    agent_memory        kind, data (healing memory: executions, elements, heals)
+    api_tokens          name, token_hash, prefix, last_used_at (for agents such as the MCP server)
     users               uid, email, display_name, organization, job_title, last_login_at
     pipeline_runs       project_id, trigger, status, stages, tests, summary, ...
     fix_patches         target_url, repo, commit, files, applied, manual, patch
@@ -36,8 +38,11 @@ PIPELINE_RUNS = "pipeline_runs"
 FIX_PATCHES = "fix_patches"
 DEPLOYMENTS = "deployments"
 INTEGRATIONS = "integrations"
+AGENT_MEMORY = "agent_memory"  # agents.memory.persistent_store.COLLECTION
+API_TOKENS = "api_tokens"
 
 __all__ = [
     "TestExecutionStatus", "PROJECTS", "APPLICATIONS", "TEST_CASES", "TEST_EXECUTIONS",
     "SECURITY_FINDINGS", "AUDIT_EVENTS", "BLUEPRINTS", "USERS", "PIPELINE_RUNS", "FIX_PATCHES", "DEPLOYMENTS", "INTEGRATIONS",
+    "AGENT_MEMORY", "API_TOKENS",
 ]

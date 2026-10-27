@@ -18,7 +18,8 @@ from agents.llm.config import LLMConfig
 from agents.llm.factory import create_llm_client
 from agents.memory.in_memory_store import InMemoryStore
 from agents.memory.memory_interface import MemoryStore
-from agents.memory.persistent_store import PersistentMemoryStore
+from agents.memory.memory_schemas import FailureInfo, TestExecutionRecord
+from agents.memory.persistent_store import PersistentMemoryStore, memory_owner
 from agents.orchestration.agent_orchestrator import AgentOrchestrator
 from agents.orchestration.recovery_policy import (
     RecoveryAction,
@@ -27,6 +28,7 @@ from agents.orchestration.recovery_policy import (
 )
 from agents.orchestration.workflow_schemas import (
     AgentState,
+    ExecutionResult,
     ExecutionResultStatus,
     OrchestratorConfig,
     WorkflowEvent,
@@ -46,6 +48,8 @@ from agents.planner.schemas import (
 )
 from agents.schemas.enums import (
     AssertionType,
+    ExecutionStatus,
+    HealingStatus,
     TestAction,
     ValidationStatus,
 )
@@ -59,7 +63,10 @@ from backend.database.store import Store, StoreUnavailableError
 from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
 from backend.models.test_execution import TestExecutionStatus
 from backend.orchestration.converters import (
+    collect_learned_targets,
+    element_record_from_fingerprint,
     engine_result_to_execution_result,
+    learned_targets_by_locator,
     test_case_to_engine_plan,
 )
 from engine.runner import run_test
@@ -161,6 +168,17 @@ def create_memory_store() -> MemoryStore:
         return InMemoryStore()
 
 
+def create_platform_llm_client(config: LLMConfig | None = None) -> LLMClientSession:
+    """The LLM client the agents use: ``LLM_PROVIDER``'s, or for the default
+    ``mock`` provider one pre-loaded with the offline planner scenarios."""
+    config = config or LLMConfig.from_env()
+    if config.provider == "mock":
+        provider = MockLLMProvider(LLMConfig(provider="mock", model="mock-model", max_retries=0))
+        register_planner_scenarios(provider)
+        return LLMClientSession(provider=provider)
+    return create_llm_client(config)
+
+
 def create_default_orchestrator(memory_store: MemoryStore | None = None) -> AgentOrchestrator:
     """Create a fully configured AgentOrchestrator.
 
@@ -170,15 +188,15 @@ def create_default_orchestrator(memory_store: MemoryStore | None = None) -> Agen
     """
     memory_store = memory_store or create_memory_store()
     config = LLMConfig.from_env()
-    if config.provider == "mock":
-        provider = MockLLMProvider(LLMConfig(provider="mock", model="mock-model", max_retries=0))
-        register_planner_scenarios(provider)
-        llm_session = LLMClientSession(provider=provider)
-    else:
-        llm_session = create_llm_client(config)
+    llm_session = create_platform_llm_client(config)
     logger.info("Platform orchestrator using LLM provider: %s", llm_session.provider_name)
 
-    failure_analyzer = FailureAnalyzerAgent(memory_store=memory_store)
+    # The analyzer consults the model only for failures its rules cannot
+    # classify; the offline mock has no diagnosis scenarios to answer with.
+    failure_analyzer = FailureAnalyzerAgent(
+        memory_store=memory_store,
+        llm_client=llm_session if config.provider != "mock" else None,
+    )
     healing_engine = HealingDecisionEngine(
         memory_store=memory_store,
         llm_client=llm_session,
@@ -220,6 +238,42 @@ def get_platform_orchestrator() -> PlatformWorkflowOrchestrator:
     return _platform_orchestrator
 
 
+def forget_healing_memory() -> None:
+    """Drop erased records (``DELETE /me``) from the running orchestrator's
+    healing memory, which otherwise keeps them until the next restart."""
+    memory = _platform_orchestrator.ai_orchestrator.memory if _platform_orchestrator else None
+    if isinstance(memory, PersistentMemoryStore):
+        memory.reload()
+
+
+_ASSERTION_NAMES = frozenset(t.value for t in AssertionType)
+
+
+def _assertion_type(name: str) -> AssertionType:
+    """The planner assertion for a stored check: a planner type name
+    (``value_equals``) or a pipeline action (``ASSERT_CONTAINS_TEXT``)."""
+    if name in _ASSERTION_NAMES:
+        return AssertionType(name)
+    if "url" in name:
+        return AssertionType.URL_EQUALS if "equal" in name or "exact" in name else AssertionType.URL_CONTAINS
+    if "value" in name:
+        return AssertionType.VALUE_EQUALS
+    if "text" in name:
+        return AssertionType.ELEMENT_HAS_TEXT if "has_text" in name or "exact" in name else AssertionType.ELEMENT_CONTAINS_TEXT
+    if "not" in name or "hidden" in name:
+        return AssertionType.ELEMENT_NOT_VISIBLE
+    return AssertionType.ELEMENT_VISIBLE
+
+
+# Hard cap on re-runs of a transient failure (the recovery policy sets the real limit)
+MAX_RETRY_RUNS = 3
+
+
+def _first_error(result: EngineTestResult, default: str) -> str:
+    failed_step = next((st for st in getattr(result, "steps", []) if getattr(st, "status", None) in (StepStatus.FAILED, "failed")), None)
+    return getattr(result, "error_message", None) or (getattr(failed_step, "error", None) if failed_step else None) or default
+
+
 class PlatformWorkflowOrchestrator:
     """Coordinates test execution runs with AI failure diagnosis and self-healing."""
 
@@ -259,6 +313,24 @@ class PlatformWorkflowOrchestrator:
         start_time = datetime.now(UTC)
         execution = db.update(TEST_EXECUTIONS, execution.id, status=TestExecutionStatus.RUNNING.value, started_at=start_time)
 
+        try:
+            # Healing memory written during this run belongs to the run's owner
+            with memory_owner(execution.get("owner_uid")):
+                return await self._execute(db, execution, test_case, app, options)
+        except Exception as exc:
+            # Never leave the run RUNNING: record why it ended, then report the error
+            logger.exception("Execution #%s crashed", execution.id)
+            try:
+                db.update(TEST_EXECUTIONS, execution.id, status=TestExecutionStatus.FAILED.value,
+                          completed_at=datetime.now(UTC),
+                          error_message=f"Run failed unexpectedly ({type(exc).__name__}: {str(exc)[:300]})")
+            except Exception:  # noqa: BLE001 - the original error is what the caller needs
+                logger.exception("Could not record the crash of execution #%s", execution.id)
+            raise
+
+    async def _execute(self, db: Store, execution: Any, test_case: Any, app: Any,
+                       options: RunOptions | None) -> dict[str, Any]:
+        """Steps 3-8 of ``execute_test_run`` for an execution marked RUNNING."""
         # Build Member 1 TestCase model from DB record or structured description
         m1_steps: list[Member1TestStep] = []
         m1_assertions: list[Assertion] = []
@@ -280,14 +352,8 @@ class PlatformWorkflowOrchestrator:
                 if isinstance(raw_steps, list):
                     for idx, s in enumerate(raw_steps, start=1):
                         act_raw = str(s.get("action", "navigate")).strip().lower()
-                        if "assert" in act_raw or act_raw in ("element_visible", "element_not_visible", "element_contains_text"):
-                            as_type = AssertionType.ELEMENT_VISIBLE
-                            if "url" in act_raw:
-                                as_type = AssertionType.URL_CONTAINS
-                            elif "text" in act_raw:
-                                as_type = AssertionType.ELEMENT_CONTAINS_TEXT
-                            elif "not" in act_raw or "hidden" in act_raw:
-                                as_type = AssertionType.ELEMENT_NOT_VISIBLE
+                        if "assert" in act_raw or act_raw in _ASSERTION_NAMES:
+                            as_type = _assertion_type(act_raw)
                             # A check belongs where it was written: right after the step
                             # before it (an outcome check mid-scenario), not at the end
                             (m1_steps[-1].assertions if m1_steps else m1_assertions).append(
@@ -302,10 +368,9 @@ class PlatformWorkflowOrchestrator:
                             if act_raw in ("goto", "open"):
                                 act_enum = TestAction.NAVIGATE
                             else:
-                                try:
-                                    act_enum = TestAction(act_raw)
-                                except ValueError:
-                                    act_enum = TestAction.CLICK if (s.get("target") or s.get("target_selector")) else TestAction.NAVIGATE
+                                # An unknown action fails the run as unreadable: guessing
+                                # (e.g. a click for "check") would test something else
+                                act_enum = TestAction(act_raw)
 
                             val = s.get("value")
                             if act_enum == TestAction.NAVIGATE and not val:
@@ -344,8 +409,10 @@ class PlatformWorkflowOrchestrator:
             assertions=m1_assertions,
         )
 
-        # Convert to Member 2 TestPlan
-        engine_plan = test_case_to_engine_plan(m1_test_case, app.base_url)
+        # Convert to Member 2 TestPlan, with the fallbacks and fingerprints
+        # earlier runs learned (the engine heals a broken locator from them)
+        learned = learned_targets_by_locator(test_case.get("healing_targets"))
+        engine_plan = test_case_to_engine_plan(m1_test_case, app.base_url, learned)
 
         workflow_id = f"wf-exec-{execution.id}"
 
@@ -379,18 +446,34 @@ class PlatformWorkflowOrchestrator:
         baseline = load_baseline(owner, test_case.id) if settings.VISUAL_REGRESSION else None
         engine_result: EngineTestResult = await run_test(engine_plan, options=run_opts,
                                                          visual=settings.VISUAL_REGRESSION, visual_baseline=baseline)
-        shown_result = engine_result  # the run whose steps the dashboard shows
+        runs = [engine_result]  # every browser run, so their working files are removed
+        shown_result, shown_plan = engine_result, engine_plan  # the run whose steps the dashboard shows
 
-        exec_result = engine_result_to_execution_result(
-            engine_result=engine_result,
-            workflow_id=workflow_id,
-            test_case_id=m1_test_case.test_id,
-            engine_plan=engine_plan,
-        )
+        exec_result = self._submit_ready(engine_result, workflow_id, m1_test_case.test_id, engine_plan)
+        state = await self.ai_orchestrator.submit_execution_result(state, exec_result)
+
+        # A transient failure the recovery policy chose to retry: run it again
+        # (bounded by the policy's retry limit), then diagnose and heal as usual
+        retries = 0
+        while (
+            exec_result.status != ExecutionResultStatus.SUCCESS
+            and state.current_step == WorkflowStep.EXECUTION_PENDING
+            and state.recovery_decision is not None
+            and state.recovery_decision.decision == RecoveryAction.RETRY
+            and retries < MAX_RETRY_RUNS
+        ):
+            retries += 1
+            logger.info("Execution #%s: retrying after a transient failure (retry %d)", execution.id, retries)
+            engine_result = await run_test(engine_plan, options=run_opts,
+                                           visual=settings.VISUAL_REGRESSION, visual_baseline=baseline)
+            runs.append(engine_result)
+            shown_result = engine_result
+            exec_result = self._submit_ready(engine_result, workflow_id, m1_test_case.test_id, engine_plan)
+            state = await self.ai_orchestrator.submit_execution_result(state, exec_result)
 
         final_status = TestExecutionStatus.PASSED.value
         error_msg = None
-        duration_ms = engine_result.duration_ms
+        duration_ms = sum(run.duration_ms for run in runs)
 
         if exec_result.status == ExecutionResultStatus.SUCCESS:
             final_status = TestExecutionStatus.PASSED.value
@@ -403,71 +486,31 @@ class PlatformWorkflowOrchestrator:
                     for st in engine_result.steps
                     if st.status == StepStatus.HEALED and st.healing
                 )
-            state = await self.ai_orchestrator.submit_execution_result(state, exec_result)
         else:
-            # Failure detected -> delegate to Member 1 AI intelligence
-            logger.info("Test execution failed. Submitting result to AI orchestrator for analysis.")
-            state = await self.ai_orchestrator.submit_execution_result(state, exec_result)
-            recommendation = state.healing_recommendation
-
-            # Check if self-healing is recommended
-            if (
-                recommendation
-                and recommendation.target_selector
-                and recommendation.action == RecoveryAction.TRY_HEALING
-            ):
-                logger.info(
-                    "Self-healing proposed replacement selector: %s. Validating with engine...",
-                    recommendation.target_selector,
-                )
-                fc = exec_result.failure_context
-                healed_plan = apply_healed_selector(
-                    engine_plan,
-                    broken_selector=recommendation.original_selector or (fc.target_selector if fc else ""),
-                    failed_step=fc.failed_step if fc else 0,
-                    healed_selector=recommendation.target_selector,
-                )
-                validation_result = await run_test(healed_plan, options=run_opts)
-
-                validation_success = validation_result.status in (
-                    TestStatus.PASSED,
-                    TestStatus.HEALED,
-                )
-
-                feedback = HealingResultFeedback(
-                    healing_id=recommendation.healing_id,
-                    test_id=m1_test_case.test_id,
-                    original_selector=recommendation.original_selector or "",
-                    healed_selector=recommendation.target_selector,
-                    validation_status=(
-                        ValidationStatus.SUCCESS
-                        if validation_success
-                        else ValidationStatus.FAILED
-                    ),
-                    execution_time_ms=validation_result.duration_ms,
-                )
-                state = await self.ai_orchestrator.submit_healing_result(state, feedback)
-
-                if validation_success:
-                    shown_result = validation_result
-                    final_status = TestExecutionStatus.PASSED.value
-                    error_msg = f"Self-healed selector: {recommendation.target_selector}"
-                else:
-                    final_status = TestExecutionStatus.FAILED.value
-                    failed_step = next((st for st in getattr(validation_result, "steps", []) if getattr(st, "status", None) in (StepStatus.FAILED, "failed")), None)
-                    error_msg = (
-                        getattr(validation_result, "error_message", None)
-                        or (getattr(failed_step, "error", None) if failed_step else None)
-                        or "Healing validation failed"
-                    )
+            # Failure detected -> Member 1 analysed it; validate any heal it proposes
+            healed = None
+            try:
+                state, healed = await self._validate_ai_heal(state, engine_plan, exec_result, run_opts, runs)
+            except Exception:  # noqa: BLE001 - a healing error leaves the original failure as the result
+                logger.exception("Execution #%s: AI self-healing failed", execution.id)
+            if healed is not None:
+                shown_plan, shown_result, candidate = healed
+                final_status = TestExecutionStatus.HEALED.value
+                error_msg = (f"Self-healed {exec_result.failure_context.target_selector} -> {candidate.selector} "
+                             f"(AI healer, confidence {candidate.confidence:.2f})")
             else:
                 final_status = TestExecutionStatus.FAILED.value
-                failed_step = next((st for st in getattr(engine_result, "steps", []) if getattr(st, "status", None) in (StepStatus.FAILED, "failed")), None)
-                error_msg = (
-                    getattr(engine_result, "error_message", None)
-                    or (getattr(failed_step, "error", None) if failed_step else None)
-                    or "Test execution failed"
-                )
+                error_msg = _first_error(engine_result, "Test execution failed")
+                tried = len(runs) - 1 - retries  # validation runs
+                if tried:
+                    error_msg += f" (self-healing tried {tried} replacement selector(s); none passed)"
+
+        # Learn from the run: healing memory and the targets' fallbacks/fingerprints
+        try:
+            self._learn_from_run(db, test_case, execution.id, m1_test_case, engine_plan, shown_plan,
+                                 shown_result, final_status, error_msg, duration_ms)
+        except Exception:  # noqa: BLE001 - learning is best-effort; the run's result stands
+            logger.exception("Execution #%s: could not record what the run learned", execution.id)
 
         # The browser could not start (e.g. Chromium missing on the host): no
         # step ran, so this is a failure — never report it as passed, even if
@@ -485,7 +528,7 @@ class PlatformWorkflowOrchestrator:
         evidence = persist_run_artifacts(shown_result, owner, execution.id, descriptions)
         visual = record_visual(engine_result.visual, owner, execution.id, test_case.id, baseline,
                                passed=final_status == TestExecutionStatus.PASSED.value)
-        self._discard_local_artifacts(engine_result, shown_result)
+        self._discard_local_artifacts(*runs)
 
         # Update database execution record
         end_time = datetime.now(UTC)
@@ -516,10 +559,170 @@ class PlatformWorkflowOrchestrator:
             "error_message": error_msg,
             "dashboard_summary": dashboard_summary.model_dump(),
             "events": [e.model_dump() for e in (state.events if state else [])],
-            "engine_steps": [st.model_dump(mode="json") for st in engine_result.steps],
+            "engine_steps": [st.model_dump(mode="json") for st in shown_result.steps],
             "visual": visual,
             "analysis": analysis_data,
         }
+
+    def _submit_ready(self, engine_result: EngineTestResult, workflow_id: str, test_id: str,
+                      engine_plan: EngineTestPlan) -> ExecutionResult:
+        """Convert an engine result for the AI orchestrator.
+
+        On a failure, make sure healing memory knows the failed target's last
+        known element (from its stored fingerprint), so the healer has the
+        element to compare the current page against even on a cold start.
+        """
+        exec_result = engine_result_to_execution_result(
+            engine_result=engine_result,
+            workflow_id=workflow_id,
+            test_case_id=test_id,
+            engine_plan=engine_plan,
+        )
+        fc = exec_result.failure_context
+        if fc is not None and fc.target_selector and 0 < fc.failed_step <= len(engine_plan.steps):
+            target = engine_plan.steps[fc.failed_step - 1].target
+            memory = self.ai_orchestrator.memory
+            if target is not None and target.fingerprint is not None and memory.get_element_by_selector(fc.target_selector) is None:
+                memory.store_element(element_record_from_fingerprint(
+                    target.fingerprint, fc.target_selector, element_id=f"{test_id}:{fc.target_selector}",
+                    page_url=fc.current_page_url,
+                ))
+        return exec_result
+
+    async def _validate_ai_heal(
+        self,
+        state: AgentState,
+        engine_plan: EngineTestPlan,
+        exec_result: ExecutionResult,
+        run_opts: RunOptions,
+        runs: list[EngineTestResult],
+    ) -> tuple[AgentState, tuple[EngineTestPlan, EngineTestResult, Any] | None]:
+        """Validate the AI healer's replacement selector(s) by re-running the test.
+
+        A heal counts only when the whole test passes with it; every outcome
+        is fed back to healing memory.  When a candidate fails, the recovery
+        policy may offer the next one, up to its attempt limit.  Returns the
+        updated state and, for a validated heal, (plan, result, candidate).
+        """
+        fc = exec_result.failure_context
+        for _ in range(self.ai_orchestrator._config.max_healing_attempts):
+            recommendation = state.healing_recommendation
+            candidate = recommendation.selected_candidate if recommendation else None
+            if (
+                state.current_step != WorkflowStep.HEALING_PENDING_VALIDATION
+                or state.recovery_decision is None
+                or state.recovery_decision.decision != RecoveryAction.TRY_HEALING
+                or candidate is None
+            ):
+                break
+            original = recommendation.original_selector or (fc.target_selector if fc else "")
+            if not original:
+                break
+            logger.info("Self-healing proposed replacement selector: %s. Validating with engine...", candidate.selector)
+            healed_plan = apply_healed_selector(
+                engine_plan,
+                broken_selector=original,
+                failed_step=fc.failed_step if fc else 0,
+                healed_selector=candidate.selector,
+            )
+            validation_result = await run_test(healed_plan, options=run_opts)
+            runs.append(validation_result)
+            passed = validation_result.status in (TestStatus.PASSED, TestStatus.HEALED)
+
+            feedback = HealingResultFeedback(
+                test_case_id=recommendation.test_id,
+                execution_id=recommendation.execution_id,
+                original_selector=original,
+                attempted_selector=candidate.selector,
+                healing_status=HealingStatus.VALIDATED_SUCCESS if passed else HealingStatus.VALIDATED_FAILURE,
+                validation_status=ValidationStatus.SUCCESS if passed else ValidationStatus.FAILURE,
+                failure_category=recommendation.failure_type,
+                confidence=candidate.confidence,
+                execution_attempt=state.healing_attempt_count or 1,
+                error_reason=None if passed else _first_error(validation_result, "Healing validation failed")[:500],
+                metadata={"source": "ai_healer", "candidate_source": candidate.source.value},
+            )
+            state = await self.ai_orchestrator.submit_healing_result(state, feedback)
+            if passed:
+                return state, (healed_plan, validation_result, candidate)
+        return state, None
+
+    def _learn_from_run(
+        self,
+        db: Store,
+        test_case: Any,
+        execution_id: int,
+        m1_test_case: Member1TestCase,
+        engine_plan: EngineTestPlan,
+        shown_plan: EngineTestPlan,
+        shown_result: EngineTestResult,
+        final_status: str,
+        error_msg: str | None,
+        duration_ms: int,
+    ) -> None:
+        """Record the run in healing memory and keep what the engine learned.
+
+        - an execution record (pass/fail history for diagnosis);
+        - the element each passing step acted on (what a later heal compares with);
+        - each heal the engine made in a run that then passed (a validated heal);
+        - the targets' fingerprints and fallback locators, on the test case,
+          so the next run of it can heal a broken locator in the engine.
+        """
+        memory = self.ai_orchestrator.memory
+        test_id = m1_test_case.test_id
+        passed = final_status in (TestExecutionStatus.PASSED.value, TestExecutionStatus.HEALED.value)
+        failed_step = next((st for st in shown_result.steps if st.status == StepStatus.FAILED), None)
+        memory.store_execution(TestExecutionRecord(
+            execution_id=f"exec-{execution_id}",
+            test_id=test_id,
+            test_name=m1_test_case.name or test_id,
+            status=ExecutionStatus.PASSED if passed else ExecutionStatus.FAILED,
+            duration_ms=duration_ms,
+            failure_info=None if passed else FailureInfo(
+                error_message=(error_msg or "Test execution failed")[:1000],
+                failed_step=next((i for i, st in enumerate(shown_result.steps, start=1) if st is failed_step), None),
+                page_url=failed_step.page_url if failed_step else None,
+            ),
+            metadata={"execution_id": execution_id, "status": final_status},
+        ))
+
+        previous_url = shown_plan.base_url
+        for original, step, step_res in zip(engine_plan.steps, shown_plan.steps, shown_result.steps, strict=False):
+            if (step_res.status == StepStatus.PASSED and step.target is not None and step.target.fingerprint is not None
+                    and original.target is not None and step.target.primary_locator == original.target.primary_locator):
+                self._remember_element(memory, element_record_from_fingerprint(
+                    step.target.fingerprint, step.target.primary_locator,
+                    element_id=f"{test_id}:{step.target.primary_locator}",
+                    page_url=previous_url,  # the page the step acted on
+                    execution_id=f"exec-{execution_id}",
+                ))
+            if passed and step_res.status == StepStatus.HEALED and step_res.healing and step_res.healing.selected_locator:
+                self.ai_orchestrator.record_healing_feedback(HealingResultFeedback(
+                    test_case_id=test_id,
+                    execution_id=f"exec-{execution_id}",
+                    original_selector=step_res.healing.original_locator,
+                    attempted_selector=step_res.healing.selected_locator,
+                    healing_status=HealingStatus.VALIDATED_SUCCESS,
+                    validation_status=ValidationStatus.SUCCESS,
+                    confidence=step_res.healing.confidence,
+                    metadata={"source": "engine", "strategy": step_res.healing.strategy_used},
+                ))
+            previous_url = step_res.page_url or previous_url
+
+        targets = collect_learned_targets(engine_plan, shown_plan, shown_result)
+        if targets != (test_case.get("healing_targets") or []):
+            db.update(TEST_CASES, test_case.id, healing_targets=targets)
+
+    @staticmethod
+    def _remember_element(memory: MemoryStore, record: Any) -> None:
+        """Store an element snapshot unless memory already holds the same one."""
+        history = memory.get_element_history(record.element_id)
+        latest = history[0] if history else None
+        same = latest is not None and all(
+            getattr(latest, field) == getattr(record, field) for field in ("selector", "text", "role", "page_url", "attributes")
+        )
+        if not same:
+            memory.store_element(record)
 
     @staticmethod
     def _discard_local_artifacts(*results: Any) -> None:
