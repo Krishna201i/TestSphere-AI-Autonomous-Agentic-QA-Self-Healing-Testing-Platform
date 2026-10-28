@@ -145,7 +145,7 @@ async def run_test(
                 shot = await write_screenshot(page, plan.test_id, last.step_id, artifacts_dir)
                 step_results[-1] = last.model_copy(update={"screenshot_path": shot})
             if visual and step_results and all(s.status != StepStatus.FAILED for s in step_results):
-                visual_result = await _visual_check(page, artifacts_dir, visual_baseline)
+                visual_result = await _visual_check(page, artifacts_dir, visual_baseline, config.visual_full_page)
             if keep_state is not None and step_results and all(s.status != StepStatus.FAILED for s in step_results):
                 keep_state.append(await page.context.storage_state())
     except Exception as exc:  # noqa: BLE001 - the engine reports failures in its result and never raises
@@ -173,10 +173,11 @@ async def run_test(
     )
 
 
-async def _visual_check(page: Page, artifacts_dir: str, baseline: bytes | None) -> dict | None:
+async def _visual_check(page: Page, artifacts_dir: str, baseline: bytes | None,
+                        full_page: bool = False) -> dict | None:
     """Screenshot the page the test ended on and compare it with the baseline; None if it fails."""
     try:
-        current = await visual_diff.screenshot(page)
+        current = await visual_diff.screenshot(page, full_page=full_page)
         folder = Path(artifacts_dir) / "_visual"
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "current.png").write_bytes(current)

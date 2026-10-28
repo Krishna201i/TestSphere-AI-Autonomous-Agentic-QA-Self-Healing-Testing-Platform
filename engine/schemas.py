@@ -218,6 +218,10 @@ class EngineConfig(BaseModel):
         pattern=r"^[1-9]\d{2,3}x[1-9]\d{2,3}$",
         description="Browser window as WIDTHxHEIGHT, e.g. 390x844 for a phone (ENGINE_VIEWPORT)",
     )
+    visual_full_page: bool = Field(
+        default_factory=lambda: os.getenv("VISUAL_FULL_PAGE", "false").strip().lower() in ("true", "1"),
+        description="Visual checks screenshot the whole page, not only the window (VISUAL_FULL_PAGE)",
+    )
     browser: Literal["chromium", "firefox", "webkit"] = Field(
         default_factory=lambda: os.getenv("ENGINE_BROWSER", "chromium").strip().lower() or "chromium",
         description="Browser engine to run tests in (ENGINE_BROWSER; Chromium by default)",

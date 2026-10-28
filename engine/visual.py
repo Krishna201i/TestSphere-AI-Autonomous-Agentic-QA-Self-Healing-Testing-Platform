@@ -9,6 +9,11 @@ images on canvases), so no image library is needed.  A pixel counts as
 changed when any colour channel differs by more than ``TOLERANCE``, which
 ignores anti-aliasing and compression noise.  The result is the share of
 changed pixels and a diff image: the new screenshot faded, changed pixels red.
+
+Full-page screenshots grow and shrink with the content, so two of the same
+width are compared over the taller one's height: rows only one of them has
+count as changed (content added or removed), the rest pixel by pixel.  A
+different width is a layout change and counts as fully changed.
 """
 
 from __future__ import annotations
@@ -25,22 +30,24 @@ _COMPARE_JS = """
 async ([baseline, current, tolerance]) => {
   const load = (src) => new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = src; });
   const [a, b] = await Promise.all([load(baseline), load(current)]);
-  if (a.width !== b.width || a.height !== b.height) {
+  if (a.width !== b.width) {
     return {ratio: 1, changed: b.width * b.height, total: b.width * b.height, sizeChanged: true,
             baseline: [a.width, a.height], current: [b.width, b.height], diff: null};
   }
-  const pixels = (img) => { const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
-    const x = c.getContext('2d'); x.drawImage(img, 0, 0); return x.getImageData(0, 0, img.width, img.height); };
+  const W = b.width, H = Math.max(a.height, b.height);  // rows one image lacks stay transparent
+  const pixels = (img) => { const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0); return x.getImageData(0, 0, W, H); };
   const pa = pixels(a).data, out = pixels(b), pb = out.data;
   let changed = 0;
   for (let i = 0; i < pb.length; i += 4) {
-    const d = Math.max(Math.abs(pa[i] - pb[i]), Math.abs(pa[i + 1] - pb[i + 1]), Math.abs(pa[i + 2] - pb[i + 2]));
+    const d = Math.max(Math.abs(pa[i] - pb[i]), Math.abs(pa[i + 1] - pb[i + 1]), Math.abs(pa[i + 2] - pb[i + 2]),
+                       Math.abs(pa[i + 3] - pb[i + 3]));
     if (d > tolerance) { changed++; pb[i] = 230; pb[i + 1] = 30; pb[i + 2] = 30; pb[i + 3] = 255; }
     else { const g = (pb[i] + pb[i + 1] + pb[i + 2]) / 3; pb[i] = pb[i + 1] = pb[i + 2] = 200 + g / 5; }
   }
-  const c = document.createElement('canvas'); c.width = b.width; c.height = b.height;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
   c.getContext('2d').putImageData(out, 0, 0);
-  return {ratio: changed / (b.width * b.height), changed, total: b.width * b.height, sizeChanged: false,
+  return {ratio: changed / (W * H), changed, total: W * H, sizeChanged: a.height !== b.height,
           diff: changed ? c.toDataURL('image/png') : null};
 }
 """
@@ -66,12 +73,12 @@ async def compare(context: Any, baseline: bytes, current: bytes) -> dict[str, An
     }
 
 
-async def screenshot(page: Any) -> bytes:
-    """The visible viewport, settled: same size every run, animations stopped, no caret."""
+async def screenshot(page: Any, full_page: bool = False) -> bytes:
+    """The visible viewport (or the whole page), settled: animations stopped, no caret."""
     from contextlib import suppress
 
     with suppress(Exception):  # a page that never goes idle is still compared as it is
         await page.wait_for_load_state("networkidle", timeout=3000)
     with suppress(Exception):
         await page.evaluate("document.fonts && document.fonts.ready")
-    return await page.screenshot(full_page=False, animations="disabled", caret="hide")
+    return await page.screenshot(full_page=full_page, animations="disabled", caret="hide")

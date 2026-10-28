@@ -7,6 +7,11 @@
       "title": "Viewport",
       "type": "string"
     },
+    "visual_full_page": {
+      "description": "Visual checks screenshot the whole page, not only the window (VISUAL_FULL_PAGE)",
+      "title": "Visual Full Page",
+      "type": "boolean"
+    },
     "browser": {
       "description": "Browser engine to run tests in (ENGINE_BROWSER; Chromium by default)",
       "enum": [
