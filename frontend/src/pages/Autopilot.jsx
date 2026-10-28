@@ -259,6 +259,7 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
     slack_webhook_url: p.slack_webhook_url || '', notify_on: p.notify_on || 'failures',
     deploy_hook_url: p.deploy_hook_url || '', rollback_hook_url: p.rollback_hook_url || '',
     health_url: p.health_url || '', deploy_on_pass: Boolean(p.deploy_on_pass),
+    sign_in_first: Boolean(p.sign_in_first),
   });
   const [form, setForm] = useState(() => fromProject(project));
   const [error, setError] = useState(null);
@@ -267,7 +268,8 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
   useEffect(() => {
     setForm(fromProject(project));
   }, [project.app_url, project.repo_url, project.prompt, project.slack_webhook_url, project.notify_on,
-    project.deploy_hook_url, project.rollback_hook_url, project.health_url, project.deploy_on_pass]); // eslint-disable-line react-hooks/exhaustive-deps
+    project.deploy_hook_url, project.rollback_hook_url, project.health_url, project.deploy_on_pass,
+    project.sign_in_first]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function act(fn) {
     setError(null);
@@ -320,6 +322,11 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                   <label className="field">App URL<input className="input" value={form.app_url} onChange={(e) => setForm({ ...form, app_url: e.target.value })} placeholder="https://app.example/" /></label>
                   <label className="field">Git repository<input className="input" value={form.repo_url} onChange={(e) => setForm({ ...form, repo_url: e.target.value })} placeholder="https://github.com/you/app" /></label>
                   <label className="field">What to test<input className="input" value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} placeholder="optional" /></label>
+                  <label className="check">
+                    <input type="checkbox" checked={form.sign_in_first}
+                      onChange={(e) => setForm({ ...form, sign_in_first: e.target.checked })} />
+                    Sign in first: run the goal&apos;s login test, then test linked pages signed in (for example “log in with demo / secret”)
+                  </label>
                   <label className="field">
                     Chat alerts (Slack, Discord, Google Chat or Teams webhook URL)
                     <input className="input" value={form.slack_webhook_url} onChange={(e) => setForm({ ...form, slack_webhook_url: e.target.value })}

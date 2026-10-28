@@ -83,6 +83,8 @@ async def run_test(
     *,
     visual: bool = False,
     visual_baseline: bytes | None = None,
+    storage_state: dict | None = None,
+    keep_state: list[dict] | None = None,
 ) -> TestResult:
     """
     Execute *plan* sequentially and return a ``TestResult``.
@@ -97,6 +99,11 @@ async def run_test(
     visual / visual_baseline:
         Take a settled viewport screenshot when the run passes, and compare it
         with *visual_baseline* (PNG bytes) when given (``engine/visual.py``).
+    storage_state / keep_state:
+        Start with this browser session (cookies and local storage, e.g. from a
+        sign-in test), and append the session the run ended with to
+        *keep_state* when no step failed.  It holds login cookies: callers keep
+        it in memory and never store it.
 
     Returns
     -------
@@ -115,7 +122,8 @@ async def run_test(
     visual_result: dict | None = None
 
     try:
-        async with BrowserSession(config, trace_path=f"{artifacts_dir}/_trace.zip") as session:
+        async with BrowserSession(config, trace_path=f"{artifacts_dir}/_trace.zip",
+                                  storage_state=storage_state) as session:
             page = await session.new_page()
 
             for step in plan.steps:
@@ -137,6 +145,8 @@ async def run_test(
                 step_results[-1] = last.model_copy(update={"screenshot_path": shot})
             if visual and step_results and all(s.status != StepStatus.FAILED for s in step_results):
                 visual_result = await _visual_check(page, artifacts_dir, visual_baseline)
+            if keep_state is not None and step_results and all(s.status != StepStatus.FAILED for s in step_results):
+                keep_state.append(await page.context.storage_state())
     except Exception as exc:  # noqa: BLE001 - the engine reports failures in its result and never raises
         log.error("[%s] Browser session error: %s", plan.test_id, exc)
         step_results.append(

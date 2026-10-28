@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -268,6 +269,21 @@ def _assertion_type(name: str) -> AssertionType:
 # Hard cap on re-runs of a transient failure (the recovery policy sets the real limit)
 MAX_RETRY_RUNS = 3
 
+# The browser session a run starts from and where it hands its own on (see
+# execute_test_run); per task, so concurrent runs never share one.  It holds
+# login cookies, so it is only ever kept in memory.
+_session: ContextVar[tuple[dict | None, list[dict] | None]] = ContextVar("browser_session", default=(None, None))
+
+
+async def _run(plan: EngineTestPlan, **kwargs: Any) -> EngineTestResult:
+    """``run_test`` with this task's browser session, when it has one."""
+    storage_state, keep_state = _session.get()
+    if storage_state is not None:
+        kwargs["storage_state"] = storage_state
+    if keep_state is not None:
+        kwargs["keep_state"] = keep_state
+    return await run_test(plan, **kwargs)
+
 
 def _first_error(result: EngineTestResult, default: str) -> str:
     failed_step = next((st for st in getattr(result, "steps", []) if getattr(st, "status", None) in (StepStatus.FAILED, "failed")), None)
@@ -285,8 +301,15 @@ class PlatformWorkflowOrchestrator:
         db: Store,
         execution_id: int,
         options: RunOptions | None = None,
+        *,
+        storage_state: dict | None = None,
+        keep_state: list[dict] | None = None,
     ) -> dict[str, Any]:
         """Execute a single test execution run end-to-end.
+
+        *storage_state* starts the browser signed in (a session from an earlier
+        test); a run that ends without a failed step appends its own session
+        to *keep_state*.  Both stay in memory: they hold login cookies.
 
         1. Fetches TestCase and Application from DB.
         2. Sets TestExecution status to RUNNING.
@@ -315,8 +338,12 @@ class PlatformWorkflowOrchestrator:
 
         try:
             # Healing memory written during this run belongs to the run's owner
-            with memory_owner(execution.get("owner_uid")):
-                return await self._execute(db, execution, test_case, app, options)
+            token = _session.set((storage_state, keep_state))
+            try:
+                with memory_owner(execution.get("owner_uid")):
+                    return await self._execute(db, execution, test_case, app, options)
+            finally:
+                _session.reset(token)
         except Exception as exc:
             # Never leave the run RUNNING: record why it ended, then report the error
             logger.exception("Execution #%s crashed", execution.id)
@@ -444,7 +471,7 @@ class PlatformWorkflowOrchestrator:
             run_opts = run_opts.model_copy(update={"tracing_enabled": True})
         owner = execution.get("owner_uid") or "local-dev"
         baseline = load_baseline(owner, test_case.id) if settings.VISUAL_REGRESSION else None
-        engine_result: EngineTestResult = await run_test(engine_plan, options=run_opts,
+        engine_result: EngineTestResult = await _run(engine_plan, options=run_opts,
                                                          visual=settings.VISUAL_REGRESSION, visual_baseline=baseline)
         runs = [engine_result]  # every browser run, so their working files are removed
         shown_result, shown_plan = engine_result, engine_plan  # the run whose steps the dashboard shows
@@ -464,7 +491,7 @@ class PlatformWorkflowOrchestrator:
         ):
             retries += 1
             logger.info("Execution #%s: retrying after a transient failure (retry %d)", execution.id, retries)
-            engine_result = await run_test(engine_plan, options=run_opts,
+            engine_result = await _run(engine_plan, options=run_opts,
                                            visual=settings.VISUAL_REGRESSION, visual_baseline=baseline)
             runs.append(engine_result)
             shown_result = engine_result
@@ -630,7 +657,7 @@ class PlatformWorkflowOrchestrator:
                 failed_step=fc.failed_step if fc else 0,
                 healed_selector=candidate.selector,
             )
-            validation_result = await run_test(healed_plan, options=run_opts)
+            validation_result = await _run(healed_plan, options=run_opts)
             runs.append(validation_result)
             passed = validation_result.status in (TestStatus.PASSED, TestStatus.HEALED)
 

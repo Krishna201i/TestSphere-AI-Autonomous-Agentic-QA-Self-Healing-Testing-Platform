@@ -335,7 +335,8 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
 
     # ── execute (with AI analysis + healing inside the orchestrator) ──
     db_check = await asyncio.to_thread(dbsource.start_check, project)
-    results = await _stage_execute(state, test_cases, orchestrator, owner)
+    results = await _stage_execute(state, test_cases, orchestrator, owner,
+                                   sign_in_first=bool(project.get("sign_in_first")))
     goal_text = URLAnalyzerService.prompt_values(project.get("prompt")).get("text")
     database = await asyncio.to_thread(dbsource.finish_check, db_check, [goal_text] if goal_text else [])
     state.save(database=database)
@@ -484,21 +485,44 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
     return application, generated + saved, detail
 
 
+def _is_sign_in(tc: Record) -> bool:
+    """The goal's form test (the one that signs in when the goal is a login)."""
+    return str(tc.get("external_id") or "").startswith(GENERATED_PREFIX)         and str(tc.get("external_id")).endswith("-interaction")
+
+
+def _signed_in_kwargs(tc: Record, sign_in_first: bool, session: list[dict]) -> dict[str, Any]:
+    """Session arguments for one test when "sign in first" is on: the sign-in
+    test captures its session, linked and route pages start from it.  The
+    target page's own tests stay signed out (they check the page as analyzed)."""
+    if not sign_in_first:
+        return {}
+    if _is_sign_in(tc):
+        return {"keep_state": session}
+    if session and tc.get("category") in ("link", "route"):
+        return {"storage_state": session[-1]}
+    return {}
+
+
 async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrator: Any,
-                         owner: str | None) -> list[dict[str, Any]]:
+                         owner: str | None, *, sign_in_first: bool = False) -> list[dict[str, Any]]:
     from backend.orchestration.orchestrator import get_platform_orchestrator
     from engine.schemas import RunOptions
 
     orch = orchestrator or get_platform_orchestrator()
     db = state.db
     results: list[dict[str, Any]] = []
+    # In memory for this run only: it holds the app's login cookies
+    session: list[dict] = []
+    if sign_in_first:  # the sign-in test runs first so later pages can start signed in
+        test_cases = sorted(test_cases, key=lambda tc: not _is_sign_in(tc))
     state.stage("execute", "running", f"0 of {len(test_cases)} run")
     for idx, tc in enumerate(test_cases, start=1):
         state.stage("execute", "running", f"Running {idx} of {len(test_cases)}: {tc['name']}")
         execution = TestExecutionService.create_execution(db, test_case_id=tc["id"], owner_uid=owner)
         visual = None
         try:
-            res = await orch.execute_test_run(db=db, execution_id=execution["id"], options=RunOptions(headless=True))
+            res = await orch.execute_test_run(db=db, execution_id=execution["id"], options=RunOptions(headless=True),
+                                              **_signed_in_kwargs(tc, sign_in_first, session))
             status, error = res.get("status", "FAILED"), res.get("error_message")
             visual = res.get("visual")
         except StoreUnavailableError:

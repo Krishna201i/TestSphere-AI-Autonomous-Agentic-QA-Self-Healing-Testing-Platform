@@ -49,7 +49,12 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - http.server API
         status = {"/missing": 404, "/broken": 500}.get(self.path, 200)
         body = (FORM if status == 200 else f"<h1>Error {status}</h1>").encode()
+        if self.path == "/me":  # who the session cookie says you are
+            signed_in = "session=alice" in (self.headers.get("Cookie") or "")
+            body = f"<p id='who'>{'alice' if signed_in else 'nobody'}</p>".encode()
         self.send_response(status)
+        if self.path == "/signin":
+            self.send_header("Set-Cookie", "session=alice; Path=/; HttpOnly")
         self.send_header("Content-Type", "text/html")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -71,10 +76,10 @@ def _target(selector: str) -> Target:
     return Target(description=selector, primary_locator=selector)
 
 
-async def _run(site: str, *steps: Step, path: str = "/form", test_id: str = "actions", **options) -> list:
+async def _run(site: str, *steps: Step, path: str = "/form", test_id: str = "actions", keep_state=None, **options) -> list:
     plan = TestPlan(test_id=test_id, name="actions", base_url=site,
                     steps=[Step(step_id="open", action=ActionType.GOTO, value=f"{site}{path}"), *steps])
-    result = await run_test(plan, RunOptions(min_action_timeout_ms=1000, **options))
+    result = await run_test(plan, RunOptions(min_action_timeout_ms=1000, **options), keep_state=keep_state)
     return result
 
 
@@ -175,3 +180,24 @@ async def test_upload_attaches_a_generated_file_by_name_only(site: str) -> None:
              exact=True),
     )
     assert result.status == TestStatus.PASSED, [s.error for s in result.steps]
+
+
+async def test_a_signed_in_session_carries_over_to_the_next_run(site: str) -> None:
+    kept: list[dict] = []
+    signin = TestPlan(test_id="signin", name="signin", base_url=site,
+                      steps=[Step(step_id="open", action=ActionType.GOTO, value=f"{site}/signin")])
+    assert (await run_test(signin, RunOptions(min_action_timeout_ms=1000), keep_state=kept)).status == TestStatus.PASSED
+    assert any(c["name"] == "session" for c in kept[0]["cookies"])
+
+    who = Step(step_id="who", action=ActionType.ASSERT_TEXT, target=_target("#who"), expected="alice", exact=True)
+    me = TestPlan(test_id="me", name="me", base_url=site,
+                  steps=[Step(step_id="open", action=ActionType.GOTO, value=f"{site}/me"), who])
+    assert (await run_test(me, RunOptions(min_action_timeout_ms=1000), storage_state=kept[0])).status == TestStatus.PASSED
+    # Without the session the same page is signed out
+    assert (await run_test(me, RunOptions(min_action_timeout_ms=1000))).status == TestStatus.FAILED
+
+
+async def test_a_failed_run_hands_no_session_on(site: str) -> None:
+    kept: list[dict] = []
+    await _run(site, Step(step_id="x", action=ActionType.CLICK, target=_target("#nothing-here")), keep_state=kept)
+    assert kept == []

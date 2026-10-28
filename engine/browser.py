@@ -169,9 +169,11 @@ class BrowserSession:
         self,
         config: EngineConfig,
         trace_path: str | None = None,
+        storage_state: dict | None = None,
     ) -> None:
         self._config = config
         self._trace_path = trace_path
+        self._storage_state = storage_state
         self._pw: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -222,6 +224,7 @@ class BrowserSession:
         self._context = await self._browser.new_context(
             viewport={"width": 1280, "height": 720},
             ignore_https_errors=True,
+            storage_state=self._storage_state,  # a signed-in session from an earlier test, or None
         )
         if self._config.tracing_enabled:
             await self._context.tracing.start(screenshots=True, snapshots=True)

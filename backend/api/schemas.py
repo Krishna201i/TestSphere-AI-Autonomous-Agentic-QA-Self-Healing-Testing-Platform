@@ -48,6 +48,8 @@ class _ProjectPipelineFields(BaseModel):
     rollback_hook_url: str | None = Field(None, max_length=1000, description="Hook that restores the previous version")
     health_url: str | None = Field(None, max_length=1024, description="URL checked after a deploy (default: app URL)")
     deploy_on_pass: bool | None = Field(None, description="Deploy and verify automatically after a passing run")
+    sign_in_first: bool | None = Field(None, description="Run the goal's sign-in test first; linked and route pages "
+                                                         "then start signed in (the session is kept in memory only)")
 
     @field_validator("deploy_hook_url")
     @classmethod
@@ -139,6 +141,7 @@ class ProjectResponse(BaseModel):
     rollback_hook_url: str | None = None
     health_url: str | None = None
     deploy_on_pass: bool | None = None
+    sign_in_first: bool | None = None
     last_deploy_id: int | None = None
     last_deploy_status: str | None = None
     database: str | None = None  # the linked database without credentials (the URL is never returned)

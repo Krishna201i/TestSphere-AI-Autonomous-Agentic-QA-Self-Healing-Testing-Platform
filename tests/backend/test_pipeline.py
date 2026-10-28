@@ -430,3 +430,39 @@ def test_page_limits_come_from_settings(monkeypatch):
     many = {**analysis(), "elements_inventory": {"links": [f"/p{i}" for i in range(10)]}}
     assert len(suite.candidate_pages(many, None, link_limit=7)) == 7
     assert suite.candidate_pages(many, None, link_limit=0) == []
+
+
+class SessionRecorder(FakeOrchestrator):
+    """Records which session arguments each test got; the sign-in test 'signs in'."""
+
+    def __init__(self):
+        super().__init__({})
+        self.sessions = {}
+
+    async def execute_test_run(self, db, execution_id, options=None, storage_state=None, keep_state=None):
+        result = await super().execute_test_run(db, execution_id, options)
+        name = self.ran[-1]
+        self.sessions[name] = (storage_state, keep_state is not None)
+        if keep_state is not None:
+            keep_state.append({"cookies": [{"name": "session", "value": "s3cret"}], "origins": []})
+        return result
+
+
+def test_sign_in_first_runs_the_login_test_first_and_shares_its_session_with_linked_pages(fresh_store, stub_network):
+    project = make_project(fresh_store, prompt="log in with demo / secret", sign_in_first=True)
+    orch = SessionRecorder()
+    run = run_once(fresh_store, project, orch, OutOfScope())
+
+    assert orch.ran[0].startswith("Scenario")  # the sign-in test goes first
+    assert orch.sessions[orch.ran[0]] == (None, True)  # ... and hands its session on
+    linked = next(n for n in orch.ran if n.startswith("Linked page"))
+    assert orch.sessions[linked][0]["cookies"][0]["name"] == "session"
+    smoke = next(n for n in orch.ran if n.startswith("Smoke"))
+    assert orch.sessions[smoke] == (None, False)  # the target page is tested signed out
+    assert "s3cret" not in json.dumps(run, default=str)  # the session is never stored
+
+
+def test_without_sign_in_first_no_session_arguments_are_passed(fresh_store, stub_network):
+    project = make_project(fresh_store, prompt="log in with demo / secret")
+    run = run_once(fresh_store, project, FakeOrchestrator({}), OutOfScope())  # would fail on unknown kwargs
+    assert run["status"] == "passed"
