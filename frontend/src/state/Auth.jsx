@@ -15,6 +15,7 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   getRedirectResult,
+  linkWithCredential,
   linkWithPopup,
   onAuthStateChanged,
   reauthenticateWithPopup,
@@ -49,9 +50,10 @@ const FIREBASE_ERRORS = {
   'auth/web-storage-unsupported':
     'This browser blocks the storage sign-in needs (private mode or blocked site data). Allow site data, or sign in with email.',
   'auth/account-exists-with-different-credential':
-    'An account with this email already exists with another sign-in method. Sign in with Google or your email, '
-    + 'then connect GitHub in Profile → Integrations.',
+    'This email already has a TestSphere account. Sign in once the way you first did (Google or email) and '
+    + 'GitHub will be linked to it, so either works from then on.',
   'auth/credential-already-in-use': 'This GitHub account is already linked to another TestSphere account.',
+  'auth/user-mismatch': 'That is a different GitHub account from the one linked here. Pick the linked account in the GitHub window.',
   'auth/too-many-requests': 'Too many attempts. Wait a minute, or reset your password.',
   'auth/network-request-failed': 'Cannot reach Firebase. Check your internet connection.',
   'auth/operation-not-allowed':
@@ -92,6 +94,26 @@ export function AuthProvider({ children }) {
   const [notice, setNotice] = useState(null);
   const authRef = useRef(null);
   const systemRef = useRef(null);
+  // A GitHub sign-in refused because the email already has an account (one
+  // account per email): linked to that account once the user signs in to it
+  const pendingGitHubRef = useRef(null);
+
+  const rememberPendingGitHub = useCallback((err) => {
+    if (err?.code !== 'auth/account-exists-with-different-credential') return;
+    pendingGitHubRef.current = GithubAuthProvider.credentialFromError(err);
+  }, []);
+
+  const linkPendingGitHub = useCallback(async () => {
+    const pending = pendingGitHubRef.current;
+    const user = authRef.current?.currentUser;
+    if (!pending || !user) return;
+    pendingGitHubRef.current = null;
+    try {
+      await linkWithCredential(user, pending);
+    } catch {
+      // Already linked, or that GitHub login belongs to another account: sign-in itself succeeded
+    }
+  }, []);
 
   const start = useCallback(async () => {
     setState({ status: 'loading', mode: null, user: null, error: null });
@@ -128,18 +150,22 @@ export function AuthProvider({ children }) {
       },
     });
     getRedirectResult(fbAuth).then((res) => { if (res) recordLogin().catch(() => {}); })
-      .catch((err) => setNotice(authMessage(err)));
+      .catch((err) => {
+        rememberPendingGitHub(err);
+        setNotice(authMessage(err));
+      });
     onAuthStateChanged(fbAuth, (u) => {
       setState({ status: u ? 'signedIn' : 'signedOut', mode: 'firebase', user: u ? toUser(u) : null, error: null });
     });
-  }, []);
+  }, [rememberPendingGitHub]);
 
   useEffect(() => { start(); }, [start]);
 
   const signIn = useCallback(async (email, password) => {
     await signInWithEmailAndPassword(authRef.current, email.trim(), password);
+    await linkPendingGitHub();
     recordLogin().catch(() => {});
-  }, []);
+  }, [linkPendingGitHub]);
 
   const signUp = useCallback(async (name, email, password) => {
     const cred = await createUserWithEmailAndPassword(authRef.current, email.trim(), password);
@@ -155,6 +181,7 @@ export function AuthProvider({ children }) {
     try {
       await signInWithPopup(authRef.current, makeProvider());
     } catch (err) {
+      rememberPendingGitHub(err);
       if (!NEEDS_REDIRECT.includes(err?.code)) throw err;
       // A redirect only comes back signed in when Firebase's auth domain is this
       // site's own (browsers partition the storage it needs across domains);
@@ -163,8 +190,9 @@ export function AuthProvider({ children }) {
       await signInWithRedirect(authRef.current, makeProvider());
       return;
     }
+    await linkPendingGitHub();
     recordLogin().catch(() => {});
-  }, []);
+  }, [rememberPendingGitHub, linkPendingGitHub]);
   const signInWithGoogle = useCallback(() => signInWithProvider(() => new GoogleAuthProvider()), [signInWithProvider]);
   // Identity only: repository access is asked for separately (githubRepoToken)
   const signInWithGitHub = useCallback(() => signInWithProvider(() => new GithubAuthProvider()), [signInWithProvider]);
@@ -180,8 +208,18 @@ export function AuthProvider({ children }) {
     const provider = new GithubAuthProvider();
     provider.addScope('repo');
     const linked = user.providerData.some((p) => p.providerId === 'github.com');
-    const result = linked ? await reauthenticateWithPopup(user, provider) : await linkWithPopup(user, provider);
-    return GithubAuthProvider.credentialFromResult(result)?.accessToken || null;
+    try {
+      const result = linked ? await reauthenticateWithPopup(user, provider) : await linkWithPopup(user, provider);
+      return GithubAuthProvider.credentialFromResult(result)?.accessToken || null;
+    } catch (err) {
+      // The GitHub login already belongs to another TestSphere account (e.g. one
+      // made by signing in with GitHub before): it can't be linked, but GitHub
+      // still granted repository access, which is all connecting needs
+      const token = err?.code === 'auth/credential-already-in-use'
+        ? GithubAuthProvider.credentialFromError(err)?.accessToken : null;
+      if (token) return token;
+      throw err;
+    }
   }, []);
 
   /** Everything needed to tell why sign-in fails, checked live. */
