@@ -366,6 +366,8 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                   <div className="small"><GitBranch size={14} className="icon-inline" /> <b>Run on every push</b> — in GitHub: Settings → Webhooks → Add webhook, content type <span className="mono">application/json</span>, “Just the push event”.</div>
                   <CopyField label="Payload URL" value={webhookUrl(project.id)} />
                   <CopyField label="Secret" value={project.webhook_secret || ''} />
+                  <div className="small">On GitLab: Settings → Webhooks, this URL, the same secret as the <i>Secret token</i>, trigger “Push events”.</div>
+                  <CopyField label="GitLab URL" value={webhookUrl(project.id, 'gitlab')} />
                   <div><button type="button" className="btn btn-sm" disabled={busy} onClick={() => act(() => rotateWebhookSecret(project.id))}><RefreshCw size={13} /> New secret</button></div>
                   <ProjectDatabase project={project} onChanged={onChanged} />
                 </div>

@@ -43,6 +43,8 @@ class FakeGitLab:
             return httpx.Response(201, json={"name": body["branch"]})
         if path.endswith("/repository/commits"):
             return httpx.Response(201, json={"id": "c" * 40})
+        if "/statuses/" in path:
+            return httpx.Response(201, json={"status": body.get("state")})
         if path.endswith("/merge_requests"):
             return httpx.Response(201, json={"iid": 12, "web_url": "https://gitlab.com/acme/web/shop/-/merge_requests/12"})
         return httpx.Response(404, json={"message": "404 Not Found"})
@@ -61,6 +63,8 @@ class FakeBitbucket:
             return httpx.Response(200, json={"values": []})
         if path.endswith("/src"):
             return httpx.Response(201)
+        if path.endswith("/statuses/build"):
+            return httpx.Response(201, json={})
         if path.endswith("/pullrequests"):
             return httpx.Response(201, json={"id": 4, "links": {"html": {"href": "https://bitbucket.org/acme/shop/pull-requests/4"}}})
         return httpx.Response(404, json={"error": {"message": "not found"}})
@@ -137,3 +141,30 @@ def test_merge_and_pull_requests_use_the_saved_git_credential(forges, repo, host
     resp = client.post(f"/api/security/patches/{row['id']}/pull-request")
     assert resp.status_code == 201 and resp.json()["number"] == number
     assert token not in resp.text
+
+
+
+@pytest.mark.parametrize(("repo", "host", "token", "expect"), [
+    ("https://gitlab.com/acme/web/shop", "gitlab.com", "glpat-secret-123",
+     ("/api/v4/projects/acme%2Fweb%2Fshop/statuses/" + BASE, {"state": "failed", "name": "TestSphere"})),
+    ("https://bitbucket.org/acme/shop", "bitbucket.org", "bb-token-12345",
+     (f"/2.0/repositories/acme/shop/commit/{BASE}/statuses/build", {"state": "FAILED", "key": "testsphere"})),
+])
+def test_commit_status_on_gitlab_and_bitbucket(forges, monkeypatch, repo, host, token, expect):
+    from backend.pipeline.runner import report_commit_status
+
+    monkeypatch.setattr(settings, "DASHBOARD_URL", "https://testsphere.example")
+    client = TestClient(app)
+    project = {"owner_uid": "local-dev", "repo_url": repo}
+    run = {"id": 9, "status": "failed", "commit_sha": BASE, "summary": {"passed": 3, "total": 4}}
+    assert report_commit_status(get_store(), project, run) is False  # no credential saved yet
+    client.put("/api/integrations/git-credentials", json={"host": host, "token": token})
+    assert report_commit_status(get_store(), project, run) is True
+
+    gl, bb = forges
+    calls = gl.calls if host == "gitlab.com" else bb.calls
+    path, fields = expect
+    sent = next(c for c in calls if c[1] == path)
+    body = sent[2] if isinstance(sent[2], dict) else json.loads(sent[2])
+    assert fields.items() <= body.items()
+    assert body["description"] == "Run #9: 3/4 tests passed"

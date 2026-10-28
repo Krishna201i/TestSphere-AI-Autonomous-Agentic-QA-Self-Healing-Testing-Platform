@@ -466,3 +466,38 @@ def test_without_sign_in_first_no_session_arguments_are_passed(fresh_store, stub
     project = make_project(fresh_store, prompt="log in with demo / secret")
     run = run_once(fresh_store, project, FakeOrchestrator({}), OutOfScope())  # would fail on unknown kwargs
     assert run["status"] == "passed"
+
+
+def gitlab_push(repo="https://gitlab.com/acme/shop", branch="main", sha="9f8e7d6c5b"):
+    return json.dumps({
+        "object_kind": "push", "ref": f"refs/heads/{branch}", "checkout_sha": sha, "user_username": "krishna",
+        "project": {"web_url": repo, "git_http_url": repo + ".git", "default_branch": "main"},
+        "commits": [{"id": sha, "message": "Tighten checkout validation\n\nbody"}],
+    }).encode()
+
+
+def deliver_gitlab(client, project, body, event="Push Hook", token=None):
+    return client.post(f"/api/webhooks/gitlab/{project['id']}", content=body,
+                       headers={"X-Gitlab-Event": event, "X-Gitlab-Token": token or project["webhook_secret"],
+                                "Content-Type": "application/json"})
+
+
+def test_gitlab_push_triggers_a_run_with_the_pushed_commit(fresh_store, no_background):
+    client = TestClient(app)
+    project = make_project(fresh_store, repo_url="https://gitlab.com/acme/shop.git")
+    resp = deliver_gitlab(client, project, gitlab_push())
+    assert resp.status_code == 200, resp.text
+    run = fresh_store.get(PIPELINE_RUNS, resp.json()["started"])
+    assert run["trigger"] == "webhook" and run["ingest"] is True and run["commit_sha"] == "9f8e7d6c5b"
+    assert run["actor"] == "gitlab:krishna" and run["trigger_detail"] == "9f8e7d6 Tighten checkout validation"
+
+
+def test_gitlab_webhook_checks_token_branch_repository_and_event(fresh_store, no_background):
+    client = TestClient(app)
+    project = make_project(fresh_store, repo_url="https://gitlab.com/acme/shop")
+    assert deliver_gitlab(client, project, gitlab_push(), token="wrong-token").status_code == 401
+    assert client.post("/api/webhooks/gitlab/999", content=b"{}").status_code == 401
+    assert "default branch" in deliver_gitlab(client, project, gitlab_push(branch="feature")).json()["ignored"]
+    assert "not this project" in deliver_gitlab(client, project, gitlab_push(repo="https://gitlab.com/x/y")).json()["ignored"]
+    assert "do not trigger" in deliver_gitlab(client, project, gitlab_push(), event="Merge Request Hook").json()["ignored"]
+    assert no_background == []

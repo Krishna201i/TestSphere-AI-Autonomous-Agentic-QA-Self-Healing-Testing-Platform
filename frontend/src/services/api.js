@@ -173,6 +173,6 @@ export const getApiTokens = () => request('/api/me/tokens');
 export const createApiToken = (name) => request('/api/me/tokens', { method: 'POST', body: { name } });
 export const revokeApiToken = (id) => request(`/api/me/tokens/${id}`, { method: 'DELETE' });
 
-/** Webhook URL GitHub should call for a project (absolute, using the API base). */
-export const webhookUrl = (projectId) =>
-  `${BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '')}/api/webhooks/github/${projectId}`;
+/** Webhook URL GitHub (or GitLab) should call for a project (absolute, using the API base). */
+export const webhookUrl = (projectId, host = 'github') =>
+  `${BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '')}/api/webhooks/${host}/${projectId}`;

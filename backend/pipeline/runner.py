@@ -248,16 +248,26 @@ def _start_pending_push(db: Store, project: Record) -> Record | None:
 
 
 def report_commit_status(db: Store, project: Record, run: Record) -> bool:
-    """Show the run's result on the pushed commit in GitHub (when the owner connected GitHub)."""
-    from backend.api.integrations import github_token
+    """Show the run's result on the pushed commit in GitHub, GitLab or Bitbucket
+    (with the owner's connected GitHub or saved Git credential)."""
+    from backend.api.integrations import git_auth, github_token
+    from backend.gitforges import (
+        BitbucketClient,
+        GitLabClient,
+        parse_forge_repo,
+        set_bitbucket_status,
+        set_gitlab_status,
+    )
     from backend.github import GitHubClient, GitHubError, parse_repo
     from backend.notify import run_url
 
     repo = parse_repo(project.get("repo_url"))
-    if not (run.get("commit_sha") and repo):
+    forge = None if repo else parse_forge_repo(project.get("repo_url"))
+    if not (run.get("commit_sha") and (repo or forge)):
         return False
-    token = github_token(db, project.get("owner_uid"))
-    if not token:
+    token = github_token(db, project.get("owner_uid")) if repo else None
+    auth = git_auth(db, project.get("owner_uid"), project.get("repo_url")) if forge else None
+    if not (token or auth):
         return False
     s = run.get("summary") or {}
     state = {"passed": "success", "failed": "failure"}.get(run.get("status"), "error")
@@ -266,9 +276,17 @@ def report_commit_status(db: Store, project: Record, run: Record) -> bool:
         text += " (goal not tested)"
     elif s.get("goal_untested_parts"):
         text += " (goal partly tested)"
+    description = f"Run #{run['id']}: {text}"
     try:
-        with GitHubClient(token) as gh:
-            gh.set_commit_status(*repo, run["commit_sha"], state, f"Run #{run['id']}: {text}", run_url(run["id"]))
+        if repo:
+            with GitHubClient(token) as gh:
+                gh.set_commit_status(*repo, run["commit_sha"], state, description, run_url(run["id"]))
+        elif forge[0] == "gitlab":
+            with GitLabClient(auth.token) as gl:
+                set_gitlab_status(gl, forge[1], run["commit_sha"], state, description, run_url(run["id"]))
+        else:
+            with BitbucketClient(auth.username, auth.token) as bb:
+                set_bitbucket_status(bb, forge[1], run["commit_sha"], state, description, run_url(run["id"]))
         return True
     except GitHubError as exc:
         logger.warning("Could not set the commit status for run #%s: %s", run["id"], exc)

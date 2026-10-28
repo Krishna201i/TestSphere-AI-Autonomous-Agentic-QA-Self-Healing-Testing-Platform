@@ -138,3 +138,28 @@ class BitbucketClient(_ForgeClient):
             "source": {"branch": {"name": name}}, "destination": {"branch": {"name": base}},
         })
         return {"url": pr["links"]["html"]["href"], "number": pr["id"], "branch": name, "base": base}
+
+
+# Run result -> each host's commit status state
+_GITLAB_STATES = {"success": "success", "failure": "failed", "error": "failed", "pending": "running"}
+_BITBUCKET_STATES = {"success": "SUCCESSFUL", "failure": "FAILED", "error": "FAILED", "pending": "INPROGRESS"}
+
+
+def set_gitlab_status(client: GitLabClient, path: str, sha: str, state: str, description: str,
+                      target_url: str | None) -> None:
+    """TestSphere's result on a pushed commit, shown next to it in GitLab."""
+    payload = {"state": _GITLAB_STATES[state], "name": "TestSphere", "description": description[:140]}
+    if target_url:
+        payload["target_url"] = target_url
+    client._call("POST", f"/projects/{quote(path, safe='')}/statuses/{sha}", json=payload)
+
+
+def set_bitbucket_status(client: BitbucketClient, path: str, sha: str, state: str, description: str,
+                         target_url: str | None) -> None:
+    """The same on Bitbucket (which needs a link: none without DASHBOARD_URL)."""
+    if not target_url:
+        return
+    client._call("POST", f"/repositories/{path}/commit/{sha}/statuses/build", json={
+        "key": "testsphere", "name": "TestSphere", "state": _BITBUCKET_STATES[state],
+        "description": description[:140], "url": target_url,
+    })
