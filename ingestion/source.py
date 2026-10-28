@@ -41,7 +41,7 @@ class SourceError(ValueError):
 
 @dataclass(frozen=True)
 class GitAuth:
-    """Credentials for one Git host: a token (or app password) and the user name the host expects."""
+    """Credentials for one Git host: an access token and the user name the host expects."""
 
     username: str
     token: str

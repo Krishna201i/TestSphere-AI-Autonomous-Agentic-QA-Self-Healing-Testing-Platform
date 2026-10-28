@@ -51,6 +51,13 @@ class _ForgeClient:
     def __exit__(self, *exc: Any) -> None:
         self.close()
 
+    def _status(self, method: str, path: str, **kwargs: Any) -> int:
+        """Only the status code (e.g. 404 = no such branch)."""
+        try:
+            return self._http.request(method, path, **kwargs).status_code
+        except httpx.HTTPError as exc:
+            raise GitHubError(f"Could not reach {self.name}: {exc}") from exc
+
     def _call(self, method: str, path: str, **kwargs: Any) -> Any:
         try:
             resp = self._http.request(method, path, **kwargs)
@@ -86,16 +93,15 @@ class GitLabClient(_ForgeClient):
         project = f"/projects/{quote(path, safe='')}"
         info = self._call("GET", project)
         name = branch
-        for attempt in range(1, 6):
-            try:
-                self._call("POST", f"{project}/repository/branches", json={"branch": name, "ref": base_sha})
+        for attempt in range(2, 7):  # a free branch name: a missing branch answers 404
+            if self._status("GET", f"{project}/repository/branches/{quote(name, safe='')}") == 404:
                 break
-            except GitHubError as exc:
-                if exc.status != 400 or attempt == 5:  # 400 = branch exists already
-                    raise
-                name = f"{branch}-{attempt + 1}"
+            name = f"{branch}-{attempt}"
+        else:
+            raise GitHubError(f"Branches {branch} to {name} already exist on {path}.", 409)
+        # One commit that also creates the branch from the patch's base commit (start_sha)
         self._call("POST", f"{project}/repository/commits", json={
-            "branch": name, "commit_message": title,
+            "branch": name, "start_sha": base_sha, "commit_message": title,
             "actions": [{"action": "update", "file_path": p, "content": c} for p, c in files],
         })
         mr = self._call("POST", f"{project}/merge_requests", json={
@@ -106,17 +112,19 @@ class GitLabClient(_ForgeClient):
 
 
 class BitbucketClient(_ForgeClient):
-    """Pull requests on bitbucket.org with an access token or an app password."""
+    """Pull requests on bitbucket.org with an API token or a workspace/repository access token.
+
+    Both go as a bearer token (Atlassian: "Bearer authentication removes the
+    need to provide the Atlassian email tied to the API token").  App
+    passwords, which needed a user name, were switched off by Atlassian in 2026.
+    """
 
     name = "Bitbucket"
 
     def __init__(self, username: str, token: str, transport: httpx.BaseTransport | None = None) -> None:
-        # An access token goes as a bearer token (saved with the x-token-auth user);
-        # an app password with the account's user name
-        auth = None if username == "x-token-auth" else httpx.BasicAuth(username, token)
-        headers = {"User-Agent": "TestSphere-AI"} | ({"Authorization": f"Bearer {token}"} if auth is None else {})
-        super().__init__(httpx.Client(base_url=BITBUCKET_API, timeout=20, transport=transport,
-                                      follow_redirects=False, auth=auth, headers=headers))
+        del username  # Git over https needs one (x-token-auth); the REST API does not
+        super().__init__(httpx.Client(base_url=BITBUCKET_API, timeout=20, transport=transport, follow_redirects=False,
+                                      headers={"Authorization": f"Bearer {token}", "User-Agent": "TestSphere-AI"}))
 
     def open_fix_pr(self, path: str, base_sha: str, files: list[tuple[str, str]],
                     branch: str, title: str, body: str) -> dict[str, Any]:

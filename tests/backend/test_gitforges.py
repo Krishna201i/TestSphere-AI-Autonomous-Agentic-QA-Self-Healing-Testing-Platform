@@ -28,19 +28,19 @@ def test_parse_forge_repo():
 
 
 class FakeGitLab:
-    def __init__(self, existing_branches=0):
-        self.calls, self.existing = [], existing_branches
+    def __init__(self, existing=()):
+        self.calls, self.existing = [], set(existing)  # URL-encoded names of branches that exist
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path, body = request.url.raw_path.decode(), json.loads(request.content or b"{}")
         self.calls.append((request.method, path, body, request.headers.get("PRIVATE-TOKEN")))
         if path == "/api/v4/projects/acme%2Fweb%2Fshop":
             return httpx.Response(200, json={"default_branch": "main"})
-        if path.endswith("/repository/branches"):
-            if self.existing:
-                self.existing -= 1
-                return httpx.Response(400, json={"message": "Branch already exists"})
-            return httpx.Response(201, json={"name": body["branch"]})
+        if "/repository/branches/" in path:  # one branch: 404 when it does not exist (GitLab REST docs)
+            name = path.rsplit("/", 1)[1]
+            if name in self.existing:
+                return httpx.Response(200, json={"name": name})
+            return httpx.Response(404, json={"message": "404 Branch Not Found"})
         if path.endswith("/repository/commits"):
             return httpx.Response(201, json={"id": "c" * 40})
         if "/statuses/" in path:
@@ -71,14 +71,16 @@ class FakeBitbucket:
 
 
 def test_gitlab_merge_request_is_one_commit_on_a_new_branch_from_the_patch_base():
-    fake = FakeGitLab(existing_branches=1)
+    fake = FakeGitLab(existing={"testsphere%2Ffix-1"})
     with GitLabClient("glpat-secret", transport=httpx.MockTransport(fake)) as gl:
         mr = gl.open_fix_pr("acme/web/shop", BASE, [("app.py", "fixed\n")], "testsphere/fix-1", "Fix", "Body")
     assert mr == {"url": "https://gitlab.com/acme/web/shop/-/merge_requests/12", "number": 12,
                   "branch": "testsphere/fix-1-2", "base": "main"}
-    branch = [b for m, p, b, _ in fake.calls if p.endswith("/repository/branches")][-1]
-    assert branch == {"branch": "testsphere/fix-1-2", "ref": BASE}
+    looked_up = [p for m, p, b, _ in fake.calls if "/repository/branches/" in p]
+    assert looked_up[0].endswith("/testsphere%2Ffix-1") and looked_up[-1].endswith("/testsphere%2Ffix-1-2")
     commit = next(b for m, p, b, _ in fake.calls if p.endswith("/repository/commits"))
+    # One commit that also creates the branch from the patch's base commit
+    assert commit["branch"] == "testsphere/fix-1-2" and commit["start_sha"] == BASE
     assert commit["actions"] == [{"action": "update", "file_path": "app.py", "content": "fixed\n"}]
     assert all(token == "glpat-secret" for *_, token in fake.calls)
 
@@ -95,11 +97,11 @@ def test_bitbucket_pull_request_commits_on_top_of_the_patch_base():
     assert all(auth == "Bearer bb-token" for *_, auth in fake.calls)
 
 
-def test_bitbucket_app_password_uses_basic_auth():
+def test_bitbucket_api_token_saved_with_a_user_name_is_still_a_bearer_token():
     fake = FakeBitbucket()
-    with BitbucketClient("alice", "app-pass", transport=httpx.MockTransport(fake)) as bb:
+    with BitbucketClient("alice", "atlassian-api-token", transport=httpx.MockTransport(fake)) as bb:
         bb.open_fix_pr("acme/shop", BASE, [("a.py", "x")], "b", "t", "d")
-    assert all(auth.startswith("Basic ") for *_, auth in fake.calls)
+    assert all(auth == "Bearer atlassian-api-token" for *_, auth in fake.calls)
 
 
 @pytest.fixture

@@ -141,7 +141,8 @@ by a GitHub push set a `TestSphere` commit status (success / failure / error) li
 **Private repositories.** Fetching a repository (ingestion, pipeline runs, fix patches, the commit a deploy
 ships) uses the owner's credentials for that host: the connected GitHub token for `github.com`, or a Git
 credential saved for another allowed host with `PUT /api/integrations/git-credentials`
-(`{"host": "gitlab.com", "token": "glpat-…"}`; Bitbucket app passwords also take `"username"`). The token is
+(`{"host": "gitlab.com", "token": "glpat-…"}`; for Bitbucket an API token or access token, since app passwords
+no longer work). The token is
 stored encrypted, sent as an `Authorization` header scoped to that one host (never in the URL, `.git/config`
 or error messages, and not after a redirect to another host), and used only for its owner's projects.
 A GitHub token needs *Contents: Read* on the repository to clone it.

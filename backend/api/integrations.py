@@ -101,8 +101,8 @@ TOKEN_USERS = {"github.com": "x-access-token", "gitlab.com": "oauth2", "bitbucke
 class GitCredential(BaseModel):
     host: str = Field(..., min_length=3, max_length=255, description="Git host, e.g. gitlab.com")
     username: str | None = Field(None, max_length=255,
-                                 description="Leave empty for a token (Bitbucket app passwords need your user name)")
-    token: str = Field(..., min_length=8, max_length=512, description="Personal/project access token or app password")
+                                 description="Leave empty for a token (Bitbucket accepts x-token-auth or your Bitbucket user name)")
+    token: str = Field(..., min_length=8, max_length=512, description="Personal, project or API access token")
 
 
 def git_auth(db: Store, uid: str | None, url: str | None) -> GitAuth | None:

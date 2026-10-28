@@ -195,7 +195,7 @@ function GitCredentials() {
         <label className="field">
           User name <span className="muted">(optional)</span>
           <input className="input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })}
-            autoComplete="off" placeholder="Bitbucket needs yours" />
+            autoComplete="off" placeholder="leave empty for a token" />
         </label>
         <label className="field wide">
           Access token
