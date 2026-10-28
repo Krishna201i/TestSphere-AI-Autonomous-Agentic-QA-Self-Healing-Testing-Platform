@@ -10,6 +10,8 @@
         "select",
         "check",
         "uncheck",
+        "hover",
+        "upload",
         "assert_text",
         "assert_visible",
         "assert_hidden",

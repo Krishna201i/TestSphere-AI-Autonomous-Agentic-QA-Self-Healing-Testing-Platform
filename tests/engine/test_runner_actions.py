@@ -9,6 +9,7 @@ let wrong results pass:
 - press without a target goes to the page; wait without a value settles
 - goto fails on an HTTP error status unless that status is expected
 - each run writes to its own directory, never outside the artifacts root
+- hover moves the pointer; upload attaches a generated file, never a server file
 """
 
 from __future__ import annotations
@@ -37,6 +38,10 @@ FORM = """<!doctype html><html><head><title>Form</title></head><body>
 <p id="greeting">Hello   Bob</p>
 <p id="keys"></p>
 <script>document.addEventListener("keydown", (e) => { document.getElementById("keys").textContent += e.key; });</script>
+<button id="menu" onmouseenter="document.getElementById('tip').hidden = false">Menu</button>
+<p id="tip" hidden>Shown on hover</p>
+<input id="avatar" type="file" onchange="document.getElementById('picked').textContent = this.files[0].name + ' ' + this.files[0].type">
+<p id="picked"></p>
 </body></html>"""
 
 
@@ -150,3 +155,23 @@ async def test_each_run_has_its_own_directory_inside_the_root(site: str, tmp_pat
         shot = Path(result.steps[-1].screenshot_path).resolve()
         assert run_dir in shot.parents
     assert not (tmp_path / "outside").exists()
+
+
+async def test_hover_shows_what_the_pointer_reveals(site: str) -> None:
+    result = await _run(
+        site,
+        Step(step_id="hover", action=ActionType.HOVER, target=_target("#menu")),
+        Step(step_id="tip", action=ActionType.ASSERT_VISIBLE, target=_target("#tip")),
+    )
+    assert result.status == TestStatus.PASSED, [s.error for s in result.steps]
+
+
+async def test_upload_attaches_a_generated_file_by_name_only(site: str) -> None:
+    result = await _run(
+        site,
+        # A path to a real server file: only its name is used, the content is generated
+        Step(step_id="upload", action=ActionType.UPLOAD, target=_target("#avatar"), value="C:/Windows/../etc/photo.png"),
+        Step(step_id="picked", action=ActionType.ASSERT_TEXT, target=_target("#picked"), expected="photo.png image/png",
+             exact=True),
+    )
+    assert result.status == TestStatus.PASSED, [s.error for s in result.steps]

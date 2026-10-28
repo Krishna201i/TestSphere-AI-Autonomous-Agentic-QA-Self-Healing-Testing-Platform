@@ -169,7 +169,7 @@ class StructuredOutputProcessor:
         # Valid actions (lowercase)
         valid_actions = {
             "navigate", "click", "fill", "select",
-            "check", "uncheck", "press", "wait",
+            "check", "uncheck", "hover", "upload", "press", "wait",
         }
         # Valid assertion types (lowercase with underscores)
         valid_assertion_types = {

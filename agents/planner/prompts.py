@@ -58,6 +58,8 @@ SUPPORTED ACTIONS (use only these):
 | select   | Select an option from a dropdown      | Yes             | Yes (option)   |
 | check    | Check a checkbox                      | Yes             | No             |
 | uncheck  | Uncheck a checkbox                    | Yes             | No             |
+| hover    | Move the pointer over an element      | Yes             | No             |
+| upload   | Attach a file to a file input         | Yes             | Yes (file name)|
 | press    | Press a keyboard key                  | No              | Yes (key name) |
 | wait     | Wait for a condition or fixed time    | No              | No             |
 """

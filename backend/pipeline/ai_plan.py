@@ -24,7 +24,7 @@ logger = logging.getLogger("testsphere.ai_plan")
 
 MAX_AI_TESTS = 5
 _ACTIONS = {"navigate": "NAVIGATE", "click": "CLICK", "fill": "FILL", "press": "PRESS", "select": "SELECT",
-            "check": "CHECK", "uncheck": "UNCHECK", "wait": "WAIT"}
+            "check": "CHECK", "uncheck": "UNCHECK", "hover": "HOVER", "upload": "UPLOAD", "wait": "WAIT"}
 _CHECKS = {"element_visible": "ASSERT_VISIBLE", "element_not_visible": "ASSERT_HIDDEN",
            "element_contains_text": "ASSERT_CONTAINS_TEXT", "element_has_text": "ASSERT_HAS_TEXT",
            "url_contains": "ASSERT_URL", "url_equals": "ASSERT_URL_EQUALS", "value_equals": "ASSERT_VALUE"}

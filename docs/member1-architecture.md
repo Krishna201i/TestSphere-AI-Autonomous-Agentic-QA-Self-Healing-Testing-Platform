@@ -567,6 +567,8 @@ ApplicationContext
 | `select`   | Yes             | Yes (option)   | Select from a dropdown         |
 | `check`    | Yes             | No             | Check a checkbox               |
 | `uncheck`  | Yes             | No             | Uncheck a checkbox             |
+| `hover`    | Yes             | No             | Move the pointer over an element |
+| `upload`   | Yes             | Yes (file name)| Attach a generated file of that name |
 | `press`    | No              | Yes (key)      | Press a keyboard key           |
 | `wait`     | No              | No             | Wait for condition/time        |
 

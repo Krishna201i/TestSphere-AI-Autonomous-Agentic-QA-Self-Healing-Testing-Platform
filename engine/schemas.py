@@ -48,6 +48,8 @@ class ActionType(str, Enum):
     SELECT = "select"
     CHECK = "check"
     UNCHECK = "uncheck"
+    HOVER = "hover"
+    UPLOAD = "upload"
     ASSERT_TEXT = "assert_text"
     ASSERT_VISIBLE = "assert_visible"
     ASSERT_HIDDEN = "assert_hidden"

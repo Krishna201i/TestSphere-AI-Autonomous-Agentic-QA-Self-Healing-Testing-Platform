@@ -110,6 +110,8 @@ class TestAction(str, Enum):
     SELECT        Yes             Yes (option)
     CHECK         Yes             No
     UNCHECK       Yes             No
+    HOVER         Yes             No
+    UPLOAD        Yes             Yes (file name)
     PRESS         No              Yes (key name)
     WAIT          No              No
     ============  ==============  ==============
@@ -121,6 +123,8 @@ class TestAction(str, Enum):
     SELECT = "select"
     CHECK = "check"
     UNCHECK = "uncheck"
+    HOVER = "hover"
+    UPLOAD = "upload"
     PRESS = "press"
     WAIT = "wait"
 

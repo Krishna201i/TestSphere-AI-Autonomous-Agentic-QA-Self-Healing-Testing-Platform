@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import mimetypes
+import re
 import time
 import uuid
 from datetime import UTC, datetime
@@ -279,7 +281,7 @@ async def _execute_step(
 # passes when nothing matches; press without a target goes to the page)
 _ELEMENT_ACTIONS = frozenset({
     ActionType.CLICK, ActionType.FILL, ActionType.PRESS, ActionType.SELECT, ActionType.CHECK,
-    ActionType.UNCHECK, ActionType.ASSERT_TEXT, ActionType.ASSERT_VALUE, ActionType.ASSERT_VISIBLE,
+    ActionType.UNCHECK, ActionType.HOVER, ActionType.UPLOAD, ActionType.ASSERT_TEXT, ActionType.ASSERT_VALUE, ActionType.ASSERT_VISIBLE,
 })
 
 
@@ -444,6 +446,14 @@ async def _perform_action_with_locator(
     elif action == ActionType.UNCHECK:
         await loc.uncheck(timeout=timeout)
 
+    elif action == ActionType.HOVER:
+        await loc.hover(timeout=timeout)
+
+    elif action == ActionType.UPLOAD:
+        # The value names a file; its content is generated, so a test (or a
+        # model writing one) can never upload a file from this server
+        await loc.set_input_files(_upload_payload(_require_value(step, "upload")), timeout=timeout)
+
     elif action == ActionType.ASSERT_TEXT:
         expected = step.expected or ""
         actual = (await loc.inner_text(timeout=timeout)).strip()
@@ -490,6 +500,21 @@ def _require_value(step: Step, action_name: str) -> str:
     if not step.value:
         raise ValueError(f"Step {step.step_id!r}: action {action_name!r} requires a value")
     return step.value
+
+
+# A 1×1 transparent PNG: image inputs that check the file still accept it
+_TINY_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+    "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082"
+)
+
+
+def _upload_payload(value: str) -> dict[str, object]:
+    """A generated file named after *value* (only its base name is used)."""
+    name = re.split(r"[\\/]", value.strip())[-1] or "testsphere-upload.txt"
+    mime = mimetypes.guess_type(name)[0] or "text/plain"
+    body = _TINY_PNG if mime == "image/png" else f"TestSphere test upload: {name}\n".encode()
+    return {"name": name, "mimeType": mime, "buffer": body}
 
 
 def _require_locator(step: Step) -> str:
