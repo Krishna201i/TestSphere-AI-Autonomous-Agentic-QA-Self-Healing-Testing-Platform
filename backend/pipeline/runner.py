@@ -463,9 +463,16 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
     left_out = [f"{c['label']} ({codes[c['url']] or 'unreachable'})" for c in candidates
                 if not codes.get(c["url"]) or codes[c["url"]] >= 400]
     reachable = [c for c in candidates if codes.get(c["url"]) and codes[c["url"]] < 400]
-    pages = await _analyze_pages([c["url"] for c in reachable[:settings.PIPELINE_DEEP_PAGES]])
-    planned += [suite.page_check_test(c, pages[c["url"]]) if pages.get(c["url"]) else suite.render_test(c)
-                for c in reachable]
+    if project.get("sign_in_first"):
+        # These pages run signed in, but analysis sees them signed out (often a
+        # redirect to sign in): check they stay put instead of checking content
+        planned += [suite.stays_on_page_test(c) for c in reachable]
+    else:
+        pages = await _analyze_pages([c["url"] for c in reachable[:settings.PIPELINE_DEEP_PAGES]])
+        # A page that redirected was analyzed as the page it led to: no content checks from that
+        planned += [suite.page_check_test(c, pages[c["url"]])
+                    if pages.get(c["url"]) and not suite.redirected(c, pages[c["url"]]) else suite.render_test(c)
+                    for c in reachable]
 
     generated, created = [], 0
     for test in planned:

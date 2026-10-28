@@ -501,3 +501,21 @@ def test_gitlab_webhook_checks_token_branch_repository_and_event(fresh_store, no
     assert "not this project" in deliver_gitlab(client, project, gitlab_push(repo="https://gitlab.com/x/y")).json()["ignored"]
     assert "do not trigger" in deliver_gitlab(client, project, gitlab_push(), event="Merge Request Hook").json()["ignored"]
     assert no_background == []
+
+
+def test_a_page_that_redirected_gets_no_content_checks_from_where_it_landed():
+    candidate = {"kind": "link", "url": "http://app.test/account", "label": "/account"}
+    assert suite.redirected(candidate, {"final_url": "http://app.test/login?next=/account"})
+    assert not suite.redirected(candidate, {"final_url": "http://app.test/account/"})
+    assert not suite.redirected(candidate, {})
+
+
+def test_sign_in_first_checks_linked_pages_stay_put_instead_of_signed_out_content(fresh_store, stub_network):
+    # Analysis is signed out: here every page "is" the login page it redirects to
+    stub_network["analysis"] = {**analysis(), "final_url": "http://app.test/login"}
+    project = make_project(fresh_store, prompt="log in with demo / secret", sign_in_first=True)
+    run_once(fresh_store, project, SessionRecorder(), OutOfScope())
+    linked = next(tc for tc in fresh_store.find(TEST_CASES) if tc["name"].startswith("Linked page"))
+    steps = json.loads(linked["description"])["steps"]
+    assert [(s["action"], s.get("value")) for s in steps][-1] == ("ASSERT_URL", "/about")
+    assert not any(s["action"] == "ASSERT_CONTAINS_TEXT" for s in steps)  # nothing from the signed-out page

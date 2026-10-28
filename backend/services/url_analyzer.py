@@ -103,6 +103,7 @@ class URLAnalyzerService:
         headers: dict[str, str] = {}
         error_encountered: str | None = None
         certificate_valid: bool | None = None
+        final_url = normalized_url  # where redirects ended
 
         try:
             res, certificate_valid = await get_verifying_first(
@@ -111,6 +112,7 @@ class URLAnalyzerService:
             )
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             status_code = res.status_code
+            final_url = str(res.url)
             html = res.text
             headers = dict(res.headers)
             if not certificate_valid:
@@ -187,6 +189,7 @@ class URLAnalyzerService:
         return {
             "success": error_encountered is None and status_code < 400,
             "url": normalized_url,
+            "final_url": final_url,
             "domain": domain,
             "status_code": status_code,
             "latency_ms": latency_ms,

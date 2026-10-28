@@ -137,6 +137,22 @@ def _get_routes(blueprint: dict[str, Any] | None) -> Iterable[str]:
 _NO_FIELD = ("hidden", "submit", "button", "image", "reset")
 
 
+def stays_on_page_test(candidate: dict[str, str]) -> dict[str, Any]:
+    """For a project that signs in first: the page opens without being sent
+    elsewhere (to the sign-in page when the session did not carry over)."""
+    test = render_test(candidate)
+    path = urlparse(candidate["url"]).path or "/"
+    if path != "/":
+        test["steps"].append(_step(3, "ASSERT_URL", value=path, description=f"Still on {path} (not sent to sign in)"))
+    return test
+
+
+def redirected(candidate: dict[str, str], page: dict[str, Any]) -> bool:
+    """The page sent the (signed-out) visitor somewhere else, e.g. to sign in."""
+    final = urlparse(page.get("final_url") or candidate["url"])
+    return (final.path or "/").rstrip("/") != (urlparse(candidate["url"]).path or "/").rstrip("/")
+
+
 def page_check_test(candidate: dict[str, str], page: dict[str, Any]) -> dict[str, Any]:
     """A linked or route page checked from its own analysis: it opens, shows
     its title and main heading, and its form controls are there.  Nothing is
