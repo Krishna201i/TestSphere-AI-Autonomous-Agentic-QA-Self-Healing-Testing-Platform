@@ -489,7 +489,7 @@ class URLAnalyzerService:
         pair = re.search(r"([\w.@+-]+)\s*/\s*(\S+)", text)
         if pair:
             values["username"], values["password"] = pair.group(1), pair.group(2).rstrip(".,;")
-        pw = re.search(r"\bpass(?:word)?\s*(?:is|=|:)?\s*[\"']?([^\s\"',;]+)", text, re.IGNORECASE)
+        pw = re.search(r"\bpass(?:word)?\b\s*(?:is|=|:)?\s*[\"']?([^\s\"',;]+)", text, re.IGNORECASE)
         if pw:
             values["password"] = pw.group(1)
         user = re.search(r"\b(?:user ?name|user|login|e-?mail)\s*(?:is|=|:)?\s*[\"']?([\w.@+-]+)", text, re.IGNORECASE) \

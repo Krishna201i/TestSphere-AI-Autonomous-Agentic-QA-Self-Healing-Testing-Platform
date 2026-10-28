@@ -12,6 +12,7 @@ from backend.services.url_analyzer import URLAnalyzerService as U
     ("add a todo item called Buy milk and mark it as completed", {"text": "Buy milk"}),
     ('search for "red shoes"', {"text": "red shoes"}),
     ("check the home page loads", {}),
+    ("log in with an email and password", {}),  # the word "password" is not a password
     ("open https://example.com/a/b", {}),
 ])
 def test_values_are_read_from_the_goal(prompt, expected):

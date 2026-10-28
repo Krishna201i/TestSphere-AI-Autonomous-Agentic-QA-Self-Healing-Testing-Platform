@@ -55,7 +55,7 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 ### 2.2 AI Agent Settings
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `LLM_PROVIDER` | `mock` | `mock` (offline, deterministic) or `api` (any OpenAI-compatible chat API). `local` is reserved, not yet implemented |
+| `LLM_PROVIDER` | `mock` | `mock` (offline, deterministic) or `api` (any OpenAI-compatible chat API), or `local` (an OpenAI-compatible server on this machine such as Ollama; no key needed, `LLM_BASE_URL` defaults to `http://localhost:11434/v1`). With `mock`, test generation and healing use only the built-in rules: the AI planner, AI healer and failure analyzer stay off |
 | `LLM_API_KEY` | `""` | API key for the configured endpoint (required if `LLM_PROVIDER=api`) |
 | `LLM_BASE_URL` | OpenAI | Base URL of the OpenAI-compatible endpoint (OpenAI, Anthropic, Gemini, Groq, OpenRouter) |
 | `LLM_MODEL` | `mock-model` | Model identifier sent to the endpoint |

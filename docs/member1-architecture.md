@@ -804,30 +804,22 @@ It does not perform any AI reasoning. This means:
 
 - Generated test plans are static fixtures, not intelligent output
 - The pipeline infrastructure is fully tested
-- Real intelligence requires a real model (future)
+- Real intelligence requires a real model: set `LLM_PROVIDER=api` (any
+  OpenAI-compatible endpoint) or `LLM_PROVIDER=local` (Ollama and similar)
 
 ### 10.12 Connecting a Real Model
 
-To replace the mock with a real model:
+Both providers are served by `agents/llm/providers/api.py`; only settings change:
 
-```python
-# 1. Implement LLMClient for the new provider
-class LocalLLMProvider(LLMClient):
-    async def generate(self, request: LLMRequest) -> LLMResponse:
-        # Call the local model
-        ...
+```bash
+LLM_PROVIDER=api
+LLM_API_KEY=...
+LLM_MODEL=...
+LLM_BASE_URL=https://api.openai.com/v1   # or another OpenAI-compatible endpoint
 
-# 2. Register in factory.py
-if provider == "local":
-    return LocalLLMProvider(config)
-
-# 3. Set environment variable
-# LLM_PROVIDER=local
-
-# 4. The TestPlanner works without any changes
-client = create_llm_client()
-planner = LLMTestPlanner(client)
-plan = await planner.generate_test_plan(context)
+# or a model on this machine
+LLM_PROVIDER=local
+LLM_MODEL=llama3.2
 ```
 
 No changes to `planner.py`, `validation.py`, `prompts.py`, or
