@@ -5,8 +5,9 @@ set -o errexit
 
 echo "=== Installing Python dependencies ==="
 pip install --upgrade pip
-pip install -r requirements.txt
-pip install -e .
+# Exact, hash-checked versions: the same lock the Dockerfile and CI install
+pip install --require-hashes -r requirements.txt
+pip install --no-deps -e .
 
 echo "=== Installing Playwright Chromium browser ==="
 # Install browsers inside the project directory: hosts such as Render only ship
