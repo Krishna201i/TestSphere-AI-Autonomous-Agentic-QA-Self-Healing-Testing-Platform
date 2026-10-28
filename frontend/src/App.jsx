@@ -27,6 +27,18 @@ function DatabaseBanner() {
   );
 }
 
+/** What happened to a GitHub sign-in that had to be linked to an existing account. */
+function AccountBanner() {
+  const { accountNotice, clearAccountNotice } = useAuth();
+  if (!accountNotice) return null;
+  return (
+    <div className={`alert-banner row-between${accountNotice.ok ? ' ok' : ''}`} role={accountNotice.ok ? 'status' : 'alert'}>
+      <span>{accountNotice.text}</span>
+      <button type="button" className="btn btn-sm" onClick={clearAccountNotice}>Dismiss</button>
+    </div>
+  );
+}
+
 /** A page that fails to render shows what happened instead of blanking the whole app. */
 class PageErrorBoundary extends React.Component {
   constructor(props) {
@@ -156,6 +168,7 @@ function Dashboard({ uid }) {
     <WorkspaceProvider uid={uid}>
       <TopNav page={page} onNavigate={navigate} />
       <DatabaseBanner />
+      <AccountBanner />
       <main>
         <PageErrorBoundary key={page}>
           <View onNavigate={navigate} params={params} />

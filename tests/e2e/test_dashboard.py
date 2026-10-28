@@ -130,8 +130,14 @@ def test_privacy_notice_is_reachable_before_sign_in(server, browser):
     page.get_by_role("button", name="Back to sign in").click()
     page.get_by_role("button", name="Continue with Google").wait_for()
     assert page.get_by_role("button", name="Continue with GitHub").count() == 1
+    assert page.get_by_role("button", name="Try it as a guest").count() == 1
     if SHOTS:
         page.screenshot(path=str(SHOTS / "sign-in.png"))
+    page.get_by_role("button", name="Continue with phone").click()
+    page.get_by_label("Phone number").wait_for()
+    assert page.get_by_role("button", name="Send code").count() == 1
+    page.get_by_role("button", name="Back to sign in").click()
+    page.get_by_role("button", name="Continue with Google").wait_for()
     assert errors == []
     page.close()
 

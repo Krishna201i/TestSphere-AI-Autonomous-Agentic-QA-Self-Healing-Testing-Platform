@@ -8,6 +8,9 @@ const fb = vi.hoisted(() => ({
   linkWithPopup: vi.fn(),
   linkWithCredential: vi.fn(),
   reauthenticateWithPopup: vi.fn(),
+  signInAnonymously: vi.fn(),
+  signInWithPhoneNumber: vi.fn(),
+  onAuthStateChanged: null,
 }));
 
 vi.mock('firebase/app', () => ({ initializeApp: () => ({}), getApps: () => [] }));
@@ -18,11 +21,17 @@ vi.mock('firebase/auth', () => {
     static credentialFromResult(res) { return res.credential || null; }
   }
   class GoogleAuthProvider {}
+  class RecaptchaVerifier {
+    constructor(auth, button, options) { Object.assign(this, { button, options }); }
+    clear() {}
+  }
   return {
-    GithubAuthProvider, GoogleAuthProvider,
+    GithubAuthProvider, GoogleAuthProvider, RecaptchaVerifier,
     getAuth: () => fb.auth,
     getRedirectResult: async () => null,
-    onAuthStateChanged: () => () => {},
+    onAuthStateChanged: (auth, cb) => { fb.onAuthStateChanged = cb; return () => {}; },
+    signInAnonymously: fb.signInAnonymously,
+    signInWithPhoneNumber: fb.signInWithPhoneNumber,
     signInWithPopup: fb.signInWithPopup,
     linkWithPopup: fb.linkWithPopup,
     linkWithCredential: fb.linkWithCredential,
@@ -80,6 +89,24 @@ describe('GitHub on an account that signs in with Google (same email)', () => {
     await act(() => auth().signInWithGoogle());
 
     expect(fb.linkWithCredential).toHaveBeenCalledWith(user, githubCred);
+    expect(auth().accountNotice).toMatchObject({ ok: true });
+    expect(auth().linkNeeded).toBe(false);
+  });
+
+  it('asks for the existing sign-in, then says why GitHub could not be linked instead of hiding it', async () => {
+    const user = { uid: 'u1', providerData: [{ providerId: 'google.com' }] };
+    fb.signInWithPopup
+      .mockRejectedValueOnce(authError('auth/account-exists-with-different-credential', { providerId: 'github.com' }))
+      .mockImplementationOnce(async () => { fb.auth.currentUser = user; });
+    fb.linkWithCredential.mockRejectedValueOnce(authError('auth/credential-already-in-use'));
+    const auth = await renderAuth();
+
+    await act(() => auth().signInWithGitHub().catch(() => {}));
+    expect(auth().linkNeeded).toBe(true);  // the sign-in screen offers "Continue with Google to add GitHub"
+    await act(() => auth().signInWithGoogle());
+
+    expect(auth().accountNotice.ok).toBe(false);
+    expect(auth().accountNotice.text).toMatch(/separate TestSphere account/);
   });
 
   it('connects repositories even when that GitHub login belongs to another account', async () => {
@@ -88,5 +115,36 @@ describe('GitHub on an account that signs in with Google (same email)', () => {
     const auth = await renderAuth();
 
     await expect(auth().githubRepoToken()).resolves.toBe('gho_repo');
+  });
+});
+
+
+describe('Phone and guest sign-in', () => {
+  it('texts a code, then signs in with it', async () => {
+    const confirm = vi.fn(async () => {});
+    fb.signInWithPhoneNumber.mockResolvedValueOnce({ confirm });
+    const auth = await renderAuth();
+
+    await act(() => auth().sendPhoneCode('+91 98765-43210', 'phone-send'));
+    const [, number, verifier] = fb.signInWithPhoneNumber.mock.calls[0];
+    expect(number).toBe('+919876543210');
+    expect(verifier).toMatchObject({ button: 'phone-send', options: { size: 'invisible' } });
+
+    await act(() => auth().confirmPhoneCode(' 123456 '));
+    expect(confirm).toHaveBeenCalledWith('123456');
+  });
+
+  it('signs in as a guest, shown as "Guest"', async () => {
+    fb.signInAnonymously.mockResolvedValueOnce({});
+    const auth = await renderAuth();
+    await act(() => auth().signInAsGuest());
+    expect(fb.signInAnonymously).toHaveBeenCalled();
+
+    await act(async () => fb.onAuthStateChanged({ uid: 'g1', isAnonymous: true, email: null, displayName: null,
+      phoneNumber: null, providerData: [] }));
+    expect(auth().user).toMatchObject({ name: 'Guest', provider: 'anonymous' });
+    await act(async () => fb.onAuthStateChanged({ uid: 'p1', isAnonymous: false, email: null, displayName: null,
+      phoneNumber: '+919876543210', providerData: [{ providerId: 'phone' }] }));
+    expect(auth().user).toMatchObject({ name: '+919876543210', provider: 'phone' });
   });
 });

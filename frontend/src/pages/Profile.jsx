@@ -7,7 +7,10 @@ import Integrations from '../components/Integrations';
 import ApiTokens from '../components/ApiTokens';
 import { timeAgo, toDate } from '../lib/derive';
 
-const PROVIDERS = { password: 'Email & password', 'google.com': 'Google', local: 'Local (sign-in off)' };
+const PROVIDERS = {
+  password: 'Email & password', 'google.com': 'Google', 'github.com': 'GitHub', phone: 'Phone (SMS code)',
+  anonymous: 'Guest (no account)', local: 'Local (sign-in off)',
+};
 
 export function initialsOf(name) {
   return (name || '').split(/[\s._@-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';

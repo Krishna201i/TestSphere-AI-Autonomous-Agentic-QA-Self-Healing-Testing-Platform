@@ -310,6 +310,7 @@ img.avatar { object-fit: cover; }
   background: var(--warning-soft); color: var(--warning-fg); font-size: var(--fs-base);
 }
 .alert-banner.inline { margin: 0; }
+.alert-banner.ok { border-color: var(--success); background: var(--success-soft); color: var(--success-fg); }
 
 /* ── Menus ───────────────────────────────────────────────── */
 .menu-anchor { position: relative; }

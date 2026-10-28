@@ -73,7 +73,7 @@ export default function TopNav({ page, onNavigate }) {
   const { health, audit, system, operator, setOperator } = useWorkspace();
   const auth = useAuth();
   const signedIn = auth.mode === 'firebase';
-  const displayName = signedIn ? (auth.user.name || auth.user.email) : operator;
+  const displayName = (signedIn ? (auth.user.name || auth.user.email) : operator) || 'Account';
   const h = healthStats(health);
   const menu = useMenu();
   const [theme, setTheme] = useTheme();
