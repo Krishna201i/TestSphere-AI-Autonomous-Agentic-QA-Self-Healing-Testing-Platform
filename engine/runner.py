@@ -125,6 +125,7 @@ async def run_test(
         async with BrowserSession(config, trace_path=f"{artifacts_dir}/_trace.zip",
                                   storage_state=storage_state) as session:
             page = await session.new_page()
+            page.on("dialog", _accept_dialog)
 
             for step in plan.steps:
                 log.info("[%s] Executing step %s (%s)", plan.test_id, step.step_id, step.action)
@@ -217,8 +218,12 @@ async def _execute_step(
             f"{req.method} {req.url} — {req.failure}"  # type: ignore[attr-defined]
         )
 
+    def _on_dialog(dialog: object) -> None:  # accepted by _accept_dialog; recorded here
+        console_logs.append(f"[dialog {dialog.type}] {dialog.message}")  # type: ignore[attr-defined]
+
     page.on("console", _on_console)
     page.on("requestfailed", _on_request_failed)
+    page.on("dialog", _on_dialog)
 
     step_start = time.monotonic()
     screenshot_path: str | None = None
@@ -285,6 +290,14 @@ async def _execute_step(
     finally:
         page.remove_listener("console", _on_console)
         page.remove_listener("requestfailed", _on_request_failed)
+        page.remove_listener("dialog", _on_dialog)
+
+
+async def _accept_dialog(dialog: object) -> None:
+    """Answer alert / confirm / prompt as a user pressing OK would (Playwright
+    would otherwise dismiss them, so a "Delete? OK" flow always cancelled)."""
+    with contextlib.suppress(PlaywrightError):
+        await dialog.accept()  # type: ignore[attr-defined]
 
 
 # Element actions whose missing element means a broken locator (assert_hidden

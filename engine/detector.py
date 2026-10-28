@@ -81,9 +81,19 @@ _CANDIDATES_JS = """\
 ([selectors, maxN]) => {
     const seen = new Set();
     const raw  = [];
+    // Matches in the document and inside open shadow roots (web components),
+    // which document.querySelectorAll does not enter; the locators built from
+    // them resolve there too, since Playwright's CSS pierces open shadow DOM
+    const roots = [document];
+    for (let i = 0; i < roots.length; i++) {
+        for (const el of roots[i].querySelectorAll('*')) {
+            if (el.shadowRoot) roots.push(el.shadowRoot);
+        }
+    }
+    const deepQuery = (sel) => roots.flatMap((r) => [...r.querySelectorAll(sel)]);
 
     for (const sel of selectors) {
-        for (const el of document.querySelectorAll(sel)) {
+        for (const el of deepQuery(sel)) {
             if (!seen.has(el)) {
                 seen.add(el);
                 raw.push({

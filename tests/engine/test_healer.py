@@ -353,3 +353,55 @@ def test_a_different_kind_of_input_is_never_the_same_element():
     email = ElementFingerprint(tag="input", id="email", attributes={"type": "email"})
     assert score_fingerprint(box, radio)[0] == 0.0
     assert score_fingerprint(email, email.model_copy(update={"attributes": {"type": "text"}}))[0] > 0.0
+
+
+SHADOW_PAGE = """<!doctype html><html><body>
+<shop-cart></shop-cart><p id="done"></p>
+<script>
+customElements.define("shop-cart", class extends HTMLElement {
+  connectedCallback() {
+    const root = this.attachShadow({ mode: "open" });
+    root.innerHTML = '<button data-testid="TESTID" class="buy">Buy now</button>';
+    root.querySelector("button").onclick = () => { document.getElementById("done").textContent = "bought"; };
+  }
+});
+</script></body></html>"""
+
+
+async def test_heals_a_button_inside_a_web_components_shadow_root() -> None:
+    page = {"html": SHADOW_PAGE.replace("TESTID", "buy-button")}
+
+    class Handler(SimpleHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server API
+            body = page["html"].encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        button = Target(description="Buy button", primary_locator='[data-testid="buy-button"]')
+        plan = TestPlan(test_id="shadow", name="shadow", base_url=base, steps=[
+            Step(step_id="goto", action=ActionType.GOTO, value=f"{base}/"),
+            Step(step_id="buy", action=ActionType.CLICK, target=button),
+            Step(step_id="done", action=ActionType.ASSERT_TEXT,
+                 target=Target(description="Done", primary_locator="#done"), expected="bought"),
+        ])
+        assert (await run_test(plan, OPTIONS)).status == TestStatus.PASSED
+        assert button.fingerprint is not None
+        button.fallback_locators = ["#gone"]  # only the fingerprint scan can find it now
+        page["html"] = SHADOW_PAGE.replace("TESTID", "purchase")
+
+        result = await run_test(plan, OPTIONS)
+        buy = next(s for s in result.steps if s.step_id == "buy")
+        assert buy.status == StepStatus.HEALED, buy.error
+        assert buy.healing.strategy_used == "fingerprint"
+        assert result.status == TestStatus.HEALED
+    finally:
+        server.shutdown()

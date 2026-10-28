@@ -42,6 +42,8 @@ FORM = """<!doctype html><html><head><title>Form</title></head><body>
 <p id="tip" hidden>Shown on hover</p>
 <input id="avatar" type="file" onchange="document.getElementById('picked').textContent = this.files[0].name + ' ' + this.files[0].type">
 <p id="picked"></p>
+<button id="delete" onclick="document.getElementById('deleted').textContent = confirm('Delete this item?') ? 'deleted' : 'kept'">Delete</button>
+<p id="deleted"></p>
 <p id="width"></p><script>document.getElementById("width").textContent = "w" + window.innerWidth;</script>
 </body></html>"""
 
@@ -209,3 +211,14 @@ async def test_the_window_size_can_be_a_phone(site: str) -> None:
     assert (await _run(site, width, viewport="390x844")).status == TestStatus.PASSED
     default = Step(step_id="width", action=ActionType.ASSERT_TEXT, target=_target("#width"), expected="w1280", exact=True)
     assert (await _run(site, default)).status == TestStatus.PASSED
+
+
+async def test_a_confirm_dialog_is_answered_ok_and_recorded(site: str) -> None:
+    result = await _run(
+        site,
+        Step(step_id="delete", action=ActionType.CLICK, target=_target("#delete")),
+        Step(step_id="deleted", action=ActionType.ASSERT_TEXT, target=_target("#deleted"), expected="deleted", exact=True),
+    )
+    assert result.status == TestStatus.PASSED, [s.error for s in result.steps]
+    click = next(s for s in result.steps if s.step_id == "delete")
+    assert "[dialog confirm] Delete this item?" in click.console_logs
