@@ -13,6 +13,7 @@ statically (committed secrets, committed .env files, debug flags).
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import tomllib
@@ -26,8 +27,9 @@ SKIP_DIRS = {
     ".git", "node_modules", "venv", ".venv", "env", "__pycache__", "dist", "build", ".next",
     ".nuxt", "coverage", ".pytest_cache", ".mypy_cache", "target", "vendor", ".idea", ".vscode",
 }
-MAX_FILES = 20_000
-MAX_TEXT_BYTES = 1_000_000
+# Safety caps for one repository (INGEST_MAX_FILES / INGEST_MAX_FILE_BYTES)
+MAX_FILES = max(1, int(os.getenv("INGEST_MAX_FILES", "20000")))
+MAX_TEXT_BYTES = max(1, int(os.getenv("INGEST_MAX_FILE_BYTES", "1000000")))
 
 LANGUAGES = {
     ".py": "Python", ".js": "JavaScript", ".jsx": "JavaScript", ".mjs": "JavaScript", ".cjs": "JavaScript",

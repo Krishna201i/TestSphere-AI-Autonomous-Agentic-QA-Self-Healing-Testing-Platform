@@ -213,6 +213,11 @@ class EngineConfig(BaseModel):
     RunOptions.
     """
 
+    viewport: str = Field(
+        default_factory=lambda: os.getenv("ENGINE_VIEWPORT", "1280x720").strip() or "1280x720",
+        pattern=r"^[1-9]\d{2,3}x[1-9]\d{2,3}$",
+        description="Browser window as WIDTHxHEIGHT, e.g. 390x844 for a phone (ENGINE_VIEWPORT)",
+    )
     browser: Literal["chromium", "firefox", "webkit"] = Field(
         default_factory=lambda: os.getenv("ENGINE_BROWSER", "chromium").strip().lower() or "chromium",
         description="Browser engine to run tests in (ENGINE_BROWSER; Chromium by default)",
@@ -277,6 +282,7 @@ class RunOptions(BaseModel):
     min_action_timeout_ms: int | None = Field(None, ge=0)
     quick_heal_ms: int | None = Field(None, ge=0)
     browser: Literal["chromium", "firefox", "webkit"] | None = None
+    viewport: str | None = Field(None, pattern=r"^[1-9]\d{2,3}x[1-9]\d{2,3}$")
 
     def merged(self, base: EngineConfig) -> EngineConfig:
         """Return a new EngineConfig with non-None overrides applied."""

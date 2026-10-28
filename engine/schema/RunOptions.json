@@ -132,6 +132,19 @@
       ],
       "default": null,
       "title": "Browser"
+    },
+    "viewport": {
+      "anyOf": [
+        {
+          "pattern": "^[1-9]\\d{2,3}x[1-9]\\d{2,3}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Viewport"
     }
   },
   "title": "RunOptions",

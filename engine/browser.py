@@ -222,7 +222,7 @@ class BrowserSession:
                 raise RuntimeError(f"{exc}\n({failure})") from exc
             self._browser = await self._launch()
         self._context = await self._browser.new_context(
-            viewport={"width": 1280, "height": 720},
+            viewport=dict(zip(("width", "height"), map(int, self._config.viewport.split("x")), strict=True)),
             ignore_https_errors=True,
             storage_state=self._storage_state,  # a signed-in session from an earlier test, or None
         )

@@ -42,6 +42,7 @@ FORM = """<!doctype html><html><head><title>Form</title></head><body>
 <p id="tip" hidden>Shown on hover</p>
 <input id="avatar" type="file" onchange="document.getElementById('picked').textContent = this.files[0].name + ' ' + this.files[0].type">
 <p id="picked"></p>
+<p id="width"></p><script>document.getElementById("width").textContent = "w" + window.innerWidth;</script>
 </body></html>"""
 
 
@@ -201,3 +202,10 @@ async def test_a_failed_run_hands_no_session_on(site: str) -> None:
     kept: list[dict] = []
     await _run(site, Step(step_id="x", action=ActionType.CLICK, target=_target("#nothing-here")), keep_state=kept)
     assert kept == []
+
+
+async def test_the_window_size_can_be_a_phone(site: str) -> None:
+    width = Step(step_id="width", action=ActionType.ASSERT_TEXT, target=_target("#width"), expected="w390", exact=True)
+    assert (await _run(site, width, viewport="390x844")).status == TestStatus.PASSED
+    default = Step(step_id="width", action=ActionType.ASSERT_TEXT, target=_target("#width"), expected="w1280", exact=True)
+    assert (await _run(site, default)).status == TestStatus.PASSED

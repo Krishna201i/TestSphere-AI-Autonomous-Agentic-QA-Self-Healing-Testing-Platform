@@ -1,6 +1,12 @@
 {
   "description": "Global engine configuration.\n\nSet once at engine start; individual runs may override a subset via\nRunOptions.",
   "properties": {
+    "viewport": {
+      "description": "Browser window as WIDTHxHEIGHT, e.g. 390x844 for a phone (ENGINE_VIEWPORT)",
+      "pattern": "^[1-9]\\d{2,3}x[1-9]\\d{2,3}$",
+      "title": "Viewport",
+      "type": "string"
+    },
     "browser": {
       "description": "Browser engine to run tests in (ENGINE_BROWSER; Chromium by default)",
       "enum": [

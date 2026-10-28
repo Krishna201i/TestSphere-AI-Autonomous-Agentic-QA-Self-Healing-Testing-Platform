@@ -67,12 +67,14 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `AGENT_MEMORY_MAX_RECORDS` | `2000` | Newest healing records loaded at start-up; more remembers older heals but costs that many database reads per restart |
 | `INGEST_WORKSPACE` | `./data/repos` | Where ingested repositories are cloned |
 | `INGEST_GIT_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts public repositories may be cloned from (https only) |
+| `INGEST_MAX_FILES` / `INGEST_MAX_FILE_BYTES` / `INGEST_CLONE_TIMEOUT` | `20000` / `1000000` / `120` | Safety caps per repository: files analyzed, bytes read per file, seconds a clone may take |
 | `INGEST_ALLOW_LOCAL_PATHS` | `true` locally in development; `false` on Render/Heroku/Railway/Fly/Cloud Run unless set | Accept local folder paths for ingestion (reads the server's disk); never enable on a public server |
 | `SECURITY_SCAN_ALLOWED_HOSTS` | `""` | Extra hosts the passive scanner may contact (loopback always allowed) |
 | `RATE_LIMIT_RUNS_PER_MINUTE` | `10` | Runs, scans and clones each user may start per minute (`0` disables); over it the API answers 429 |
 | `RATE_LIMIT_BACKEND` | `memory` | `memory` counts per process (right for one instance); `database` shares the count between instances, at one read and one write per run start. With several API instances, also route each `/api/workflow/stream` client back to the instance running its workflow (sticky sessions): live run events stay in that instance's memory |
 | `ENGINE_MAX_BROWSERS` | `2` | Browser instances that may run at once; further runs wait for a slot |
 | `ENGINE_BROWSER` | `chromium` | Browser tests run in: `chromium`, `firefox` or `webkit` (Safari's engine). The image installs Chromium only; another browser is downloaded on its first run, or add `python -m playwright install --with-deps <browser>` to the build. The outbound request guard covers all three |
+| `ENGINE_VIEWPORT` | `1280x720` | Browser window as WIDTHxHEIGHT (e.g. `390x844` for a phone). Changing it changes screenshots, so visual baselines are taken again |
 | `PIPELINE_LINK_PAGES` / `PIPELINE_ROUTE_PAGES` | `3` / `5` | Same-site linked pages and codebase GET routes each pipeline run tests besides the target page |
 | `PIPELINE_DEEP_PAGES` | `3` | How many of those pages are analyzed for content checks (title, heading, form controls present); the rest only must render. Forms on them are never submitted |
 | `PIPELINE_AI_PLANNER` | `auto` | `auto`: AI-written tests when a real model is configured; `on` / `off` force it |

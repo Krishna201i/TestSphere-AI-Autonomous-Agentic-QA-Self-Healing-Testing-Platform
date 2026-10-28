@@ -32,7 +32,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 DEFAULT_GIT_HOSTS = frozenset({"github.com", "gitlab.com", "bitbucket.org"})
-CLONE_TIMEOUT_S = 120
+CLONE_TIMEOUT_S = max(10, int(os.getenv("INGEST_CLONE_TIMEOUT", "120")))
 
 
 class SourceError(ValueError):
