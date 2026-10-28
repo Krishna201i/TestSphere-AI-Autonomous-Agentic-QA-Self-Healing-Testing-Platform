@@ -52,6 +52,16 @@ async def get_verifying_first(url: str, *, timeout: float, headers: dict[str, st
         return await client.get(url, headers=headers), False
 
 
+# A bare boolean attribute (required, required="", required=required)
+_REQUIRED = re.compile(r"(?:^|\s)required(?=[\s=/>]|$)", re.IGNORECASE)
+
+# Values a browser accepts for each input type (anything else is refused by fill)
+_TYPED_VALUES = {
+    "number": "42", "tel": "5551234567", "url": "https://example.com", "date": "2026-01-15",
+    "time": "12:30", "datetime-local": "2026-01-15T12:30", "month": "2026-01", "week": "2026-W03",
+}
+
+
 class URLAnalyzerService:
     """Service for live network inspection, DOM element discovery, and QA test synthesis."""
 
@@ -250,9 +260,9 @@ class URLAnalyzerService:
 
     @classmethod
     def _extract_inputs(cls, html: str) -> list[dict[str, Any]]:
-        results = []
-        raw_inputs = re.findall(r"<input\s+([^>]+)>", html, re.IGNORECASE)
-        for idx, tag in enumerate(raw_inputs, start=1):
+        found: list[tuple[int, dict[str, Any]]] = []  # (position in the page, field)
+        raw_inputs = [(m.start(), m.group(1)) for m in re.finditer(r"<input\s+([^>]+)>", html, re.IGNORECASE)]
+        for idx, (pos, tag) in enumerate(raw_inputs, start=1):
             attr_dict = cls._parse_tag_attrs(tag)
             itype = attr_dict.get("type", "text").lower()
             if itype in ("hidden", "image"):
@@ -273,15 +283,25 @@ class URLAnalyzerService:
             else:
                 selector = f"input:nth-of-type({idx})"
 
-            results.append({
+            found.append((pos, {
                 "type": itype,
                 "name": name,
                 "id": elem_id,
                 "placeholder": placeholder,
                 "aria_label": aria_label,
                 "selector": selector,
-            })
-        return results
+                "required": bool(_REQUIRED.search(tag)),
+            }))
+        for m in re.finditer(r"<textarea\b([^>]*)>", html, re.IGNORECASE):
+            attr_dict = cls._parse_tag_attrs(m.group(1))
+            name, elem_id = attr_dict.get("name"), attr_dict.get("id")
+            selector = f"#{elem_id}" if elem_id else f"textarea[name='{name}']" if name else None
+            if selector:
+                found.append((m.start(), {"type": "textarea", "name": name, "id": elem_id,
+                                          "placeholder": attr_dict.get("placeholder"),
+                                          "aria_label": attr_dict.get("aria-label"),
+                                          "selector": selector, "required": bool(_REQUIRED.search(m.group(1)))}))
+        return [field for _, field in sorted(found, key=lambda f: f[0])]  # in page order
 
     @classmethod
     def _extract_buttons(cls, html: str) -> list[dict[str, Any]]:
@@ -545,15 +565,26 @@ class URLAnalyzerService:
         use_form = not parts or goal_plan.is_form_part(parts[0], given) \
             or not goal_plan.later_part_steps(0, parts[0], given)
         if inputs and use_form:
-            for inp in inputs[:4]:  # the first few real inputs
+            for inp in inputs:
+                if sum(1 for st in steps if st["action"] == "FILL") >= 8:
+                    break  # enough for a sign-up form
                 itype = inp.get("type", "text")
                 iname = (inp.get("name") or "").lower()
                 target_sel = inp["selector"]
 
                 hint = f"{iname} {(inp.get('id') or '').lower()} {(inp.get('placeholder') or '').lower()}"
-                if itype in ("checkbox", "radio", "submit", "button", "file", "range", "color"):
+                if itype == "checkbox" and inp.get("required"):
+                    # A box the form will not submit without ("I accept the terms")
+                    steps.append({"step_number": step_num, "action": "CHECK", "target": target_sel, "value": None,
+                                  "description": f"the {(inp.get('aria_label') or inp.get('name') or 'required')[:40]} checkbox"})
+                    step_num += 1
                     continue
-                if "pass" in hint or itype == "password":
+                if itype in ("checkbox", "radio", "submit", "button", "file", "range", "color", "reset"):
+                    continue
+                if itype in _TYPED_VALUES:
+                    val = _TYPED_VALUES[itype]
+                    desc = f"the {(inp.get('placeholder') or inp.get('aria_label') or inp.get('name') or itype)[:40]} field"
+                elif "pass" in hint or itype == "password":
                     val = given.get("password", "AutoQAPassword!99")
                     desc = "the password field"
                 elif any(k in hint for k in ("user", "email", "login")) or itype == "email":

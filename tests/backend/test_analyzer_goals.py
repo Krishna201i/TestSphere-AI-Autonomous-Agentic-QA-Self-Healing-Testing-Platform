@@ -110,3 +110,57 @@ def test_other_schemes_are_refused_clearly(url):
 
     r = TestClient(app).post("/api/workflow/analyze", json={"url": url})
     assert r.status_code == 422 and "Only http:// and https://" in r.json()["detail"]
+
+
+SIGN_UP = """<!doctype html><html><head><title>Sign up</title></head><body>
+<form action="/welcome" method="get">
+<input id="n" name="name" required><input id="e" type="email" name="email" required>
+<input id="p" type="password" name="password" required minlength="8">
+<input id="age" type="number" name="age" required min="18"><input id="dob" type="date" name="dob" required>
+<input id="ph" type="tel" name="phone" required><textarea id="bio" name="bio" required></textarea>
+<input id="terms" type="checkbox" name="terms" required><input id="news" type="checkbox" name="news">
+<button type="submit" id="go">Create account</button></form></body></html>"""
+
+
+async def test_a_sign_up_form_with_typed_and_required_fields_really_submits():
+    """The browser refuses to submit unless every required field is valid."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from engine.runner import run_test
+    from engine.schemas import (
+        ActionType,
+        RunOptions,
+        Step,
+        Target,
+        TestPlan,
+        TestStatus,
+    )
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server API
+            body = (SIGN_UP if self.path == "/" else "<h1 id='hi'>Welcome</h1>").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        planned = U._synthesize_test_steps(f"{base}/", "Sign up", U._extract_inputs(SIGN_UP), U._extract_buttons(SIGN_UP))
+        actions = {"NAVIGATE": ActionType.GOTO, "FILL": ActionType.FILL, "CHECK": ActionType.CHECK, "CLICK": ActionType.CLICK}
+        steps = [Step(step_id=f"s{i}", action=actions[s["action"]], value=s["value"],
+                      target=Target(description=s["description"], primary_locator=s["target"]) if s["target"] else None)
+                 for i, s in enumerate(planned)]
+        steps.append(Step(step_id="url", action=ActionType.ASSERT_URL, expected="/welcome"))
+        result = await run_test(TestPlan(test_id="signup", name="signup", base_url=base, steps=steps),
+                                RunOptions(min_action_timeout_ms=3000))
+        assert result.status == TestStatus.PASSED, [(s.step_id, s.error) for s in result.steps if s.error]
+        assert "news" not in {s["target"].lstrip("#") for s in planned if s["target"]}  # optional box left alone
+    finally:
+        server.shutdown()
