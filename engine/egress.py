@@ -15,9 +15,10 @@ The guard is any callable taking a URL and raising to refuse it; the backend
 installs its SSRF check (``backend.netguard.check_target``) via
 ``engine.browser.set_request_guard``.
 
-Limitation: the guard resolves the host and the proxy then connects by name,
-so a DNS answer that changes between the two lookups (DNS rebinding) is not
-caught here.
+DNS rebinding: the proxy resolves each host once, checks every address it
+resolved to, and connects only to those checked addresses (pinned for the
+session), so a DNS answer that changes after the check cannot redirect the
+connection to an internal address.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import socket
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
@@ -40,7 +42,8 @@ class EgressProxy:
     def __init__(self, guard: Callable[[str], None]) -> None:
         self._guard = guard
         self._server: asyncio.base_events.Server | None = None
-        self._verdicts: dict[tuple[str, int], str | None] = {}
+        # (host, port) -> (refusal or None, the checked addresses to connect to)
+        self._verdicts: dict[tuple[str, int], tuple[str | None, list[str]]] = {}
         self._writers: set[asyncio.StreamWriter] = set()
 
     async def start(self) -> str:
@@ -58,16 +61,28 @@ class EgressProxy:
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._server.wait_closed(), timeout=2)
 
-    async def _refusal(self, host: str, port: int, url: str) -> str | None:
-        """Why *host:port* may not be contacted, or None (one check per destination)."""
+    async def _verdict(self, host: str, port: int, url: str) -> tuple[str | None, list[str]]:
+        """Why *host:port* may not be contacted (or None) and the addresses that
+        were checked, resolved once per destination for the whole session."""
         key = (host.lower(), port)
         if key not in self._verdicts:
-            try:
-                await asyncio.to_thread(self._guard, url)
-                self._verdicts[key] = None
-            except Exception as exc:  # noqa: BLE001 - any guard error means refuse
-                self._verdicts[key] = str(exc) or type(exc).__name__
+            self._verdicts[key] = await self._check(host, port, url)
         return self._verdicts[key]
+
+    async def _check(self, host: str, port: int, url: str) -> tuple[str | None, list[str]]:
+        try:
+            await asyncio.to_thread(self._guard, url)
+            infos = await asyncio.get_running_loop().getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+            # IPv4 first: a dead IPv6 route must not stall the run
+            ips = sorted({info[4][0].split("%")[0] for info in infos}, key=lambda ip: ":" in ip)
+            if not ips:
+                return f"{host} does not resolve", []
+            scheme = urlsplit(url).scheme
+            for ip in ips:  # the addresses actually connected to, not only the name
+                await asyncio.to_thread(self._guard, f"{scheme}://{f'[{ip}]' if ':' in ip else ip}:{port}/")
+        except Exception as exc:  # noqa: BLE001 - any guard or lookup error means refuse
+            return str(exc) or type(exc).__name__, []
+        return None, ips
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self._writers.add(writer)
@@ -95,19 +110,17 @@ class EgressProxy:
                 return
             host, port, url = parts.hostname, parts.port or 80, target
 
-        reason = await self._refusal(host, port, url)
+        reason, ips = await self._verdict(host, port, url)
         if reason:
             # Drop without a response: Chromium would render a proxy's 403 as
             # an ordinary page, and the step that navigated there would pass.
             log.warning("Blocked browser connection to %s:%s: %s", host, port, reason)
             return
-        try:
-            # Race IPv6/IPv4 like browsers do: a dead IPv6 route must not stall the run
-            up_reader, up_writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port, happy_eyeballs_delay=0.25), timeout=15)
-        except (TimeoutError, OSError):
+        upstream = await _connect(ips, port)
+        if upstream is None:
             await _reply(writer, 502, "Bad Gateway")
             return
+        up_reader, up_writer = upstream
 
         if method == "CONNECT":
             writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
@@ -120,6 +133,16 @@ class EgressProxy:
             request = "\r\n".join([f"{method} {path} {version}", *headers, "Connection: close", "", ""])
             up_writer.write(request.encode("latin-1"))  # nosemgrep: request-data-write - forwarding after the destination check
         await asyncio.gather(_pipe(reader, up_writer), _pipe(up_reader, writer))
+
+
+async def _connect(ips: list[str], port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
+    """Open a connection to the first checked address that answers (never by name)."""
+    for ip in ips:
+        try:
+            return await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=5 if ":" in ip else 15)
+        except (TimeoutError, OSError):
+            continue
+    return None
 
 
 async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:

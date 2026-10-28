@@ -112,3 +112,39 @@ async def test_allowed_sites_still_load(sites, engine):
     result = await run_test(_plan(f"{public_url}/page"), engine)
     assert result.steps[0].status == StepStatus.PASSED
     assert "/page" in public_hits
+
+
+async def test_a_name_that_resolves_to_a_blocked_address_is_refused(monkeypatch):
+    """DNS rebinding: the name passes the guard, but the proxy checks the
+    addresses it resolved and connects only to those, never by name again."""
+    import asyncio
+
+    from engine.egress import EgressProxy
+
+    internal, _, internal_hits = _serve({})
+    port = internal.server_address[1]
+
+    def guard(url: str) -> None:
+        if urlsplit(url).hostname == "127.0.0.1":
+            raise ValueError("internal address")
+
+    loop = asyncio.get_running_loop()
+    real = loop.getaddrinfo
+
+    async def rebinding(host, *args, **kwargs):  # the attacker's DNS: a public-looking name, an internal answer
+        return await real("127.0.0.1" if host == "rebind.test" else host, *args, **kwargs)
+
+    monkeypatch.setattr(loop, "getaddrinfo", rebinding)
+    proxy = EgressProxy(guard)
+    proxy_url = await proxy.start()
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", urlsplit(proxy_url).port)
+        writer.write(f"GET http://rebind.test:{port}/secret HTTP/1.1\r\nHost: rebind.test\r\n\r\n".encode())
+        await writer.drain()
+        reply = await asyncio.wait_for(reader.read(), timeout=5)
+        writer.close()
+    finally:
+        await proxy.close()
+        internal.shutdown()
+    assert b"ok" not in reply
+    assert internal_hits == []
