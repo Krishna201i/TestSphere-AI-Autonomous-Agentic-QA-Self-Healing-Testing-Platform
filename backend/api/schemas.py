@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.config import git_hosts
 from backend.models.test_execution import TestExecutionStatus
-from backend.notify import NOTIFY_CHOICES, check_slack_webhook
+from backend.notify import NOTIFY_CHOICES, check_alert_webhook
 from backend.pipeline.deploy_config import check_hook_url
 from ingestion.source import SourceError, validate_git_url
 
@@ -42,7 +42,7 @@ class _ProjectPipelineFields(BaseModel):
     repo_url: str | None = Field(None, max_length=1024, description="Git repository to ingest (optional)")
     prompt: str | None = Field(None, max_length=500, description="What to test, in plain words (optional)")
     schedule_minutes: int | None = Field(None, description=f"Re-run interval in minutes, one of {SCHEDULE_CHOICES}")
-    slack_webhook_url: str | None = Field(None, max_length=500, description="Slack incoming webhook for run alerts")
+    slack_webhook_url: str | None = Field(None, max_length=500, description="Slack, Discord, Google Chat or Teams incoming webhook for run alerts")
     notify_on: str | None = Field(None, description="'failures' (default) or 'always'")
     deploy_hook_url: str | None = Field(None, max_length=1000, description="Deploy hook (Render, Vercel, Netlify, ...)")
     rollback_hook_url: str | None = Field(None, max_length=1000, description="Hook that restores the previous version")
@@ -67,7 +67,7 @@ class _ProjectPipelineFields(BaseModel):
     @field_validator("slack_webhook_url")
     @classmethod
     def _slack(cls, v: str | None) -> str | None:
-        return check_slack_webhook(v)
+        return check_alert_webhook(v)
 
     @field_validator("notify_on")
     @classmethod

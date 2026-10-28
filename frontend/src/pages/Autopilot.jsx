@@ -321,9 +321,9 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                   <label className="field">Git repository<input className="input" value={form.repo_url} onChange={(e) => setForm({ ...form, repo_url: e.target.value })} placeholder="https://github.com/you/app" /></label>
                   <label className="field">What to test<input className="input" value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} placeholder="optional" /></label>
                   <label className="field">
-                    Slack alerts (incoming webhook URL)
+                    Chat alerts (Slack, Discord, Google Chat or Teams webhook URL)
                     <input className="input" value={form.slack_webhook_url} onChange={(e) => setForm({ ...form, slack_webhook_url: e.target.value })}
-                      placeholder="https://hooks.slack.com/services/…" />
+                      placeholder="https://hooks.slack.com/services/… or https://discord.com/api/webhooks/…" />
                   </label>
                   <label className="field">
                     Send an alert

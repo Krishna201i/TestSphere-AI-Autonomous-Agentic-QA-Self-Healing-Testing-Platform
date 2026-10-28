@@ -14,7 +14,13 @@ from backend.config import settings
 from backend.database.session import get_store
 from backend.main import app
 from backend.models import PIPELINE_RUNS
-from backend.notify import check_slack_webhook, notify_run, should_notify, slack_message
+from backend.notify import (
+    check_alert_webhook,
+    notify_run,
+    should_notify,
+    slack_message,
+    webhook_kind,
+)
 from backend.services.project_service import ProjectService
 
 HOOK = "https://hooks.slack.com/services/T000/B000/XXXX"
@@ -40,13 +46,13 @@ RUN = {"id": 12, "status": "failed", "project_name": "Shop", "started_at": "2026
 ])
 def test_only_slack_incoming_webhooks_are_accepted(url):
     with pytest.raises(ValueError):
-        check_slack_webhook(url)
+        check_alert_webhook(url)
 
 
 def test_slack_webhook_accepts_and_clears():
-    assert check_slack_webhook(HOOK) == HOOK
-    assert check_slack_webhook("  ") == ""
-    assert check_slack_webhook(None) is None
+    assert check_alert_webhook(HOOK) == HOOK
+    assert check_alert_webhook("  ") == ""
+    assert check_alert_webhook(None) is None
 
 
 def test_when_to_notify():
@@ -129,3 +135,35 @@ def test_junit_stays_valid_xml_with_terminal_colours_and_markup():
     case = ET.fromstring(junit_xml(run)).find("testsuite/testcase")
     assert case.get("name") == 'x<y "q"'
     assert case.find("failure").text == "Timeout [31mred[0m & <b>"
+
+
+@pytest.mark.parametrize(("url", "kind"), [
+    (HOOK, "slack"),
+    ("https://discord.com/api/webhooks/123/abc", "discord"),
+    ("https://chat.googleapis.com/v1/spaces/AAA/messages?key=k&token=t", "google_chat"),
+    ("https://prod-12.westus.logic.azure.com:443/workflows/abc/triggers/manual/paths/invoke?sig=x", "teams"),
+    ("https://discord.com.evil.example/api/webhooks/1/a", None),
+    ("https://evil.logic.azure.com.example/x", None),
+    ("http://discord.com/api/webhooks/1/a", None),
+])
+def test_each_chat_service_is_recognised_and_nothing_else(url, kind):
+    assert webhook_kind(url) == kind
+
+
+@pytest.mark.parametrize(("url", "check"), [
+    ("https://discord.com/api/webhooks/123/abc", lambda body: "**Shop**" in body["content"]),
+    ("https://chat.googleapis.com/v1/spaces/AAA/messages?key=k", lambda body: "*Shop*" in body["text"]),
+    ("https://prod-1.westus.logic.azure.com/workflows/x",
+     lambda body: body["attachments"][0]["contentType"] == "application/vnd.microsoft.card.adaptive"),
+])
+def test_each_chat_service_gets_its_own_message_format(url, check):
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, text="ok")
+
+    project = {"id": 1, "name": "Shop", "slack_webhook_url": url}
+    assert asyncio.run(notify_run(project, RUN, transport=httpx.MockTransport(handler))) is True
+    assert check(sent[0])
+    assert "Login" in json.dumps(sent[0])  # the failure is in every format
