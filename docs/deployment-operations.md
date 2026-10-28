@@ -72,6 +72,9 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `RATE_LIMIT_RUNS_PER_MINUTE` | `10` | Runs, scans and clones each user may start per minute (`0` disables); over it the API answers 429 |
 | `ENGINE_MAX_BROWSERS` | `2` | Browser instances that may run at once; further runs wait for a slot |
 | `ENGINE_BROWSER` | `chromium` | Browser tests run in: `chromium`, `firefox` or `webkit` (Safari's engine). The image installs Chromium only; another browser is downloaded on its first run, or add `python -m playwright install --with-deps <browser>` to the build. The outbound request guard covers all three |
+| `PIPELINE_LINK_PAGES` / `PIPELINE_ROUTE_PAGES` | `3` / `5` | Same-site linked pages and codebase GET routes each pipeline run tests besides the target page |
+| `PIPELINE_DEEP_PAGES` | `3` | How many of those pages are analyzed for content checks (title, heading, form controls present); the rest only must render. Forms on them are never submitted |
+| `PIPELINE_AI_PLANNER` | `auto` | `auto`: AI-written tests when a real model is configured; `on` / `off` force it |
 | `PIPELINE_EXECUTION` | `inline` | `inline`: pipeline runs execute in the API process. `worker`: the API only queues them and a separate `python -m backend.worker` service executes them (and runs the scheduler). Requires Firestore. See §3.1 |
 | `WORKER_POLL_SECONDS` / `WORKER_HEARTBEAT_SECONDS` / `WORKER_STALE_SECONDS` | `5` / `30` / `600` | Worker queue polling; heartbeat while a run executes; a running run silent for longer than the stale limit is marked interrupted |
 | `DASHBOARD_URL` | Render's `RENDER_EXTERNAL_URL`, else `""` | Public address of the dashboard, used for "Open run" links in Slack alerts |

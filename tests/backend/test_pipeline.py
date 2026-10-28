@@ -408,3 +408,25 @@ def test_a_push_during_a_run_is_tested_when_the_run_ends(fresh_store, no_backgro
     assert follow_up["trigger"] == "webhook" and follow_up["actor"] == "github:krishna"
     assert fresh_store.get(PROJECTS, project["id"])["pending_push"] is None
     assert asyncio.run(finish()) is None  # started once
+
+
+def test_an_analyzed_linked_page_is_checked_but_never_submitted():
+    candidate = {"kind": "link", "url": "http://app.test/contact", "label": "/contact"}
+    page = {"page_title": "Contact us", "elements_inventory": {
+        "headings": ["Get in touch"],
+        "inputs": [{"selector": "#csrf", "type": "hidden"}, {"selector": "#email", "type": "email", "name": "email"}],
+        "buttons": [{"selector": "button", "text": "?"}, {"selector": "#send", "text": "Send"}],
+    }}
+    test = suite.page_check_test(candidate, page)
+    assert test["slug"] == suite.render_test(candidate)["slug"]  # same stored test, now with more checks
+    assert [(s["action"], s["target"]) for s in test["steps"]] == [
+        ("NAVIGATE", None), ("ASSERT_CONTAINS_TEXT", "head > title"), ("ASSERT_CONTAINS_TEXT", "body"),
+        ("ASSERT_VISIBLE", "#email"), ("ASSERT_VISIBLE", "#send"),
+    ]
+    assert not {s["action"] for s in test["steps"]} & {"FILL", "CLICK", "PRESS", "SELECT", "CHECK", "UPLOAD"}
+
+
+def test_page_limits_come_from_settings(monkeypatch):
+    many = {**analysis(), "elements_inventory": {"links": [f"/p{i}" for i in range(10)]}}
+    assert len(suite.candidate_pages(many, None, link_limit=7)) == 7
+    assert suite.candidate_pages(many, None, link_limit=0) == []

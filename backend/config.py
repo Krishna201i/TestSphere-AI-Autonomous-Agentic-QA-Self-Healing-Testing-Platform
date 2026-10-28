@@ -204,6 +204,11 @@ class Settings(BaseSettings):
     VISUAL_REGRESSION: bool = Field(default_factory=lambda: os.getenv("VISUAL_REGRESSION", "true").lower() in ("true", "1"))
     VISUAL_DIFF_THRESHOLD: float = Field(default_factory=lambda: float(os.getenv("VISUAL_DIFF_THRESHOLD", "0.02")))
     # LLM Test Planner in the pipeline: "auto" (when LLM_PROVIDER is a real model), "on" or "off"
+    # Other pages a pipeline tests: linked pages and codebase routes, and how
+    # many of them are analyzed for content checks (the rest only must render)
+    PIPELINE_LINK_PAGES: int = Field(default_factory=lambda: max(0, int(os.getenv("PIPELINE_LINK_PAGES", "3"))))
+    PIPELINE_ROUTE_PAGES: int = Field(default_factory=lambda: max(0, int(os.getenv("PIPELINE_ROUTE_PAGES", "5"))))
+    PIPELINE_DEEP_PAGES: int = Field(default_factory=lambda: max(0, int(os.getenv("PIPELINE_DEEP_PAGES", "3"))))
     PIPELINE_AI_PLANNER: str = Field(default_factory=lambda: os.getenv("PIPELINE_AI_PLANNER", "auto").lower())
     PIPELINE_AI_PLANNER_TIMEOUT: float = Field(default_factory=lambda: float(os.getenv("PIPELINE_AI_PLANNER_TIMEOUT", "120")))
     # Check pinned dependency versions against OSV.dev (sends package names and versions, never code)

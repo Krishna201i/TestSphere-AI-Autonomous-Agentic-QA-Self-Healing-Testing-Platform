@@ -8,8 +8,10 @@ has an ingested codebase, its HTTP routes into a suite of browser tests:
 - interaction  fill the discovered inputs and press the primary button
                (or the user's "what to test" scenario)
 - content      the main heading is on the page
-- link-*       same-site pages linked from the target render
-- route-*      GET routes found in the codebase render on the live site
+- link-*       same-site pages linked from the target render; the first few
+               are analyzed too, and also check their title, heading and
+               form controls (never submitting a form the goal did not ask for)
+- route-*      GET routes found in the codebase, the same way
 
 Steps use the same shape as ``URLAnalyzerService._synthesize_test_steps`` so
 the orchestrator can run them unchanged.  Pure functions; the runner does the
@@ -84,7 +86,8 @@ def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict
     return tests
 
 
-def candidate_pages(analysis: dict[str, Any], blueprint: dict[str, Any] | None = None) -> list[dict[str, str]]:
+def candidate_pages(analysis: dict[str, Any], blueprint: dict[str, Any] | None = None, *,
+                    link_limit: int = MAX_LINK_PAGES, route_limit: int = MAX_ROUTE_PAGES) -> list[dict[str, str]]:
     """Other same-site pages worth a render check: linked pages, then codebase GET routes.
 
     Returns ``{"kind": "link"|"route", "url", "label"}`` items, de-duplicated,
@@ -112,11 +115,11 @@ def candidate_pages(analysis: dict[str, Any], blueprint: dict[str, Any] | None =
         if not href or href.lower().startswith(("mailto:", "tel:", "javascript:", "data:")):
             continue
         absolute = urljoin(base, href)
-        add("link", absolute, urlparse(absolute).path or "/", MAX_LINK_PAGES)
+        add("link", absolute, urlparse(absolute).path or "/", link_limit)
 
     root = f"{origin.scheme}://{origin.netloc}"
     for route in _get_routes(blueprint):
-        add("route", root + route, f"GET {route}", MAX_ROUTE_PAGES)
+        add("route", root + route, f"GET {route}", route_limit)
     return out
 
 
@@ -129,6 +132,37 @@ def _get_routes(blueprint: dict[str, Any] | None) -> Iterable[str]:
         if path == "/api" or path.startswith("/api/"):
             continue  # an API answers data, not a page to render
         yield path
+
+
+_NO_FIELD = ("hidden", "submit", "button", "image", "reset")
+
+
+def page_check_test(candidate: dict[str, str], page: dict[str, Any]) -> dict[str, Any]:
+    """A linked or route page checked from its own analysis: it opens, shows
+    its title and main heading, and its form controls are there.  Nothing is
+    filled in or submitted: that page's form could send mail or change data."""
+    test = render_test(candidate)
+    url, title = candidate["url"], page.get("page_title") or ""
+    inventory = page.get("elements_inventory") or {}
+    steps = [_step(1, "NAVIGATE", value=url, description=f"Open {url}")]
+    if title and not title.endswith(" Webpage"):
+        steps.append(_step(len(steps) + 1, "ASSERT_CONTAINS_TEXT", target="head > title", value=_clean_title(title),
+                           description=f"Page title contains '{_clean_title(title)}'"))
+    headings = inventory.get("headings") or []
+    if headings:
+        steps.append(_step(len(steps) + 1, "ASSERT_CONTAINS_TEXT", target="body", value=headings[0][:40],
+                           description=f"Page shows '{headings[0][:40]}'"))
+    field = next((i for i in inventory.get("inputs") or [] if i.get("type", "text") not in _NO_FIELD), None)
+    if field:
+        steps.append(_step(len(steps) + 1, "ASSERT_VISIBLE", target=field["selector"],
+                           description=f"The {(field.get('placeholder') or field.get('name') or 'input')[:40]} field is there"))
+    button = next((b for b in inventory.get("buttons") or [] if b.get("selector") not in (None, "button")), None)
+    if button:
+        steps.append(_step(len(steps) + 1, "ASSERT_VISIBLE", target=button["selector"],
+                           description=f"The '{(button.get('text') or 'button')[:40]}' button is there"))
+    if len(steps) == 1:
+        steps.append(_step(2, "ASSERT_VISIBLE", target="body", description="Page body renders"))
+    return {**test, "steps": steps}
 
 
 def render_test(candidate: dict[str, str]) -> dict[str, Any]:

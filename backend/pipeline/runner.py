@@ -411,6 +411,21 @@ async def _reachable(urls: list[str]) -> dict[str, int | None]:
     return dict(zip(urls, codes, strict=True))
 
 
+async def _analyze_pages(urls: list[str]) -> dict[str, dict[str, Any]]:
+    """Each page's analysis (title, headings, controls); a page that fails or
+    takes too long is left out and keeps a plain render check."""
+    async def one(url: str) -> dict[str, Any] | None:
+        try:
+            page = await asyncio.wait_for(URLAnalyzerService.analyze_live_website(url=url), timeout=45)
+        except Exception as exc:  # noqa: BLE001 - one page's analysis never stops the run
+            logger.info("Could not analyze %s for content checks: %s", url, exc)
+            return None
+        return page if page.get("success") else None
+
+    found = await asyncio.gather(*(one(u) for u in urls))
+    return {u: p for u, p in zip(urls, found, strict=True) if p}
+
+
 async def _plan(db: Store, project: Record, analysis: dict[str, Any],
                 blueprint: dict[str, Any] | None) -> tuple[Record, list[Record], str]:
     owner = project.get("owner_uid")
@@ -423,11 +438,15 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
     planned = suite.page_tests(analysis, project.get("prompt"))
     extra, ai_note = await ai_plan.ai_tests(analysis, project.get("prompt"), (blueprint or {}).get("frameworks"))
     planned += extra
-    candidates = suite.candidate_pages(analysis, blueprint)
+    candidates = suite.candidate_pages(analysis, blueprint, link_limit=settings.PIPELINE_LINK_PAGES,
+                                       route_limit=settings.PIPELINE_ROUTE_PAGES)
     codes = await _reachable([c["url"] for c in candidates]) if candidates else {}
     left_out = [f"{c['label']} ({codes[c['url']] or 'unreachable'})" for c in candidates
                 if not codes.get(c["url"]) or codes[c["url"]] >= 400]
-    planned += [suite.render_test(c) for c in candidates if codes.get(c["url"]) and codes[c["url"]] < 400]
+    reachable = [c for c in candidates if codes.get(c["url"]) and codes[c["url"]] < 400]
+    pages = await _analyze_pages([c["url"] for c in reachable[:settings.PIPELINE_DEEP_PAGES]])
+    planned += [suite.page_check_test(c, pages[c["url"]]) if pages.get(c["url"]) else suite.render_test(c)
+                for c in reachable]
 
     generated, created = [], 0
     for test in planned:
