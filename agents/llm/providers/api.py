@@ -33,7 +33,9 @@ It is never logged or included in exception messages.
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import re
 import time
 
 import httpx
@@ -137,6 +139,36 @@ class APIProvider(LLMClient):
         except ValueError:
             return response.text[:300]
 
+    @staticmethod
+    def _rate_limit_hints(response: httpx.Response) -> tuple[float | None, bool]:
+        """(seconds to wait, quota used up) from a 429: the ``Retry-After``
+        header, or Google's ``retryDelay`` and quota violations (a zero limit
+        or a per-day quota cannot recover within a run)."""
+        retry_after: float | None = None
+        with contextlib.suppress(TypeError, ValueError):
+            retry_after = float(response.headers.get("retry-after", ""))
+        exhausted = False
+        try:
+            body = response.json()
+        except ValueError:
+            return retry_after, exhausted
+        if isinstance(body, list) and body:
+            body = body[0]
+        error = body.get("error") if isinstance(body, dict) else None
+        if not isinstance(error, dict):
+            return retry_after, exhausted
+        exhausted = bool(re.search(r"\blimit: 0\b", str(error.get("message", ""))))
+        for detail in error.get("details") or []:
+            if not isinstance(detail, dict):
+                continue
+            delay = re.fullmatch(r"([\d.]+)s", str(detail.get("retryDelay", "")))
+            if delay and retry_after is None:
+                retry_after = float(delay.group(1))
+            for violation in detail.get("violations") or []:
+                if isinstance(violation, dict) and "PerDay" in str(violation.get("quotaId", "")):
+                    exhausted = True
+        return retry_after, exhausted
+
     def _raise_for_status(self, response: httpx.Response) -> None:
         """Raise the matching ``LLMError`` subclass for a non-2xx response."""
         status = response.status_code
@@ -149,7 +181,9 @@ class APIProvider(LLMClient):
         if status in (401, 403):
             raise LLMAuthenticationError(message, provider=self._config.provider)
         if status == 429:
-            raise LLMRateLimitError(message, provider=self._config.provider)
+            retry_after, exhausted = self._rate_limit_hints(response)
+            raise LLMRateLimitError(message, provider=self._config.provider,
+                                    retry_after=retry_after, quota_exhausted=exhausted)
         if status >= 500:
             raise LLMProviderError(message, provider=self._config.provider)
         raise LLMRequestValidationError(message, provider=self._config.provider)

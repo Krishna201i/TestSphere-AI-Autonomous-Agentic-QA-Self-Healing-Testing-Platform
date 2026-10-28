@@ -4,6 +4,13 @@ import os
 
 import pytest
 
+# Never read the developer's .env: its LLM key would send tests to a real,
+# billed model, and its database settings to the real database.  Tests run
+# offline on the mock model unless a test sets otherwise.
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+for _name in [n for n in os.environ if n.startswith("LLM_")]:
+    del os.environ[_name]
+
 # Keep agent healing memory in-process and storage in memory, so tests never
 # touch the dev database or Firestore.
 os.environ.setdefault("AGENT_MEMORY_BACKEND", "memory")

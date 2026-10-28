@@ -246,6 +246,51 @@ class TestSessionIntegration:
         assert response.content == "recovered"
         assert calls["n"] == 2
 
+    @staticmethod
+    def _counting_session(response: httpx.Response):
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            return response
+
+        config = _config(max_retries=3)
+        return LLMClientSession(APIProvider(config, transport=httpx.MockTransport(handler)), config), calls
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("body", [
+        # Gemini: a model with no free quota
+        [{"error": {"code": 429, "message": "Quota exceeded for metric: x, limit: 0, model: gemini-4-argon"}}],
+        # Gemini: the daily quota is used up
+        [{"error": {"code": 429, "message": "Quota exceeded", "details": [
+            {"@type": "type.googleapis.com/google.rpc.QuotaFailure",
+             "violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]}}],
+        # Asked to come back in half an hour
+        [{"error": {"code": 429, "message": "Quota exceeded", "details": [
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "1905s"}]}}],
+    ])
+    async def test_session_does_not_retry_a_rate_limit_that_cannot_clear(self, body):
+        session, calls = self._counting_session(httpx.Response(429, json=body))
+        with pytest.raises(LLMRateLimitError) as err:
+            await session.generate(LLMRequest(prompt="hi"))
+        assert not err.value.is_retryable
+        assert calls["n"] == 1
+
+    @pytest.mark.asyncio
+    async def test_session_waits_the_retry_after_before_retrying(self, monkeypatch):
+        slept: list[float] = []
+
+        async def fake_sleep(seconds):
+            slept.append(seconds)
+
+        monkeypatch.setattr("agents.llm.client.asyncio.sleep", fake_sleep)
+        session, calls = self._counting_session(
+            httpx.Response(429, headers={"Retry-After": "2"}, json={"error": {"message": "slow down"}}))
+        with pytest.raises(LLMRateLimitError):
+            await session.generate(LLMRequest(prompt="hi"))
+        assert calls["n"] == 4  # first try + 3 retries
+        assert slept == [2.0, 2.0, 2.0]
+
     @pytest.mark.asyncio
     async def test_session_does_not_retry_auth_error(self):
         calls = {"n": 0}

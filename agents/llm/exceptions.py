@@ -87,11 +87,31 @@ class LLMRateLimitError(LLMError):
     May be retried with backoff.
 
     Note: Can be simulated by the mock provider for testing.
+
+    Not retried when the quota is used up (a zero limit, or a daily one) or
+    the provider asks to wait longer than ``MAX_RETRY_AFTER_S``: a retry
+    then only fails again and delays the fallback.
     """
+
+    MAX_RETRY_AFTER_S = 30.0
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str = "unknown",
+        retry_after: float | None = None,
+        quota_exhausted: bool = False,
+    ) -> None:
+        super().__init__(message, provider=provider)
+        self.retry_after = retry_after
+        self.quota_exhausted = quota_exhausted
 
     @property
     def is_retryable(self) -> bool:
-        return True
+        if self.quota_exhausted:
+            return False
+        return self.retry_after is None or self.retry_after <= self.MAX_RETRY_AFTER_S
 
 
 class LLMConnectionError(LLMError):

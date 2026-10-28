@@ -23,6 +23,7 @@ Architecture::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 
@@ -30,6 +31,7 @@ from agents.llm.config import LLMConfig
 from agents.llm.exceptions import (
     LLMError,
     LLMProviderError,
+    LLMRateLimitError,
     LLMRequestValidationError,
     LLMResponseError,
 )
@@ -396,6 +398,9 @@ class LLMClientSession:
                         type(exc).__name__,
                         exc,
                     )
+                    # A rate limit says how long to wait; retrying sooner fails again
+                    if isinstance(exc, LLMRateLimitError) and exc.retry_after:
+                        await asyncio.sleep(exc.retry_after)
                 else:
                     logger.error(
                         "LLMClientSession.generate() — retryable error "
