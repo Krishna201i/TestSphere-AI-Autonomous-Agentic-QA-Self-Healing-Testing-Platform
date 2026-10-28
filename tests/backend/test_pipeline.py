@@ -46,6 +46,7 @@ BLUEPRINT = {"routes": [
     {"method": "GET", "path": "/users/{id}", "file": "app.py", "line": 2},
     {"method": "POST", "path": "/login", "file": "app.py", "line": 3},
     {"method": "GET", "path": "/about", "file": "app.py", "line": 4},
+    {"method": "ANY", "path": "/api/hello", "file": "pages/api/hello.ts", "line": 1},
 ]}
 
 
@@ -64,7 +65,7 @@ def test_candidate_pages_are_same_site_safe_and_parameter_free():
     pages = suite.candidate_pages(analysis(), BLUEPRINT)
     assert [(p["kind"], p["url"]) for p in pages] == [
         ("link", "http://app.test/about"),
-        ("route", "http://app.test/pricing"),  # /about deduplicated, /users/{id} and POST skipped
+        ("route", "http://app.test/pricing"),  # /about deduplicated; /users/{id}, POST and /api skipped
     ]
 
 
@@ -132,7 +133,7 @@ def test_full_run_chains_every_stage(fresh_store, stub_network):
 
     assert run["status"] == "passed"
     assert stage(run, "codebase")["status"] == "done"
-    assert "Using the blueprint from 2026-10-20 10:00 (4 routes)" in stage(run, "codebase")["detail"]
+    assert "Using the blueprint from 2026-10-20 10:00 (5 routes)" in stage(run, "codebase")["detail"]
     assert stage(run, "analyze")["status"] == "done"
     plan = stage(run, "plan")
     assert plan["status"] == "done"

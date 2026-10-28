@@ -126,6 +126,8 @@ def _get_routes(blueprint: dict[str, Any] | None) -> Iterable[str]:
         path = str(route.get("path", ""))
         if method not in ("GET", "ANY", "*", "ALL") or not path.startswith("/") or _PARAM_PATH.search(path):
             continue
+        if path == "/api" or path.startswith("/api/"):
+            continue  # an API answers data, not a page to render
         yield path
 
 

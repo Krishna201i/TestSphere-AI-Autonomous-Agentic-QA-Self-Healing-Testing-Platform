@@ -59,7 +59,18 @@ ROUTE_PATTERNS = [
     (re.compile(r"\b(path|re_path|url)\(\s*r?['\"]([^'\"]*)['\"]\s*,"), "django"),
     # Django REST framework:  router.register(r"articles", ViewSet)
     (re.compile(r"\b\w+\.(register)\(\s*r?['\"]([^'\"]+)['\"]\s*,"), "django"),
+    # Rails (config/routes.rb):  get "about", post '/login', resources :users
+    (re.compile(r"^\s*(get|post|put|patch|delete|match)\s+['\"]([^'\"]+)['\"]", re.M), "ruby"),
+    (re.compile(r"^\s*(resources?)\s+:(\w+)", re.M), "ruby"),
+    # Laravel (routes/*.php):  Route::get('/x', ...), Route::any("/x", ...)
+    (re.compile(r"Route::(get|post|put|patch|delete|any|match|view)\(\s*['\"]([^'\"]+)['\"]"), "php"),
+    # Go: gin/echo r.GET("/x"), chi r.Get("/x"), net/http http.HandleFunc("/x")
+    (re.compile(r"\b\w+\.(GET|POST|PUT|PATCH|DELETE|Any|Get|Post|Put|Patch|Delete|HandleFunc|Handle)\(\s*\"([^\"]+)\""), "go"),
 ]
+
+# Next.js file routes: pages/blog/[slug].tsx, app/(shop)/cart/page.tsx, app/api/x/route.ts
+_NEXT_ROUTE = re.compile(
+    r"(?:^|/)(?:src/)?(?:(pages)/(.+?)|(app)/(?:(.+?)/)?(page|route))\.(?:jsx?|tsx?|mdx)$")
 
 # Flask:  @bp.route("/x", methods=["POST", "DELETE"])
 _FLASK_METHODS = re.compile(r"methods\s*=\s*[\[(]([^\])]*)[\])]")
@@ -295,6 +306,12 @@ def _routes(text: str, rel: str, suffix: str) -> list[Route]:
             continue
         if kind == "django" and not (suffix == ".py" and rel.endswith("urls.py")):
             continue
+        if kind == "ruby" and not rel.endswith("config/routes.rb"):
+            continue
+        if kind == "php" and not (suffix == ".php" and "/routes/" in f"/{rel}"):
+            continue
+        if kind == "go" and suffix != ".go":
+            continue
         for m in pattern.finditer(text):
             line_start = text.rfind("\n", 0, m.start()) + 1
             if text[line_start:m.start()].lstrip().startswith(("#", "//", "*", "/*")):
@@ -302,8 +319,17 @@ def _routes(text: str, rel: str, suffix: str) -> list[Route]:
             groups = m.groups()[-2:]  # (method, path); python pattern has a leading router-variable group
             method = groups[0].upper()
             method = {"ROUTE": "ANY", "ALL": "ANY", "REQUEST": "ANY", "PATH": "ANY", "RE_PATH": "ANY",
-                      "URL": "ANY", "REGISTER": "ANY"}.get(method, method)
+                      "URL": "ANY", "REGISTER": "ANY", "MATCH": "ANY", "RESOURCES": "ANY", "RESOURCE": "ANY",
+                      "VIEW": "GET", "HANDLEFUNC": "ANY", "HANDLE": "ANY"}.get(method, method)
             path = groups[1]
+            if kind == "go" and not path.startswith("/"):
+                continue  # http.Get("https://...") is a client call, not a route
+            if kind == "php" and rel.endswith("routes/api.php"):
+                path = "/api/" + path.lstrip("/")  # Laravel serves routes/api.php under /api
+            if kind in ("ruby", "php", "go"):
+                # :id (Rails, gin, chi) and {id} / {id?} (Laravel, chi) -> <id>
+                path = re.sub(r":(\w+)|\{(\w+)\??\}", lambda p: f"<{p.group(1) or p.group(2)}>", path)
+                path = "/" + path.lstrip("/")
             if kind == "python":
                 path = prefixes.get(m.group("var"), "") + path
             if kind == "django":
@@ -319,7 +345,26 @@ def _routes(text: str, rel: str, suffix: str) -> list[Route]:
                     methods = [x.strip(" '\"").upper() for x in listed.group(1).split(",") if x.strip(" '\"")] or methods
             line = text.count("\n", 0, m.start()) + 1
             routes += [Route(method=meth, path=path, file=rel, line=line) for meth in methods]
-    return routes
+    return routes + _file_routes(rel)
+
+
+def _file_routes(rel: str) -> list[Route]:
+    """A Next.js page or route handler, routed by where its file is."""
+    m = _NEXT_ROUTE.search(rel)
+    if not m:
+        return []
+    if m.group(1):  # pages/ router
+        parts = m.group(2).split("/")
+        if parts[-1] == "index":
+            parts = parts[:-1]
+        if any(p.startswith("_") for p in parts):
+            return []  # _app, _document, _error
+    else:  # app/ router: folders make the path; (groups) and @slots do not
+        parts = [p for p in (m.group(4) or "").split("/") if p and not p.startswith(("(", "@"))]
+    # [slug], [...slug] and [[...slug]] -> <slug>
+    path = "/" + "/".join(re.sub(r"^\[+(?:\.\.\.)?(\w+)\]+$", r"<\1>", p) for p in parts)
+    api = parts[:1] == ["api"] or m.group(5) == "route"
+    return [Route(method="ANY" if api else "GET", path=path, file=rel, line=1)]
 
 
 def _redact(value: str) -> str:

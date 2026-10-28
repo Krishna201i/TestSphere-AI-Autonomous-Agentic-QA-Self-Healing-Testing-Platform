@@ -263,3 +263,32 @@ def test_real_world_route_and_dependency_styles(tmp_path):
     assert "FastAPI" in bp.frameworks
     assert {"ANY /articles", "ANY /articles/<slug>/favorite", "POST /tokens", "DELETE /tokens"} <= routes
     assert not [r for r in bp.risks if r.kind == "Debug mode enabled"]
+
+
+def test_nextjs_rails_laravel_and_go_routes(tmp_path):
+    files = {
+        "web/pages/index.tsx": "export default function Home() {}",
+        "web/pages/blog/[slug].tsx": "export default function Post() {}",
+        "web/pages/_app.tsx": "export default function App() {}",
+        "web/pages/api/hello.ts": "export default function handler() {}",
+        "web/src/app/(shop)/cart/page.tsx": "export default function Cart() {}",
+        "web/src/app/docs/[[...path]]/page.tsx": "export default function Docs() {}",
+        "web/src/app/api/orders/route.ts": "export async function GET() {}",
+        "rails/config/routes.rb": 'Rails.application.routes.draw do\n  get "about", to: "pages#about"\n'
+                                  '  post "/login", to: "sessions#create"\n  resources :users\n  # get "old"\nend\n',
+        "laravel/routes/web.php": "<?php\nRoute::get('/pricing', fn () => view('pricing'));\nRoute::view('/terms', 'terms');\n",
+        "laravel/routes/api.php": "<?php\nRoute::post('/orders/{order}', [OrderController::class, 'update']);\n",
+        "go/main.go": 'package main\nfunc main() {\n  r.GET("/health", h)\n  r.Get("/users/{id}", h)\n'
+                      '  http.HandleFunc("/metrics", m)\n  resp, _ := http.Get("https://example.com/x")\n}\n',
+    }
+    for rel, text in files.items():
+        _write(tmp_path, rel, text)
+    routes = {f"{r.method} {r.path}" for r in analyze_repo(tmp_path).routes}
+    assert {
+        "GET /", "GET /blog/<slug>", "ANY /api/hello",                                  # Next.js pages/
+        "GET /cart", "GET /docs/<path>", "ANY /api/orders",                             # Next.js app/
+        "GET /about", "POST /login", "ANY /users",                                      # Rails
+        "GET /pricing", "GET /terms", "POST /api/orders/<order>",                       # Laravel
+        "GET /health", "GET /users/<id>", "ANY /metrics",                               # Go
+    } <= routes
+    assert not any("_app" in r or "example.com" in r or "/old" in r for r in routes)
