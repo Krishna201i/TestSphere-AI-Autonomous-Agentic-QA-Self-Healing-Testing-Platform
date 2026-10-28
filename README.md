@@ -70,7 +70,7 @@ frontend/  React dashboard ──────────────▶ backend
                                              ▼
         agents/   planner, failure analyzer, healing decisions, memory, LLM client
         engine/   Playwright runner, locator healing, egress guard, benchmarks
-        security/ passive scanner, remediation proposals, fix patcher
+        security/ passive + active (DAST) scanner, remediation, fix patcher
         ingestion/ repository blueprint
 ```
 
@@ -137,7 +137,8 @@ Measure and scan:
 ```bash
 python -m engine.heal_benchmark --quick    # self-healing benchmark (drop --quick for all 277 cases)
 python scripts/loadtest.py                 # load test
-python -m security http://127.0.0.1:8000/  # passive security scan (loopback is always in scope)
+python -m security http://127.0.0.1:8000/           # passive scan (loopback is always in scope)
+python -m security http://127.0.0.1:8000/?q=x --active  # also send DAST probes (apps you own only)
 ```
 
 ---
@@ -150,7 +151,8 @@ Production runs on Render with Firebase (Authentication and Firestore). The most
 | --- | --- |
 | `FIREBASE_CREDENTIALS`, `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN` | Database and sign-in |
 | `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_BASE_URL` | AI model (`mock`, `local` such as Ollama, or any OpenAI-compatible `api`) |
-| `SECURITY_SCAN_ALLOWED_HOSTS` | Hosts the passive scanner may contact (only hosts you own or may test) |
+| `SECURITY_SCAN_ALLOWED_HOSTS` | Hosts the scanner may contact (only hosts you own or may test) |
+| `SECURITY_ACTIVE_SCAN` | Allow active (DAST) scanning — XSS, SQLi and open-redirect probes; off by default, authorized hosts only |
 | `ARTIFACT_STORE=gcs`, `ARTIFACT_BUCKET` | Keep screenshots and traces in Cloud Storage |
 | `TOKEN_ENCRYPTION_KEY` | Encrypts connected GitHub tokens (required when hosted) |
 | `PIPELINE_EXECUTION=worker` | Run pipelines in a separate worker service |
@@ -174,7 +176,7 @@ Every setting, the Dockerfile, the worker, Firestore rules and indexes, and CI a
 
 ## Security and privacy
 
-- The scanner is passive and scope-limited; testing a site needs its owner's permission.
+- Scanning is scope-limited to an allowlist; testing a site needs its owner's permission. The scanner is passive by default, with opt-in active (DAST) probes behind a server switch.
 - Every outbound request, including everything the test browser loads, goes through an SSRF guard.
 - Each user sees only their own data. The privacy notice in the dashboard explains what is stored, and
   *Delete account* erases it together with the sign-in account.

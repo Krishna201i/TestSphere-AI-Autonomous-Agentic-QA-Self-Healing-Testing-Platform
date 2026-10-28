@@ -175,3 +175,56 @@ def test_timestamps_are_utc_aware(client) -> None:
     finding = client.get("/api/security/findings").json()[0]
     assert event["at"].endswith("+00:00")
     assert finding["first_seen"].endswith("+00:00")
+
+
+# ── Active (DAST) scanning ────────────────────────────────────
+
+def _vuln_active_transport():
+    """A target that reflects 'q' unescaped — the active scanner should find XSS."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        from urllib.parse import parse_qs, urlsplit
+        q = parse_qs(urlsplit(str(request.url)).query).get("q", [""])[0]
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=f"<h1>{q}</h1>")
+    return httpx.MockTransport(handler)
+
+
+@pytest.fixture
+def active_client(state, monkeypatch):
+    from backend.api.security import get_active_scanner, get_scanner
+    from security import ActiveScanner
+
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", True)
+    passive = httpx.MockTransport(lambda r: httpx.Response(200, headers=state["headers"], text=""))
+    app.dependency_overrides[get_scanner] = lambda: PassiveScanner(ScopePolicy.of("app.test"), transport=passive)
+    app.dependency_overrides[get_active_scanner] = lambda: ActiveScanner(
+        ScopePolicy.of("app.test"), transport=_vuln_active_transport())
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+def test_active_scan_finds_and_persists_xss(active_client) -> None:
+    resp = active_client.post("/api/security/scan", json={"url": "http://app.test/search?q=hi", "active": True})
+    assert resp.status_code == 200, resp.text
+    ids = _by_id(resp.json()["findings"])
+    assert "SEC-XSS-REFLECTED" in ids and ids["SEC-XSS-REFLECTED"]["severity"] == "high"
+    # It is tracked like any other finding
+    assert any(f["check_id"] == "SEC-XSS-REFLECTED" for f in active_client.get("/api/security/findings").json())
+
+
+def test_active_scan_is_refused_when_the_server_has_it_off(client, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", False)
+    resp = client.post("/api/security/scan", json={"url": "http://app.test/search?q=hi", "active": True})
+    assert resp.status_code == 403 and "Active scanning is turned off" in resp.json()["detail"]
+
+
+def test_passive_scan_still_runs_without_the_active_flag(active_client) -> None:
+    resp = active_client.post("/api/security/scan", json={"url": "http://app.test/search?q=hi"})
+    assert resp.status_code == 200
+    assert not any(f["check_id"] == "SEC-XSS-REFLECTED" for f in resp.json()["findings"])
+
+
+def test_an_active_finding_can_be_retested(active_client) -> None:
+    key = _by_id(active_client.post(
+        "/api/security/scan", json={"url": "http://app.test/search?q=hi", "active": True}).json()["findings"])["SEC-XSS-REFLECTED"]["key"]
+    resp = active_client.post(f"/api/security/findings/{key}/retest", json={})
+    assert resp.status_code == 200 and resp.json()["retest_result"] == "fail"  # still vulnerable

@@ -133,7 +133,7 @@ eventSource.onerror = (err) => {
 
 ### 4.3 Passive Security Scan
 
-`POST /api/security/scan` runs the passive scanner (`security/`) against one URL: a single GET per page, no attack payloads. Findings use the shared `Finding` schema and come back most severe first.
+`POST /api/security/scan` runs the passive scanner (`security/`) against one URL: a single GET per page, no attack payloads. Pass `"active": true` (where the server has `SECURITY_ACTIVE_SCAN` on) to also run the active (DAST) scanner — reflected XSS, SQL injection and open-redirect probes, scope-limited to the same allowlist. Findings use the shared `Finding` schema and come back most severe first.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/security/scan   -H "Content-Type: application/json" -d '{"url": "http://127.0.0.1:5173/"}'

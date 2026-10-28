@@ -9,7 +9,9 @@ export default function AttackerAgent({ onNavigate }) {
   const ws = useWorkspace();
   const { lastScan, scanning, runScan, selectedKey, setSelectedKey, retests } = ws;
   const [url, setUrl] = useState('');
+  const [active, setActive] = useState(false);
   const [error, setError] = useState(null);
+  const activeAvailable = Boolean(ws.system?.active_scan);
 
   const findings = lastScan?.findings || [];
   const selected = findings.find((f) => f.key === selectedKey) || findings[0] || null;
@@ -24,7 +26,7 @@ export default function AttackerAgent({ onNavigate }) {
       return;
     }
     try {
-      await runScan(target);
+      await runScan(target, active && activeAvailable);
     } catch (err) {
       setError(err.status === 403
         ? `${err.message}. Add the host to SECURITY_SCAN_ALLOWED_HOSTS on the backend if you own it.`
@@ -37,9 +39,12 @@ export default function AttackerAgent({ onNavigate }) {
       <div className="page-title">
         <div>
           <h1>AI Attacker Agent</h1>
-          <p>Authorized, passive security testing: one GET per page, no payloads, every request and redirect checked against the server's scope allowlist.</p>
+          <p>Authorized security testing, scoped to the server's allowlist. Passive by default (one GET per page, no payloads);
+            active scanning, where the server allows it, sends test attacks to apps you own.</p>
         </div>
-        <span className="pill blue"><ShieldCheck size={12} /> Safe mode</span>
+        <span className={`pill ${active && activeAvailable ? 'orange' : 'blue'}`}>
+          <ShieldCheck size={12} /> {active && activeAvailable ? 'Active mode' : 'Safe mode'}
+        </span>
       </div>
 
       <section className="card">
@@ -48,8 +53,16 @@ export default function AttackerAgent({ onNavigate }) {
             Target URL
             <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={lastScan?.url || 'http://127.0.0.1:8000/'} />
           </label>
-          <button className="btn btn-primary" type="submit" disabled={scanning}>{scanning ? 'Scanning…' : 'Run passive scan'}</button>
+          <button className="btn btn-primary" type="submit" disabled={scanning}>
+            {scanning ? 'Scanning…' : (active && activeAvailable ? 'Run active scan' : 'Run passive scan')}
+          </button>
         </form>
+        {activeAvailable && (
+          <label className="check">
+            <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+            Active scan: also send test attacks (reflected XSS, SQL injection, open redirect). Only for apps you own.
+          </label>
+        )}
         {ws.applications.length > 0 && (
           <div className="row small">
             <span className="muted">Saved targets:</span>

@@ -259,7 +259,7 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
     slack_webhook_url: p.slack_webhook_url || '', notify_on: p.notify_on || 'failures',
     deploy_hook_url: p.deploy_hook_url || '', rollback_hook_url: p.rollback_hook_url || '',
     health_url: p.health_url || '', deploy_on_pass: Boolean(p.deploy_on_pass),
-    sign_in_first: Boolean(p.sign_in_first),
+    sign_in_first: Boolean(p.sign_in_first), active_scan: Boolean(p.active_scan),
   });
   const [form, setForm] = useState(() => fromProject(project));
   const [error, setError] = useState(null);
@@ -269,7 +269,7 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
     setForm(fromProject(project));
   }, [project.app_url, project.repo_url, project.prompt, project.slack_webhook_url, project.notify_on,
     project.deploy_hook_url, project.rollback_hook_url, project.health_url, project.deploy_on_pass,
-    project.sign_in_first]); // eslint-disable-line react-hooks/exhaustive-deps
+    project.sign_in_first, project.active_scan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function act(fn) {
     setError(null);
@@ -326,6 +326,11 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                     <input type="checkbox" checked={form.sign_in_first}
                       onChange={(e) => setForm({ ...form, sign_in_first: e.target.checked })} />
                     Sign in first: run the goal&apos;s login test, then test linked pages signed in (for example “log in with demo / secret”)
+                  </label>
+                  <label className="check">
+                    <input type="checkbox" checked={form.active_scan}
+                      onChange={(e) => setForm({ ...form, active_scan: e.target.checked })} />
+                    Active security scan (sends test attacks — reflected XSS, SQL injection, open redirect; only for apps you own, and only where the server enables it)
                   </label>
                   <label className="field">
                     Chat alerts (Slack, Discord, Google Chat or Teams webhook URL)

@@ -255,10 +255,10 @@ export function WorkspaceProvider({ uid, children }) {
   }, []);
 
   // ── Security: scan / approve / retest ───────────────────────
-  const runScan = useCallback(async (url) => {
+  const runScan = useCallback(async (url, active = false) => {
     setScanning(true);
     try {
-      const result = await securityScan(url, operator);
+      const result = await securityScan(url, operator, active);
       const at = new Date().toISOString();
       setScanMeta({
         url: result.url, final_url: result.final_url, status_code: result.status_code, at,

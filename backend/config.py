@@ -181,6 +181,12 @@ class Settings(BaseSettings):
     SECURITY_SCAN_ALLOWED_HOSTS: str = Field(
         default_factory=lambda: os.getenv("SECURITY_SCAN_ALLOWED_HOSTS", "")
     )
+    # Active (DAST) scanning sends crafted inputs, so it is off unless turned on
+    # here, and even then only ever touches SECURITY_SCAN_ALLOWED_HOSTS.
+    SECURITY_ACTIVE_SCAN: bool = Field(
+        default_factory=lambda: os.getenv("SECURITY_ACTIVE_SCAN", "false").lower() in ("true", "1"))
+    SECURITY_ACTIVE_MAX_REQUESTS: int = Field(
+        default_factory=lambda: max(1, int(os.getenv("SECURITY_ACTIVE_MAX_REQUESTS", "300"))))
 
     # Agent healing memory: "database" persists it (survives restarts),
     # "memory" keeps it in-process only (tests).

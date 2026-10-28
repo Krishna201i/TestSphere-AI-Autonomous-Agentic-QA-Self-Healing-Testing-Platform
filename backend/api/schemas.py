@@ -50,6 +50,8 @@ class _ProjectPipelineFields(BaseModel):
     deploy_on_pass: bool | None = Field(None, description="Deploy and verify automatically after a passing run")
     sign_in_first: bool | None = Field(None, description="Run the goal's sign-in test first; linked and route pages "
                                                          "then start signed in (the session is kept in memory only)")
+    active_scan: bool | None = Field(None, description="Also run the active (DAST) security scan in the pipeline; "
+                                                       "only takes effect where the server has SECURITY_ACTIVE_SCAN on")
 
     @field_validator("deploy_hook_url")
     @classmethod
@@ -142,6 +144,7 @@ class ProjectResponse(BaseModel):
     health_url: str | None = None
     deploy_on_pass: bool | None = None
     sign_in_first: bool | None = None
+    active_scan: bool | None = None
     last_deploy_id: int | None = None
     last_deploy_status: str | None = None
     database: str | None = None  # the linked database without credentials (the URL is never returned)

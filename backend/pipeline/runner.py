@@ -373,7 +373,7 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
         state.stage("heal", "done", "Nothing needed healing")
 
     # ── security ──
-    security = await _stage_security(state, app_url, owner, scanner)
+    security = await _stage_security(state, app_url, owner, scanner, active=bool(project.get("active_scan")))
 
     # ── report ──
     _report(state, project, results, security)
@@ -572,21 +572,26 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
     return results
 
 
-async def _stage_security(state: _RunState, app_url: str, owner: str | None, scanner: Any) -> dict[str, Any] | None:
-    from backend.api.security import get_scanner, scan_result
-    from security import OutOfScopeError, ScanError
+async def _stage_security(state: _RunState, app_url: str, owner: str | None, scanner: Any,
+                          *, active: bool = False) -> dict[str, Any] | None:
+    from backend.api.security import get_active_scanner, get_scanner, scan_result
+    from security import ActiveScanError, OutOfScopeError, ScanError
 
     scanner = scanner or get_scanner()
+    # Active scanning only when the project asked for it and the server allows it
+    run_active = active and settings.SECURITY_ACTIVE_SCAN
     state.stage("security", "running")
     try:
         snap = await scanner.fetch(app_url)
+        active_findings = await get_active_scanner().scan(app_url) if run_active else []
     except OutOfScopeError as exc:
         state.stage("security", "skipped", f"{exc}. Add the host to SECURITY_SCAN_ALLOWED_HOSTS (only hosts you own) to scan it.")
         return None
-    except ScanError as exc:
+    except (ScanError, ActiveScanError) as exc:
         state.stage("security", "failed", str(exc))
         return None
-    result = scan_result(state.db, scanner, snap, app_url, actor=state.doc["actor"], owner_uid=owner)
+    result = scan_result(state.db, scanner, snap, app_url, actor=state.doc["actor"], owner_uid=owner,
+                         extra_findings=active_findings)
     counts = Counter(f["severity"] for f in result["findings"])
     detail = ", ".join(f"{counts[s]} {s}" for s in ("critical", "high", "medium", "low", "info") if counts[s]) or "no findings"
     if result["reopened"]:

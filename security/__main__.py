@@ -4,8 +4,10 @@ Run a passive scan from the command line.
     python -m security http://127.0.0.1:8000/
     python -m security https://staging.example.test/ --allow staging.example.test
     python -m security http://127.0.0.1:8000/ --json
+    python -m security http://127.0.0.1:8000/search?q=x --active --allow 127.0.0.1:8000
 
 Loopback hosts are always in scope; anything else needs an explicit --allow.
+--active also runs the DAST scanner (sends test inputs); use it only on apps you own.
 Exit code: 0 = no medium+ findings, 1 = medium+ findings, 2 = scan refused/failed.
 """
 
@@ -16,6 +18,7 @@ import asyncio
 import json
 import sys
 
+from security.active_scanner import ActiveScanError, ActiveScanner
 from security.findings import Severity
 from security.passive_scanner import PassiveScanner, ScanError
 from security.scope import LOOPBACK_HOSTS, OutOfScopeError, ScopePolicy
@@ -29,12 +32,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Authorize an additional host (repeatable). Only scan hosts you own or may test.",
     )
     parser.add_argument("--json", action="store_true", help="Print findings as JSON")
+    parser.add_argument("--active", action="store_true",
+                        help="Also run the active (DAST) scanner. Sends test inputs; only for apps you own.")
     args = parser.parse_args(argv)
 
-    scanner = PassiveScanner(ScopePolicy.of(*LOOPBACK_HOSTS, *args.allow))
+    scope = ScopePolicy.of(*LOOPBACK_HOSTS, *args.allow)
     try:
-        findings = asyncio.run(scanner.scan(args.url))
-    except (OutOfScopeError, ScanError) as exc:
+        findings = asyncio.run(PassiveScanner(scope).scan(args.url))
+        if args.active:
+            findings += asyncio.run(ActiveScanner(scope).scan(args.url))
+    except (OutOfScopeError, ScanError, ActiveScanError) as exc:
         print(f"Scan refused/failed: {exc}", file=sys.stderr)
         return 2
 

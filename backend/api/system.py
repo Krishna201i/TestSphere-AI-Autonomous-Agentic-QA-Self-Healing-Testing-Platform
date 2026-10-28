@@ -98,6 +98,7 @@ def system_info(authorization: str | None = Header(None)) -> dict[str, Any]:
         "database": settings.DATABASE_BACKEND,
         "llm": {"provider": llm.provider, "model": llm.model, "configured": llm.is_configured},
         "scan_scope": sorted(LOOPBACK_HOSTS) + extra,
+        "active_scan": settings.SECURITY_ACTIVE_SCAN,
         "memory_backend": settings.AGENT_MEMORY_BACKEND,
         "ingestion": {
             "git_hosts": [h.strip() for h in settings.INGEST_GIT_HOSTS.split(",") if h.strip()],

@@ -120,7 +120,7 @@ export const acceptVisual = (id) => request(`/api/test-executions/${id}/accept-v
 export const planAndExecute = (payload) =>
   request('/api/workflow/plan-and-execute', { method: 'POST', body: payload });
 
-export const securityScan = (url, actor) => request('/api/security/scan', { method: 'POST', body: { url, actor } });
+export const securityScan = (url, actor, active = false) => request('/api/security/scan', { method: 'POST', body: { url, actor, active } });
 export const getFindings = () => request('/api/security/findings');
 export const approveFinding = (key, actor) =>
   request(`/api/security/findings/${encodeURIComponent(key)}/approve`, { method: 'POST', body: { actor } });

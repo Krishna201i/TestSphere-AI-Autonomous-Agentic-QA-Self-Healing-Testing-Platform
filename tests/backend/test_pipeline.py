@@ -519,3 +519,36 @@ def test_sign_in_first_checks_linked_pages_stay_put_instead_of_signed_out_conten
     steps = json.loads(linked["description"])["steps"]
     assert [(s["action"], s.get("value")) for s in steps][-1] == ("ASSERT_URL", "/about")
     assert not any(s["action"] == "ASSERT_CONTAINS_TEXT" for s in steps)  # nothing from the signed-out page
+
+
+def test_active_scan_runs_in_the_pipeline_only_when_project_and_server_both_allow(fresh_store, stub_network, monkeypatch):
+    import backend.api.security as sec_api
+
+    calls = {"n": 0}
+
+    class SpyActive:
+        def __init__(self, *a, **k):
+            pass
+
+        async def scan(self, url):
+            calls["n"] += 1
+            return []
+
+    monkeypatch.setattr(sec_api, "ActiveScanner", SpyActive)
+
+    # Project flag on but server off → not run
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", False)
+    project = make_project(fresh_store, active_scan=True)
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert calls["n"] == 0
+
+    # Both on → run once
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", True)
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert calls["n"] == 1
+
+    # Server on but project flag off → not run
+    calls["n"] = 0
+    plain = make_project(fresh_store)  # active_scan defaults off
+    run_once(fresh_store, plain, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert calls["n"] == 0
