@@ -70,6 +70,7 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `INGEST_ALLOW_LOCAL_PATHS` | `true` locally in development; `false` on Render/Heroku/Railway/Fly/Cloud Run unless set | Accept local folder paths for ingestion (reads the server's disk); never enable on a public server |
 | `SECURITY_SCAN_ALLOWED_HOSTS` | `""` | Extra hosts the passive scanner may contact (loopback always allowed) |
 | `RATE_LIMIT_RUNS_PER_MINUTE` | `10` | Runs, scans and clones each user may start per minute (`0` disables); over it the API answers 429 |
+| `RATE_LIMIT_BACKEND` | `memory` | `memory` counts per process (right for one instance); `database` shares the count between instances, at one read and one write per run start. With several API instances, also route each `/api/workflow/stream` client back to the instance running its workflow (sticky sessions): live run events stay in that instance's memory |
 | `ENGINE_MAX_BROWSERS` | `2` | Browser instances that may run at once; further runs wait for a slot |
 | `ENGINE_BROWSER` | `chromium` | Browser tests run in: `chromium`, `firefox` or `webkit` (Safari's engine). The image installs Chromium only; another browser is downloaded on its first run, or add `python -m playwright install --with-deps <browser>` to the build. The outbound request guard covers all three |
 | `PIPELINE_LINK_PAGES` / `PIPELINE_ROUTE_PAGES` | `3` / `5` | Same-site linked pages and codebase GET routes each pipeline run tests besides the target page |

@@ -263,6 +263,9 @@ class Settings(BaseSettings):
     # Abuse limits: expensive actions (browser runs, scans, clones, LLM calls)
     # each signed-in user may start per minute; 0 disables the limit.
     RATE_LIMIT_RUNS_PER_MINUTE: int = Field(default_factory=lambda: int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "10")))
+    # "memory": counted per process (one instance); "database": shared by every
+    # instance (one read and one write per run start)
+    RATE_LIMIT_BACKEND: str = Field(default_factory=lambda: os.getenv("RATE_LIMIT_BACKEND", "memory").strip().lower())
 
     model_config = {
         "env_file": ".env",

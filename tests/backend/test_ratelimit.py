@@ -51,6 +51,28 @@ def test_the_budget_is_shared_across_expensive_endpoints(client):
     assert scan.status_code == 429
 
 
+def test_a_database_budget_is_shared_by_every_instance(client, monkeypatch, fresh_store):
+    from backend import ratelimit
+    from backend.models import RATE_LIMITS
+
+    monkeypatch.setattr(settings, "RATE_LIMIT_BACKEND", "database")
+    assert [analyze(client, "token-alice").status_code for _ in range(2)] == [200, 200]
+    ratelimit.reset()  # another instance: none of this process's in-memory counts
+    assert analyze(client, "token-alice").status_code == 200
+    assert analyze(client, "token-alice").status_code == 429
+    assert analyze(client, "token-bob").status_code == 200
+    assert len(fresh_store.find_one(RATE_LIMITS, owner_uid="alice")["starts"]) == 3
+
+
+def test_old_starts_leave_the_shared_window(client, monkeypatch, fresh_store):
+    from backend.models import RATE_LIMITS
+
+    monkeypatch.setattr(settings, "RATE_LIMIT_BACKEND", "database")
+    fresh_store.insert(RATE_LIMITS, owner_uid="alice", starts=[1.0, 2.0, 3.0])  # long ago
+    assert analyze(client, "token-alice").status_code == 200
+    assert len(fresh_store.find_one(RATE_LIMITS, owner_uid="alice")["starts"]) == 1
+
+
 def test_zero_disables_the_limit(client, monkeypatch):
     monkeypatch.setattr(settings, "RATE_LIMIT_RUNS_PER_MINUTE", 0)
     assert all(analyze(client, "token-alice").status_code == 200 for _ in range(5))

@@ -38,6 +38,7 @@ from backend.models import (
     INTEGRATIONS,
     PIPELINE_RUNS,
     PROJECTS,
+    RATE_LIMITS,
     SECURITY_FINDINGS,
     TEST_CASES,
     TEST_EXECUTIONS,
@@ -51,7 +52,7 @@ router = APIRouter(prefix="/me", tags=["Profile"])
 # Every collection whose documents carry owner_uid
 OWNED_COLLECTIONS = (PROJECTS, APPLICATIONS, TEST_CASES, TEST_EXECUTIONS, SECURITY_FINDINGS,
                      AUDIT_EVENTS, BLUEPRINTS, PIPELINE_RUNS, FIX_PATCHES, DEPLOYMENTS, INTEGRATIONS,
-                     AGENT_MEMORY, API_TOKENS)
+                     AGENT_MEMORY, API_TOKENS, RATE_LIMITS)
 
 MAX_API_TOKENS = 10
 
