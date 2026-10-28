@@ -160,7 +160,7 @@ def create_memory_store() -> MemoryStore:
     from backend.database.session import get_store
 
     try:
-        return PersistentMemoryStore(get_store())
+        return PersistentMemoryStore(get_store(), max_records=settings.AGENT_MEMORY_MAX_RECORDS)
     except StoreUnavailableError as exc:
         # Never let a database outage stop the API from starting; healing
         # memory just isn't persisted until the backend restarts with a DB.

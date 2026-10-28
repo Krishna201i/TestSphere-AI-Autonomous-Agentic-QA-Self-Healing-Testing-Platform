@@ -64,6 +64,7 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `LLM_TIMEOUT` | `60` | Request timeout in seconds |
 | `LLM_MAX_RETRIES` | `2` | Retries for transient errors (timeouts, 429, 5xx, network) |
 | `AGENT_MEMORY_BACKEND` | `database` | `database` persists healing memory in the configured store (survives restarts); `memory` keeps it in-process |
+| `AGENT_MEMORY_MAX_RECORDS` | `2000` | Newest healing records loaded at start-up; more remembers older heals but costs that many database reads per restart |
 | `INGEST_WORKSPACE` | `./data/repos` | Where ingested repositories are cloned |
 | `INGEST_GIT_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts public repositories may be cloned from (https only) |
 | `INGEST_ALLOW_LOCAL_PATHS` | `true` locally in development; `false` on Render/Heroku/Railway/Fly/Cloud Run unless set | Accept local folder paths for ingestion (reads the server's disk); never enable on a public server |

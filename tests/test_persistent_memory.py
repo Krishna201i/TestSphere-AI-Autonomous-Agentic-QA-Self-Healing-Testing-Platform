@@ -51,3 +51,13 @@ def test_clear_wipes_the_collection(fresh_store) -> None:
     memory.store_healing_record(_record(1))
     memory.clear()
     assert PersistentMemoryStore(fresh_store).get_healing_history("#old") == []
+
+
+def test_start_up_record_limit_comes_from_settings(monkeypatch):
+    from backend.config import settings
+    from backend.orchestration import orchestrator
+
+    monkeypatch.setattr(settings, "AGENT_MEMORY_BACKEND", "database")
+    monkeypatch.setattr(settings, "AGENT_MEMORY_MAX_RECORDS", 50)
+    store = orchestrator.create_memory_store()
+    assert store._max_records == 50

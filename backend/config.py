@@ -187,6 +187,10 @@ class Settings(BaseSettings):
     AGENT_MEMORY_BACKEND: str = Field(
         default_factory=lambda: os.getenv("AGENT_MEMORY_BACKEND", "database")
     )
+    # Healing records replayed at start-up (each is a database read)
+    AGENT_MEMORY_MAX_RECORDS: int = Field(
+        default_factory=lambda: max(1, int(os.getenv("AGENT_MEMORY_MAX_RECORDS", "2000")))
+    )
 
     # Codebase ingestion: where clones go, which Git hosts may be cloned, and
     # whether local folder paths are accepted (development only by default).
