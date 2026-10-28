@@ -22,7 +22,8 @@ Checks (``check_id``):
     SEC-HDR-REFERRER     missing Referrer-Policy
     SEC-HDR-HSTS         HTTPS page without Strict-Transport-Security
     SEC-DISCLOSURE       Server / X-Powered-By reveal software versions
-    SEC-CORS             wildcard or reflected Access-Control-Allow-Origin
+    SEC-CORS             reflected origin, or wildcard with credentials
+    SEC-CORS-WILDCARD    wildcard origin without credentials (info, never patched)
     SEC-COOKIE-FLAGS     cookie missing HttpOnly / Secure / SameSite
     SEC-TRANSPORT-HTTP   non-loopback page served over plain HTTP
     SEC-FORM-PASSWORD    password field sent over plain HTTP
@@ -229,6 +230,20 @@ def check_cors(snap: PageSnapshot) -> list[Finding]:
             evidence=["Access-Control-Allow-Origin: *", "Access-Control-Allow-Credentials: true"],
             root_cause="Any site is allowed to read responses, and the server asks for credentials too.",
             recommendation="Replace * with an explicit origin allowlist.",
+        )]
+    if origin == "*":
+        # Fine for public data; a risk only where access depends on where the
+        # request comes from (an intranet, an IP allowlist).  Informational,
+        # and never auto-patched: narrowing it would break a public API.
+        return [_finding(
+            snap, "SEC-CORS-WILDCARD",
+            title="Any website can read this page's responses (CORS *)",
+            severity=Severity.INFO,
+            confidence=0.5,
+            evidence=["Access-Control-Allow-Origin: *"],
+            root_cause="The server allows every origin to read its responses (without cookies).",
+            recommendation="Keep * only for public data. If this page is limited by network or IP "
+                           "(intranet, VPN, allowlist), return Access-Control-Allow-Origin only for trusted origins.",
         )]
     return []
 

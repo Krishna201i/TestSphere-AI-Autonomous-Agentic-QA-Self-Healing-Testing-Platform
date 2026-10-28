@@ -216,9 +216,12 @@ class TestChecks:
         cors = next(f for f in await _scanner(_serve(headers)).scan("https://app.test/") if f.check_id == "SEC-CORS")
         assert cors.severity == Severity.HIGH
 
-    async def test_cors_wildcard_without_credentials_is_fine(self) -> None:
+    async def test_cors_wildcard_without_credentials_is_only_informational(self) -> None:
         headers = {**SAFE_HEADERS, "access-control-allow-origin": "*"}
-        assert "SEC-CORS" not in _ids(await _scanner(_serve(headers)).scan("https://app.test/"))
+        findings = await _scanner(_serve(headers)).scan("https://app.test/")
+        assert "SEC-CORS" not in _ids(findings)  # the patcher narrows SEC-CORS; a public API must keep *
+        wildcard = next(f for f in findings if f.check_id == "SEC-CORS-WILDCARD")
+        assert wildcard.severity == Severity.INFO
 
     async def test_cookie_flags_per_cookie_and_value_redacted(self) -> None:
         def handler(request):
