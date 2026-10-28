@@ -28,6 +28,7 @@ from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
 from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Record, Store
+from backend.gitforges import parse_forge_repo
 from backend.github import parse_repo
 from backend.models import FIX_PATCHES, PROJECTS
 from backend.ratelimit import limit_runs
@@ -108,7 +109,9 @@ def _generate(repo: str, findings: list[dict[str, Any]], site_url: str, auth: Gi
 def _public(row: Record) -> dict[str, Any]:
     out = {k: row.get(k) for k in ("id", "target_url", "repo", "commit", "frameworks", "files", "applied",
                                     "manual", "patch", "finding_keys", "actor", "created_at", "pull_request")}
-    out["github"] = parse_repo(row.get("repo")) is not None and bool(row.get("contents"))
+    forge = "github" if parse_repo(row.get("repo")) else (parse_forge_repo(row.get("repo")) or (None,))[0]
+    out["forge"] = forge if row.get("contents") else None
+    out["github"] = out["forge"] is not None  # the dashboard's "can open a pull request" flag (any host)
     return out
 
 
@@ -205,33 +208,48 @@ async def open_pull_request(
     db: Store = Depends(get_db),
     user: User = Depends(limit_runs),
 ) -> dict[str, Any]:
-    """Open a pull request with this patch on the repository it was built from."""
-    from backend.api.integrations import github_token
+    """Open a pull request (GitHub, Bitbucket) or merge request (GitLab) with this
+    patch on the repository it was built from."""
+    from backend.api.integrations import git_auth, github_token
+    from backend.gitforges import BitbucketClient, GitLabClient
     from backend.github import GitHubClient, GitHubError
 
     row = ensure_owned(user, db.get(FIX_PATCHES, patch_id), "Fix patch")
     if row.get("pull_request"):
         return row["pull_request"]
     repo = parse_repo(row.get("repo"))
-    if not repo:
+    forge = parse_forge_repo(row.get("repo"))
+    if not repo and not forge:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail="Pull requests can only be opened on https://github.com repositories.")
+                            detail="Pull requests can be opened on https://github.com, https://gitlab.com "
+                                   "and https://bitbucket.org repositories.")
     contents = row.get("contents") or {}
     if not contents or not row.get("commit"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail="This patch changes no files, or was made before pull requests were supported. "
                                    "Generate it again.")
-    token = github_token(db, user.uid)
-    if not token:
+    token = github_token(db, user.uid) if repo else None
+    auth = git_auth(db, user.uid, row.get("repo")) if forge else None
+    if repo and not token:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail="Connect GitHub first (Profile → Integrations).")
+    if forge and not auth:
+        host = "gitlab.com" if forge[0] == "gitlab" else "bitbucket.org"
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=f"Save a {host} credential with write access first "
+                                   "(Profile → Integrations → Git credentials).")
     title = (payload.title if payload and payload.title else None) or \
         f"Security headers and cookie fixes from TestSphere ({', '.join(sorted({a['check_id'] for a in row.get('applied') or []}))})"[:200]
 
     def open_pr() -> dict[str, Any]:
-        with GitHubClient(token) as gh:
-            return gh.open_fix_pr(*repo, base_sha=row["commit"], files=sorted(contents.items()),
-                                  branch=f"testsphere/fix-{patch_id}", title=title, body=_pr_body(row))
+        args = {"base_sha": row["commit"], "files": sorted(contents.items()), "branch": f"testsphere/fix-{patch_id}",
+                "title": title, "body": _pr_body(row)}
+        if repo:
+            with GitHubClient(token) as gh:
+                return gh.open_fix_pr(*repo, **args)
+        client = GitLabClient(auth.token) if forge[0] == "gitlab" else BitbucketClient(auth.username, auth.token)
+        with client:
+            return client.open_fix_pr(forge[1], **args)
 
     try:
         pr = await asyncio.to_thread(open_pr)
@@ -239,5 +257,6 @@ async def open_pull_request(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     db.update(FIX_PATCHES, patch_id, pull_request=pr)
     record_audit(db, actor=actor_for(user, "dev_active"), kind="patch", ref=str(patch_id), owner_uid=user.uid,
-                 message=f"Pull request #{pr['number']} opened on {'/'.join(repo)} for fix patch #{patch_id}")
+                 message=f"Pull request #{pr['number']} opened on {'/'.join(repo) if repo else forge[1]} "
+                         f"for fix patch #{patch_id}")
     return pr

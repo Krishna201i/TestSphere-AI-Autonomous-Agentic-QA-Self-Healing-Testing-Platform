@@ -161,12 +161,12 @@ def test_pull_request_from_a_patch(gh):
     assert client.get("/api/security/patches").json()[0]["pull_request"]["url"].endswith("/pull/7")
 
 
-def test_pull_requests_need_a_github_repository(gh):
+def test_pull_requests_need_a_supported_git_host(gh):
     client = TestClient(app)
     client.put("/api/integrations/github", json={"token": TOKEN})
-    row = _patch_row(repo="https://gitlab.com/acme/shop")
+    row = _patch_row(repo="https://git.example.com/acme/shop")
     resp = client.post(f"/api/security/patches/{row['id']}/pull-request")
-    assert resp.status_code == 422 and "github.com" in resp.json()["detail"]
+    assert resp.status_code == 422 and "gitlab.com" in resp.json()["detail"]
 
 
 def test_commit_status_on_a_pushed_run(gh):

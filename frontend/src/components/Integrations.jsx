@@ -171,7 +171,8 @@ function GitCredentials() {
       <h4 className="section-title mt-3"><KeyRound size={14} aria-hidden="true" /> Other Git hosts</h4>
       <p className="hint m-0">
         For private repositories on GitLab, Bitbucket or a self-hosted Git server: save an access token with read access
-        for the host. It is stored encrypted and never shown again.
+        for the host (with write access on gitlab.com or bitbucket.org, fix patches also open as merge or pull requests).
+        It is stored encrypted and never shown again.
       </p>
       {rows?.length > 0 && (
         <ul className="plain-list small">

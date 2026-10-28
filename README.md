@@ -33,7 +33,7 @@ rollback, and the whole loop runs again on a schedule or on every push.
 | **Self-healing** | When a locator breaks, the engine tries stored fallbacks, then a fingerprint scan of the live DOM, scoring attributes, text, position and structure. It refuses look-alikes and elements whose kind changed. |
 | **2B. Attacker agent** | Passive, scope-checked security scan: headers, cookies, CORS, TLS, forms, information disclosure. One GET per page and no payloads, limited to hosts the server allows. |
 | **3. Unified report** | Test results, regressions since the previous run, flaky tests and security findings in one report, with screenshots, DOM snapshots and Playwright traces for every test. |
-| **4. AI remediation** | Fix proposals a human approves, and fix patches against the app's own code (FastAPI, Flask, Django, Express, nginx), syntax-checked and opened as a GitHub pull request in one click. |
+| **4. AI remediation** | Fix proposals a human approves, and fix patches against the app's own code (FastAPI, Flask, Django, Express, Next.js, nginx), syntax-checked and opened as a pull request on GitHub or Bitbucket, or a merge request on GitLab, in one click. |
 | **5. Validation engine** | Re-runs the original check after a fix; findings resolve or reopen as regressions. |
 | **6. Verified deploy** | Calls the deploy hook (Render, Vercel, Netlify), waits for the new version to be healthy, runs smoke tests, and rolls back automatically if either fails. |
 
