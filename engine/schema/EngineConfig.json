@@ -54,6 +54,13 @@
       "minimum": 0,
       "title": "Min Action Timeout Ms",
       "type": "integer"
+    },
+    "quick_heal_ms": {
+      "default": 1500,
+      "description": "When a learned locator matches nothing for this long, heal right away; the full action timeout is still waited when no confident heal is found (0 = off)",
+      "minimum": 0,
+      "title": "Quick Heal Ms",
+      "type": "integer"
     }
   },
   "title": "EngineConfig",

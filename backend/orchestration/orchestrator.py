@@ -547,10 +547,15 @@ class PlatformWorkflowOrchestrator:
                 workflow_id=workflow_id,
                 current_step=WorkflowStep.COMPLETED,
                 is_terminal=True,
-                passed_tests=1 if final_status == TestExecutionStatus.PASSED.value else 0,
+                passed_tests=1 if final_status in (TestExecutionStatus.PASSED.value,
+                                                   TestExecutionStatus.HEALED.value) else 0,
                 failed_tests=1 if final_status == TestExecutionStatus.FAILED.value else 0,
             )
         )
+        # The workflow state only knows heals the AI healer validated; a run the
+        # engine healed on its own is just as healed
+        if final_status == TestExecutionStatus.HEALED.value:
+            dashboard_summary.healed_tests = max(dashboard_summary.healed_tests, 1)
 
         return {
             "execution_id": execution.id,

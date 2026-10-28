@@ -245,6 +245,12 @@ class EngineConfig(BaseModel):
         ge=0,
         description="Least time an action waits for its element before healing starts",
     )
+    quick_heal_ms: int = Field(
+        1_500,
+        ge=0,
+        description="When a learned locator matches nothing for this long, heal right away; the full "
+                    "action timeout is still waited when no confident heal is found (0 = off)",
+    )
 
 
 class RunOptions(BaseModel):
@@ -262,6 +268,7 @@ class RunOptions(BaseModel):
     tracing_enabled: bool | None = None
     max_candidates: int | None = Field(None, ge=1)
     min_action_timeout_ms: int | None = Field(None, ge=0)
+    quick_heal_ms: int | None = Field(None, ge=0)
 
     def merged(self, base: EngineConfig) -> EngineConfig:
         """Return a new EngineConfig with non-None overrides applied."""

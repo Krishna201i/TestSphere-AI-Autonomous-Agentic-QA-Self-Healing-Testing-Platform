@@ -131,6 +131,19 @@ def _known_login_button() -> list[dict]:
 
 
 class TestAIHealingOnARun:
+    async def test_a_run_the_engine_healed_counts_as_healed_in_the_summary(self):
+        healed = _result(TestStatus.HEALED, _ok("step-1"), StepResult(
+            step_id="step-2", status=StepStatus.HEALED, duration_ms=1, locator_used="button.btn",
+            healing=HealingReport(original_locator="#login-button", selected_locator="button.btn",
+                                  confidence=0.9, strategy_used="fallback[0]")))
+        db, _tc, execution = _setup(LOGIN_STEPS)
+
+        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(return_value=healed)):
+            result = await _service().execute_test_run(db=db, execution_id=execution.id)
+
+        assert result["status"] == "HEALED"
+        assert result["dashboard_summary"]["healed_tests"] == 1
+
     async def test_broken_selector_is_healed_validated_and_recorded(self, tmp_path):
         snapshot = tmp_path / "dom.html"
         snapshot.write_text(FAILED_PAGE, encoding="utf-8")

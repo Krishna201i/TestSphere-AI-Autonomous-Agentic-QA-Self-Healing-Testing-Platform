@@ -353,3 +353,22 @@ async def test_a_failed_sign_in_fails_the_outcome_check_and_is_never_healed(demo
     assert result.status == TestStatus.FAILED
     assert step.status == StepStatus.FAILED and "still visible" in (step.error or "")
     assert "form-gone" not in calls  # a failed check is a result, not a broken locator
+
+
+async def test_a_renamed_locator_heals_without_waiting_the_action_timeout(demo_server: str) -> None:
+    plan = login_plan(demo_server)
+    plan.steps[1].target = Target(description="Username input", primary_locator="#user-renamed",
+                                  fallback_locators=['[data-testid="username-input"]'])
+    result = await run_test(plan, RunOptions(min_action_timeout_ms=10_000))
+    step = result.steps[1]
+    assert step.status == StepStatus.HEALED
+    assert step.locator_used == '[data-testid="username-input"]'
+    assert step.duration_ms < 8_000  # healed after the short wait, not the 10 s action timeout
+    assert result.status == TestStatus.HEALED
+
+
+async def test_a_missing_locator_with_nothing_learned_still_fails(demo_server: str) -> None:
+    plan = login_plan(demo_server)
+    plan.steps[1].target = Target(description="Username input", primary_locator="#user-renamed")
+    result = await run_test(plan, RunOptions(min_action_timeout_ms=1_000))
+    assert result.steps[1].status == StepStatus.FAILED

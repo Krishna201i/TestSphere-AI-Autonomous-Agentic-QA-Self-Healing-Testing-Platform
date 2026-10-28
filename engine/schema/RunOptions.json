@@ -102,6 +102,19 @@
       ],
       "default": null,
       "title": "Min Action Timeout Ms"
+    },
+    "quick_heal_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Quick Heal Ms"
     }
   },
   "title": "RunOptions",

@@ -214,6 +214,11 @@ async def _execute_step(
     healing: HealingReport | None = None
 
     try:
+        # A locator that never appears is healed now, not after the full action timeout
+        healing = await _heal_missing_early(page, step, config)
+        if healing:
+            return await _healed_result(page, step, healing, config, test_id, artifacts_dir, step_start,
+                                        console_logs, network_errors)
         # Fingerprint before acting: a click that navigates removes the element
         pre_action_fp = await _fingerprint_if_present(page, step)
         locator_used = await _perform_action(page, step, config)
@@ -243,28 +248,8 @@ async def _execute_step(
         if healing and healing.selected_locator:
             # Healing succeeded — retry the action with the healed locator
             try:
-                locator_used = await _perform_action_with_locator(
-                    page, step, healing.selected_locator, config
-                )
-                duration_ms = _elapsed_ms(step_start)
-                screenshot_path = await write_screenshot(
-                    page, test_id, step.step_id, artifacts_dir
-                )
-                dom_snapshot_path = await write_dom_snapshot(
-                    page, test_id, step.step_id, artifacts_dir
-                )
-                return StepResult(
-                    step_id=step.step_id,
-                    status=StepStatus.HEALED,
-                    duration_ms=duration_ms,
-                    locator_used=locator_used,
-                    healing=healing,
-                    screenshot_path=screenshot_path,
-                    dom_snapshot_path=dom_snapshot_path,
-                    console_logs=console_logs,
-                    network_errors=network_errors,
-                    page_url=_page_url(page),
-                )
+                return await _healed_result(page, step, healing, config, test_id, artifacts_dir, step_start,
+                                            console_logs, network_errors)
             except Exception as retry_exc:  # noqa: BLE001 - the engine reports failures in its result and never raises
                 error_msg = f"Healing failed on retry: {retry_exc}"
 
@@ -288,6 +273,63 @@ async def _execute_step(
     finally:
         page.remove_listener("console", _on_console)
         page.remove_listener("requestfailed", _on_request_failed)
+
+
+# Element actions whose missing element means a broken locator (assert_hidden
+# passes when nothing matches; press without a target goes to the page)
+_ELEMENT_ACTIONS = frozenset({
+    ActionType.CLICK, ActionType.FILL, ActionType.PRESS, ActionType.SELECT, ActionType.CHECK,
+    ActionType.UNCHECK, ActionType.ASSERT_TEXT, ActionType.ASSERT_VALUE, ActionType.ASSERT_VISIBLE,
+})
+
+
+async def _heal_missing_early(page: Page, step: Step, config: EngineConfig) -> HealingReport | None:
+    """Heal a primary locator that matches nothing after a short wait.
+
+    Only an accepted heal is returned; otherwise the step runs as usual and
+    waits the full action timeout, so a slow page still finds its element.
+    """
+    target = step.target
+    if step.action not in _ELEMENT_ACTIONS or target is None or config.quick_heal_ms <= 0:
+        return None
+    if not (target.fallback_locators or target.fingerprint):
+        return None  # nothing learned to heal from
+    try:
+        await page.locator(target.primary_locator).first.wait_for(state="attached", timeout=config.quick_heal_ms)
+        return None
+    except (PlaywrightTimeoutError, PlaywrightError) as exc:
+        healing = await _attempt_healing(page, step, config, exc)
+    return healing if healing and healing.selected_locator else None
+
+
+async def _healed_result(
+    page: Page,
+    step: Step,
+    healing: HealingReport,
+    config: EngineConfig,
+    test_id: str,
+    artifacts_dir: str,
+    step_start: float,
+    console_logs: list[str],
+    network_errors: list[str],
+) -> StepResult:
+    """Run the step on the healed locator and report it HEALED (raises if the action fails)."""
+    locator_used = await _perform_action_with_locator(page, step, healing.selected_locator, config)
+    duration_ms = _elapsed_ms(step_start)
+    screenshot_path = await write_screenshot(page, test_id, step.step_id, artifacts_dir)
+    dom_snapshot_path = await write_dom_snapshot(page, test_id, step.step_id, artifacts_dir)
+    return StepResult(
+        step_id=step.step_id,
+        status=StepStatus.HEALED,
+        duration_ms=duration_ms,
+        locator_used=locator_used,
+        healing=healing,
+        screenshot_path=screenshot_path,
+        dom_snapshot_path=dom_snapshot_path,
+        console_logs=console_logs,
+        network_errors=network_errors,
+        page_url=_page_url(page),
+    )
 
 
 # ---------------------------------------------------------------------------
