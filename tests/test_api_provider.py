@@ -196,6 +196,12 @@ class TestErrorTranslation:
             await _provider(_json_handler(status=status, body=body)).generate(LLMRequest(prompt="hi"))
 
     @pytest.mark.asyncio
+    async def test_gemini_list_error_body_keeps_its_message(self):
+        body = [{"error": {"code": 404, "message": "This model is no longer available"}}]
+        with pytest.raises(LLMRequestValidationError, match="HTTP 404: This model is no longer available"):
+            await _provider(_json_handler(status=404, body=body)).generate(LLMRequest(prompt="hi"))
+
+    @pytest.mark.asyncio
     async def test_timeout_maps_to_timeout_error(self):
         def handler(request):
             raise httpx.ReadTimeout("slow", request=request)

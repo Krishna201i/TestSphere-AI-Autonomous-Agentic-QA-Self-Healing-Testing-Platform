@@ -128,7 +128,9 @@ class APIProvider(LLMClient):
         """Extract a short provider error message from a failed response."""
         try:
             body = response.json()
-            error = body.get("error", body)
+            if isinstance(body, list) and body:  # Gemini: [{"error": {...}}]
+                body = body[0]
+            error = body.get("error", body) if isinstance(body, dict) else body
             if isinstance(error, dict):
                 return str(error.get("message", error))[:300]
             return str(error)[:300]

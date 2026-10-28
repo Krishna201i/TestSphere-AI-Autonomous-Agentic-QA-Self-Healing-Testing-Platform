@@ -50,7 +50,7 @@ LLM_MODEL=claude-sonnet-5-5
 LLM_PROVIDER=api
 LLM_API_KEY=AIza...
 LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
-LLM_MODEL=gemini-2.5-flash
+LLM_MODEL=gemini-3.8-flash   # older Gemini models are closed to new keys (HTTP 404)
 ```
 
 Leave `LLM_PROVIDER=mock` for tests and CI; no key or network is needed.

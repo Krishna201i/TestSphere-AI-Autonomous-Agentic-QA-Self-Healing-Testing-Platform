@@ -495,9 +495,12 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
                         "quarantined": bool(tc.get("quarantined")),
                         "visual_changed": bool((visual or {}).get("changed"))})
         state.save(tests=results)
+    all_failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value)
     failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value and not r.get("quarantined"))
+    quarantined_failed = all_failed - failed
     state.stage("execute", "failed" if failed else "done",
-                f"{len(results) - failed} of {len(results)} passed" + (f", {failed} failed" if failed else ""))
+                f"{len(results) - all_failed} of {len(results)} passed" + (f", {failed} failed" if failed else "")
+                + (f", {quarantined_failed} quarantined failed (does not fail the run)" if quarantined_failed else ""))
     return results
 
 

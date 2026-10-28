@@ -194,6 +194,7 @@ def test_a_quarantined_failure_is_reported_but_does_not_fail_the_run(fresh_store
     assert run["status"] == "passed"
     assert run["summary"]["failed"] == 0 and run["summary"]["quarantined_failed"] == 1
     assert stage(run, "execute")["status"] == "done"
+    assert "1 quarantined failed" in stage(run, "execute")["detail"]  # never counted as a pass
 
 
 def test_unreachable_target_stops_before_planning(fresh_store, stub_network):
