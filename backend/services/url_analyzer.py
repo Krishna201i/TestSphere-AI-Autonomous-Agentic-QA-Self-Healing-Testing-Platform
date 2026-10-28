@@ -301,6 +301,20 @@ class URLAnalyzerService:
                                           "placeholder": attr_dict.get("placeholder"),
                                           "aria_label": attr_dict.get("aria-label"),
                                           "selector": selector, "required": bool(_REQUIRED.search(m.group(1)))}))
+        for m in re.finditer(r"<select\b([^>]*)>(.*?)</select>", html, re.IGNORECASE | re.DOTALL):
+            attr_dict = cls._parse_tag_attrs(m.group(1))
+            name, elem_id = attr_dict.get("name"), attr_dict.get("id")
+            selector = f"#{elem_id}" if elem_id else f"select[name='{name}']" if name else None
+            # The first real choice: not a disabled or empty "Choose..." placeholder
+            option = next((v for attrs, label in re.findall(r"<option\b([^>]*)>(.*?)</option>", m.group(2),
+                                                            re.IGNORECASE | re.DOTALL)
+                           if "disabled" not in attrs.lower()
+                           and (v := cls._parse_tag_attrs(attrs).get("value", re.sub(r"<[^>]+>", "", label).strip()))),
+                          None)
+            if selector:
+                found.append((m.start(), {"type": "select", "name": name, "id": elem_id, "placeholder": None,
+                                          "aria_label": attr_dict.get("aria-label"), "selector": selector,
+                                          "required": bool(_REQUIRED.search(m.group(1))), "option": option}))
         return [field for _, field in sorted(found, key=lambda f: f[0])]  # in page order
 
     @classmethod
@@ -565,6 +579,7 @@ class URLAnalyzerService:
         use_form = not parts or goal_plan.is_form_part(parts[0], given) \
             or not goal_plan.later_part_steps(0, parts[0], given)
         if inputs and use_form:
+            chosen: set[str] = set()  # radio groups already answered
             for inp in inputs:
                 if sum(1 for st in steps if st["action"] == "FILL") >= 8:
                     break  # enough for a sign-up form
@@ -573,13 +588,24 @@ class URLAnalyzerService:
                 target_sel = inp["selector"]
 
                 hint = f"{iname} {(inp.get('id') or '').lower()} {(inp.get('placeholder') or '').lower()}"
+                if itype == "select" and inp.get("required") and inp.get("option"):
+                    steps.append({"step_number": step_num, "action": "SELECT", "target": target_sel,
+                                  "value": inp["option"], "description": f"'{inp['option'][:40]}' in the {iname or 'list'}"})
+                    step_num += 1
+                    continue
+                if itype == "radio" and inp.get("required") and iname and iname not in chosen:
+                    chosen.add(iname)  # one choice per required group
+                    steps.append({"step_number": step_num, "action": "CHECK", "target": target_sel, "value": None,
+                                  "description": f"a {iname} option"})
+                    step_num += 1
+                    continue
                 if itype == "checkbox" and inp.get("required"):
                     # A box the form will not submit without ("I accept the terms")
                     steps.append({"step_number": step_num, "action": "CHECK", "target": target_sel, "value": None,
                                   "description": f"the {(inp.get('aria_label') or inp.get('name') or 'required')[:40]} checkbox"})
                     step_num += 1
                     continue
-                if itype in ("checkbox", "radio", "submit", "button", "file", "range", "color", "reset"):
+                if itype in ("checkbox", "radio", "select", "submit", "button", "file", "range", "color", "reset"):
                     continue
                 if itype in _TYPED_VALUES:
                     val = _TYPED_VALUES[itype]

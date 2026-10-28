@@ -118,6 +118,9 @@ SIGN_UP = """<!doctype html><html><head><title>Sign up</title></head><body>
 <input id="p" type="password" name="password" required minlength="8">
 <input id="age" type="number" name="age" required min="18"><input id="dob" type="date" name="dob" required>
 <input id="ph" type="tel" name="phone" required><textarea id="bio" name="bio" required></textarea>
+<select id="country" name="country" required><option value="" disabled selected>Choose…</option>
+<option value="in">India</option></select>
+<input type="radio" id="basic" name="plan" value="basic" required><input type="radio" id="pro" name="plan" value="pro">
 <input id="terms" type="checkbox" name="terms" required><input id="news" type="checkbox" name="news">
 <button type="submit" id="go">Create account</button></form></body></html>"""
 
@@ -153,7 +156,8 @@ async def test_a_sign_up_form_with_typed_and_required_fields_really_submits():
     base = f"http://127.0.0.1:{server.server_address[1]}"
     try:
         planned = U._synthesize_test_steps(f"{base}/", "Sign up", U._extract_inputs(SIGN_UP), U._extract_buttons(SIGN_UP))
-        actions = {"NAVIGATE": ActionType.GOTO, "FILL": ActionType.FILL, "CHECK": ActionType.CHECK, "CLICK": ActionType.CLICK}
+        actions = {"NAVIGATE": ActionType.GOTO, "FILL": ActionType.FILL, "CHECK": ActionType.CHECK, "CLICK": ActionType.CLICK,
+                   "SELECT": ActionType.SELECT}
         steps = [Step(step_id=f"s{i}", action=actions[s["action"]], value=s["value"],
                       target=Target(description=s["description"], primary_locator=s["target"]) if s["target"] else None)
                  for i, s in enumerate(planned)]
