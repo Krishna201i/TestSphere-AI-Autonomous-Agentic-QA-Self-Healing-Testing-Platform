@@ -26,10 +26,11 @@ Output side:
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -212,6 +213,10 @@ class EngineConfig(BaseModel):
     RunOptions.
     """
 
+    browser: Literal["chromium", "firefox", "webkit"] = Field(
+        default_factory=lambda: os.getenv("ENGINE_BROWSER", "chromium").strip().lower() or "chromium",
+        description="Browser engine to run tests in (ENGINE_BROWSER; Chromium by default)",
+    )
     heal_threshold: float = Field(
         0.75,
         ge=0.0,
@@ -271,6 +276,7 @@ class RunOptions(BaseModel):
     max_candidates: int | None = Field(None, ge=1)
     min_action_timeout_ms: int | None = Field(None, ge=0)
     quick_heal_ms: int | None = Field(None, ge=0)
+    browser: Literal["chromium", "firefox", "webkit"] | None = None
 
     def merged(self, base: EngineConfig) -> EngineConfig:
         """Return a new EngineConfig with non-None overrides applied."""

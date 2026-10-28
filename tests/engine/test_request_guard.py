@@ -5,20 +5,22 @@ The outbound request guard covers everything the browser fetches: direct
 navigations, redirects and subresources, not only the first URL.
 
 Two local servers stand in for a public site and an internal service; the
-guard refuses the internal one's port.  Uses real headless Chromium.
+guard refuses the internal one's port.  Runs in every installed browser
+(Chromium always; Firefox and WebKit when `playwright install` added them).
 """
 
 from __future__ import annotations
 
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 
 from engine import browser
 from engine.runner import run_test
-from engine.schemas import ActionType, Step, StepStatus, TestPlan
+from engine.schemas import ActionType, RunOptions, Step, StepStatus, TestPlan
 
 
 def _serve(routes: dict[str, tuple[int, dict[str, str], bytes]]):
@@ -40,6 +42,20 @@ def _serve(routes: dict[str, tuple[int, dict[str, str], bytes]]):
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_address[1]}", hits
+
+
+def _installed(name: str) -> bool:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        return Path(getattr(pw, name).executable_path).exists()
+
+
+@pytest.fixture(params=["chromium", "firefox", "webkit"])
+def engine(request) -> RunOptions:
+    if request.param != "chromium" and not _installed(request.param):
+        pytest.skip(f"{request.param} not installed (python -m playwright install {request.param})")
+    return RunOptions(browser=request.param)
 
 
 @pytest.fixture
@@ -69,30 +85,30 @@ def _plan(*urls: str) -> TestPlan:
     )
 
 
-async def test_direct_navigation_to_a_blocked_address_fails(sites):
+async def test_direct_navigation_to_a_blocked_address_fails(sites, engine):
     _, internal_url, internal_hits, _ = sites
-    result = await run_test(_plan(f"{internal_url}/secret"))
+    result = await run_test(_plan(f"{internal_url}/secret"), engine)
     assert result.steps[0].status == StepStatus.FAILED
     assert internal_hits == []
 
 
-async def test_redirect_to_a_blocked_address_is_stopped(sites):
+async def test_redirect_to_a_blocked_address_is_stopped(sites, engine):
     public_url, _, internal_hits, public_hits = sites
-    await run_test(_plan(f"{public_url}/redirect"))
+    await run_test(_plan(f"{public_url}/redirect"), engine)
     assert "/redirect" in public_hits
     assert internal_hits == []
 
 
-async def test_subresources_from_a_blocked_address_are_not_fetched(sites):
+async def test_subresources_from_a_blocked_address_are_not_fetched(sites, engine):
     public_url, _, internal_hits, public_hits = sites
-    result = await run_test(_plan(f"{public_url}/embeds"))
+    result = await run_test(_plan(f"{public_url}/embeds"), engine)
     assert result.steps[0].status == StepStatus.PASSED  # the page itself is allowed
     assert "/embeds" in public_hits
     assert internal_hits == []
 
 
-async def test_allowed_sites_still_load(sites):
+async def test_allowed_sites_still_load(sites, engine):
     public_url, _, _, public_hits = sites
-    result = await run_test(_plan(f"{public_url}/page"))
+    result = await run_test(_plan(f"{public_url}/page"), engine)
     assert result.steps[0].status == StepStatus.PASSED
     assert "/page" in public_hits

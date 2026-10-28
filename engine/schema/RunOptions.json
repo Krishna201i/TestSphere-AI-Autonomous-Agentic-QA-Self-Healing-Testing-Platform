@@ -115,6 +115,23 @@
       ],
       "default": null,
       "title": "Quick Heal Ms"
+    },
+    "browser": {
+      "anyOf": [
+        {
+          "enum": [
+            "chromium",
+            "firefox",
+            "webkit"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Browser"
     }
   },
   "title": "RunOptions",

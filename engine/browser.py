@@ -81,11 +81,31 @@ def _browser_slots() -> asyncio.Semaphore:
 
 
 _install_lock = threading.Lock()
-_install_state: dict = {"attempted": False, "error": None}
+_install_state: dict = {"attempted": False, "error": None}  # Chromium (reported in /api/system)
+_other_installs: dict[str, str | None] = {}  # firefox / webkit -> error or None
 
 
 def _is_missing_browser(exc: BaseException) -> bool:
     return "Executable doesn't exist" in str(exc)
+
+
+def install_browser(name: str) -> str | None:
+    """Download *name* for this Playwright version, once per process (see ``install_chromium``)."""
+    if name == "chromium":
+        return install_chromium()
+    with _install_lock:
+        if name in _other_installs:
+            return _other_installs[name]
+        log.warning("%s is missing; installing it now (one-time, can take a minute)...", name)
+        try:
+            subprocess.run([sys.executable, "-m", "playwright", "install", name],
+                           check=True, capture_output=True, text=True, timeout=600)
+            _other_installs[name] = None
+        except (OSError, subprocess.SubprocessError) as exc:
+            detail = getattr(exc, "stderr", None) or str(exc)
+            _other_installs[name] = f"automatic {name} install failed: {detail.strip()[-400:]}"
+            log.error("%s", _other_installs[name])
+        return _other_installs[name]
 
 
 def install_chromium() -> str | None:
@@ -185,7 +205,8 @@ class BrowserSession:
             self._proxy_url = await self._egress.start()
         self._pw = await async_playwright().start()
         log.debug(
-            "Launching Chromium headless=%s slow_mo=%d",
+            "Launching %s headless=%s slow_mo=%d",
+            self._config.browser,
             self._config.headless,
             self._config.slow_mo_ms,
         )
@@ -194,7 +215,7 @@ class BrowserSession:
         except Exception as exc:
             if not _is_missing_browser(exc):
                 raise
-            failure = await asyncio.to_thread(install_chromium)
+            failure = await asyncio.to_thread(install_browser, self._config.browser)
             if failure:
                 raise RuntimeError(f"{exc}\n({failure})") from exc
             self._browser = await self._launch()
@@ -207,13 +228,19 @@ class BrowserSession:
             log.debug("Tracing started")
 
     async def _launch(self) -> Browser:
-        # "<-loopback>" stops Chromium sending localhost straight past the proxy
-        proxy = {"server": self._proxy_url, "bypass": "<-loopback>"} if self._egress else None
-        return await self._pw.chromium.launch(
-            headless=self._config.headless,
-            slow_mo=self._config.slow_mo_ms,
-            proxy=proxy,
-        )
+        name = self._config.browser
+        options: dict = {"headless": self._config.headless, "slow_mo": self._config.slow_mo_ms}
+        if self._egress:
+            # Every request, localhost included, must reach the guard's proxy:
+            # "<-loopback>" stops Chromium sending localhost straight past it,
+            # and Firefox needs its own preferences for the same
+            options["proxy"] = {"server": self._proxy_url, "bypass": "<-loopback>" if name == "chromium" else ""}
+            if name == "firefox":
+                options["firefox_user_prefs"] = {
+                    "network.proxy.allow_hijacking_localhost": True,
+                    "network.proxy.no_proxies_on": "",
+                }
+        return await getattr(self._pw, name).launch(**options)
 
     async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         try:

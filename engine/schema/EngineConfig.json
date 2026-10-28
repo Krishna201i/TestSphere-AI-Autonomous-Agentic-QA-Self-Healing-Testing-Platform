@@ -1,6 +1,16 @@
 {
   "description": "Global engine configuration.\n\nSet once at engine start; individual runs may override a subset via\nRunOptions.",
   "properties": {
+    "browser": {
+      "description": "Browser engine to run tests in (ENGINE_BROWSER; Chromium by default)",
+      "enum": [
+        "chromium",
+        "firefox",
+        "webkit"
+      ],
+      "title": "Browser",
+      "type": "string"
+    },
     "heal_threshold": {
       "default": 0.75,
       "description": "Minimum similarity score (0-1) for automatic locator acceptance",
