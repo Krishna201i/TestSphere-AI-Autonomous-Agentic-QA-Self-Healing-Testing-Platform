@@ -5,6 +5,7 @@ the response headers.
 """
 
 import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -321,3 +322,61 @@ def test_typescript_express_patches_are_syntax_checked(tmp_path):
     assert result.files[0].verified in (True, None)  # None only on Node older than 22.13
     if result.files[0].verified is None:
         assert "Node 22.13" in result.files[0].check_note
+
+
+def test_nextjs_config_gets_headers_and_no_powered_by(tmp_path):
+    root = write(tmp_path / "repo", {
+        "next.config.mjs": """
+            /** @type {import('next').NextConfig} */
+            export default {
+              reactStrictMode: true,
+            };
+        """,
+        "package.json": '{"name": "shop", "dependencies": {"next": "15.0.0"}}',
+    })
+    result = build_patch(root, [*HEADERS, finding("SEC-DISCLOSURE", evidence=["x-powered-by: Next.js"])], SITE)
+    text = result.patch
+    assert result.frameworks == ["nextjs"]
+    assert "+  poweredByHeader: false," in text
+    assert '+      { key: "X-Frame-Options", value: "DENY" },' in text
+    assert result.manual == []
+    git_apply(root, text)
+    if shutil.which("node"):
+        assert result.files[0].verified is True
+        # The patched config really answers every path with the headers
+        script = ("import(process.argv[1]).then(async (m) => console.log(JSON.stringify("
+                  "{ powered: m.default.poweredByHeader, rules: await m.default.headers() })));")
+        out = subprocess.run(["node", "-e", script, (root / "next.config.mjs").as_uri()],
+                             capture_output=True, text=True, timeout=30, check=True).stdout
+        loaded = json.loads(out)
+        assert loaded["powered"] is False
+        assert loaded["rules"][0]["source"] == "/(.*)"
+        assert {"key": "X-Content-Type-Options", "value": "nosniff"} in loaded["rules"][0]["headers"]
+
+
+def test_nextjs_typescript_config(tmp_path):
+    root = write(tmp_path / "repo", {"next.config.ts": """
+        import type { NextConfig } from "next";
+
+        const nextConfig: NextConfig = {
+          images: { unoptimized: true },
+        };
+
+        export default nextConfig;
+    """})
+    result = build_patch(root, HEADERS, SITE)
+    assert "+  async headers() {" in result.patch
+    git_apply(root, result.patch)
+
+
+def test_nextjs_config_with_its_own_headers_is_left_to_a_manual_change(tmp_path):
+    root = write(tmp_path / "repo", {"next.config.js": """
+        module.exports = {
+          async headers() {
+            return [{ source: "/api/(.*)", headers: [{ key: "Cache-Control", value: "no-store" }] }];
+          },
+        };
+    """})
+    result = build_patch(root, HEADERS, SITE)
+    assert result.files == []  # never merged into a headers() it did not write
+    assert {m.check_id for m in result.manual} == {"SEC-HDR-FRAME", "SEC-HDR-XCTO", "SEC-HDR-REFERRER"}

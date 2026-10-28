@@ -15,6 +15,8 @@ Given a checkout of the repository and the open findings for its live site,
   settings in ``settings.py``.
 * Express — ``app.disable("x-powered-by")``, a header middleware right after
   ``express()``, ``cors()`` narrowed to the site's origin, cookie options.
+* Next.js — ``async headers()`` for every path and ``poweredByHeader: false``
+  in ``next.config.*`` (left to a manual change when it already has headers()).
 * nginx — ``add_header ... always;`` and ``server_tokens off;`` in the first
   ``server { }`` block (used when no app code is found).
 
@@ -201,6 +203,40 @@ def _express_apps(root: Path) -> list[tuple[Path, re.Match]]:
         if m:
             found.append((path, m))
     return sorted(found, key=lambda f: _rank(f[0], root))
+
+
+# The exported config object: const nextConfig = {, module.exports = {, export default {
+_NEXT_CONFIG_OBJECT = re.compile(
+    r"^(?P<indent>[ \t]*)(?:(?:const|let|var)\s+\w+\s*(?::\s*[\w.]+)?\s*=|module\.exports\s*=|export\s+default)\s*\{[ \t]*$",
+    re.M)
+
+
+def _next_configs(root: Path) -> list[Path]:
+    return sorted((p for p in _files(root, (".js", ".mjs", ".cjs", ".ts"))
+                   if re.fullmatch(r"next\.config\.[cm]?[jt]s", p.name)), key=lambda p: _rank(p, root))
+
+
+def _patch_next(text: str, fix: Fix, ids: str) -> tuple[str, list[tuple[str, str]]]:
+    m = _NEXT_CONFIG_OBJECT.search(text)
+    if not m:
+        return text, []
+    inner = m.group("indent") + "  "
+    done: list[tuple[str, str]] = []
+    block: list[str] = []
+    if "X-Powered-By" in fix.remove_headers and "poweredByHeader" not in text:
+        block.append(f"{inner}poweredByHeader: false,")
+        done.append(("X-Powered-By", "poweredByHeader: false"))
+    if fix.set_headers and not re.search(r"\bheaders\s*[(:]", text):
+        block += [f"{inner}async headers() {{",
+                  f'{inner}  return [{{ source: "/(.*)", headers: [',
+                  *[f'{inner}    {{ key: "{h}", value: "{_q(v)}" }},' for h, v in fix.set_headers.items()],
+                  f"{inner}  ] }}];",
+                  f"{inner}}},"]
+        done += [(h, "next.config headers()") for h in fix.set_headers]
+    if block:
+        line_no = text[: m.end()].count("\n") + 1
+        text = _insert_after_line(text, line_no, "\n".join([f"{inner}// Security headers from TestSphere fix proposals ({ids})", *block]))
+    return text, done
 
 
 def _nginx_confs(root: Path) -> list[Path]:
@@ -523,12 +559,15 @@ def build_patch(root: Path, findings: list[dict], site_url: str | None = None) -
     py_apps = _python_apps(root)
     express = _express_apps(root)
     django = _django_settings(root)
+    nextjs = _next_configs(root)
     nginx = _nginx_confs(root)
     frameworks += sorted({a[1] for a in py_apps})
     if django:
         frameworks.append("django")
     if express:
         frameworks.append("express")
+    if nextjs:
+        frameworks.append("nextjs")
     if nginx:
         frameworks.append("nginx")
 
@@ -567,7 +606,14 @@ def build_patch(root: Path, findings: list[dict], site_url: str | None = None) -
             save(path, new)
         for topic, how in done:
             mark(topic, path, how)
-    if nginx and not (py_apps or express or django):
+    elif nextjs and (fix.set_headers or fix.remove_headers):
+        path = nextjs[0]
+        new, done = _patch_next(current(path), fix, ids)
+        if new != current(path):
+            save(path, new)
+        for topic, how in done:
+            mark(topic, path, how)
+    if nginx and not (py_apps or express or django or nextjs):
         path = nginx[0]
         new, done = _patch_nginx(current(path), fix)
         if new != current(path):
