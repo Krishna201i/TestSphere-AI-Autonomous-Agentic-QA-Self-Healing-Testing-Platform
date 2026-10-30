@@ -86,7 +86,7 @@ def main() -> int:
             os.write(fd, value.encode("utf-8"))
             os.close(fd)
             result = subprocess.run(
-                [aws, "ssm", "put-parameter", "--profile", args.profile, "--region", args.region,
+                [aws, "ssm", "put-parameter", "--profile", args.profile, "--region", args.region,  # nosemgrep: dangerous-subprocess-use-tainted-env-args - an argument list (no shell) from the operator's own command line
                  "--name", f"/testsphere/{key}", "--type", "SecureString", "--overwrite",
                  "--tier", "Advanced" if len(value) > STANDARD_TIER_LIMIT else "Standard",
                  "--value", f"file://{tmp}", "--query", "Version", "--output", "text"],
