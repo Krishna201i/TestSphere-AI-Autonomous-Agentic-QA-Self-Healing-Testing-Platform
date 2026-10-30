@@ -82,7 +82,9 @@ class Backend:
         env = {**os.environ, "DATABASE_BACKEND": "local", "AUTH_REQUIRED": "false", "SCHEDULER_ENABLED": "false",
                "LOCAL_DB_PATH": str(workdir / "db.json"), "ARTIFACTS_DIR": str(workdir / "artifacts"),
                "INGEST_WORKSPACE": str(workdir / "repos"), "LOG_FORMAT": "text", "LOG_LEVEL": "WARNING",
-               "RATE_LIMIT_RUNS_PER_MINUTE": "0", "PIPELINE_EXECUTION": "inline", "ARTIFACT_TRACES": "false"}
+               "RATE_LIMIT_RUNS_PER_MINUTE": "0", "PIPELINE_EXECUTION": "inline", "ARTIFACT_TRACES": "false",
+               # The built-in planner: a real model in .env would time its API, not this server
+               "LLM_PROVIDER": "mock"}
         self.proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.main:app", "--port", str(self.port)],
                                      cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(120):
