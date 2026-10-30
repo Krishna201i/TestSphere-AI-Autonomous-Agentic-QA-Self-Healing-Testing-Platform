@@ -45,7 +45,7 @@ from backend.models import (
 )
 from backend.models.test_execution import TestExecutionStatus
 from backend.notify import notify_run
-from backend.pipeline import ai_plan, suite
+from backend.pipeline import ai_plan, explore, suite
 from backend.services.security_service import record_audit
 from backend.services.test_case_service import TestCaseService
 from backend.services.test_execution_service import TestExecutionService
@@ -515,6 +515,11 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
             row = db.update(TEST_CASES, row["id"], **changes)
         generated.append(row)
 
+    # The written goal, reached once by the AI explorer and replayed from its recording
+    explored, explore_note = await explore.explored_test(db, project, application, external_prefix=GENERATED_PREFIX)
+    if explored is not None:
+        generated.append(explored)
+
     saved = [tc for tc in db.find(TEST_CASES, application_id=application["id"], order_by="id")
              if not str(tc.get("external_id") or "").startswith(GENERATED_PREFIX)]
     detail = f"{len(generated) + len(saved)} tests: {len(generated)} generated ({created} new)"
@@ -524,6 +529,8 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
         detail += f" · left out {len(left_out)} page(s) that did not load: " + ", ".join(left_out[:4])
     if ai_note:
         detail += f" · {ai_note}"
+    if explore_note:
+        detail += f" · {explore_note}"
     return application, generated + saved, detail
 
 

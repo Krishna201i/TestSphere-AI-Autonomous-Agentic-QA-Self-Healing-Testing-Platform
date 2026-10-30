@@ -29,7 +29,7 @@ rollback, and the whole loop runs again on a schedule or on every push.
 | Stage | What it does |
 | --- | --- |
 | **1. Codebase ingestion** | Clones a public repository (or reads a local folder in development) and builds a blueprint: languages, frameworks, dependencies, existing test suites, HTTP routes, committed secrets and debug flags. Nothing in the repository is executed. |
-| **2A. AI QA agent** | Analyzes the live page (rendering JavaScript apps in a real browser), turns the written goal into steps using the values it contains, plans smoke, scenario, content and linked-page tests, and runs them in Playwright. |
+| **2A. AI QA agent** | Analyzes the live page (rendering JavaScript apps in a real browser), turns the written goal into steps using the values it contains, plans smoke, scenario, content and linked-page tests, and runs them in Playwright. With a real model, an AI explorer reaches the goal in a live browser once (opening menus, following tabs, never deleting or paying), verifies the outcome, and records the steps as a test that later runs replay without the model. |
 | **Self-healing** | When a locator breaks, the engine tries stored fallbacks, then a fingerprint scan of the live DOM, scoring attributes, text, position and structure. It refuses look-alikes and elements whose kind changed. |
 | **2B. Attacker agent** | Passive, scope-checked security scan: headers, cookies, CORS, TLS, forms, information disclosure. One GET per page and no payloads, limited to hosts the server allows. |
 | **3. Unified report** | Test results, regressions since the previous run, flaky tests and security findings in one report, with screenshots, DOM snapshots and Playwright traces for every test. |
