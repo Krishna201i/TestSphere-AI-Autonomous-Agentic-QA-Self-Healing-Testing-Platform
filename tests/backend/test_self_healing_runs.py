@@ -580,7 +580,7 @@ async def test_checkbox_steps_and_exact_checks_reach_the_engine():
 
 
 async def test_an_unknown_stored_action_is_not_run_as_a_click():
-    db, _, execution = _setup(_steps({"action": "drag", "target": "#menu"}))
+    db, _, execution = _setup(_steps({"action": "teleport", "target": "#menu"}))
     run = AsyncMock()
     with patch("backend.orchestration.orchestrator.run_test", new=run):
         result = await _service().execute_test_run(db=db, execution_id=execution.id)

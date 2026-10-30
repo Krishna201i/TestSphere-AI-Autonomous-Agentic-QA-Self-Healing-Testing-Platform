@@ -26,6 +26,7 @@ Design notes
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import mimetypes
@@ -125,11 +126,55 @@ async def run_test(
         async with BrowserSession(config, trace_path=f"{artifacts_dir}/_trace.zip",
                                   storage_state=storage_state) as session:
             page = await session.new_page()
-            page.on("dialog", _accept_dialog)
+            downloads: list[str] = []       # files offered during the current step
+            download_tasks: list[asyncio.Task] = []
+            new_tabs: list[Page] = []        # tabs opened during the current step
 
+            async def _save_download(dl: object) -> None:
+                name = safe_segment(getattr(dl, "suggested_filename", "") or "download")
+                dest = Path(artifacts_dir) / "_downloads" / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    await dl.save_as(str(dest))  # type: ignore[attr-defined]
+                    downloads.append(name)
+                except Exception as exc:  # noqa: BLE001 - a failed download is not a test failure
+                    log.info("Could not save a download: %s", exc)
+
+            def _watch(pg: Page) -> None:
+                pg.on("dialog", _accept_dialog)
+                pg.on("download", lambda dl: download_tasks.append(asyncio.ensure_future(_save_download(dl))))
+                pg.on("popup", lambda p: new_tabs.append(p))  # fires as the tab is created
+
+            _watch(page)
             for step in plan.steps:
                 log.info("[%s] Executing step %s (%s)", plan.test_id, step.step_id, step.action)
+                downloads.clear()
+                new_tabs.clear()
+                download_tasks.clear()
+                # Interaction can open a tab or start a download; both arrive just
+                # after the action resolves.  Wait up to ~1s for elements that
+                # link to one, and only a moment (a script's window.open) otherwise
+                grace = await _open_grace(page, step)
                 result = await _execute_step(page, step, config, plan.test_id, artifacts_dir)
+                deadline = time.monotonic() + grace
+                while not (new_tabs or download_tasks) and time.monotonic() < deadline:
+                    await asyncio.sleep(0.05)
+                if download_tasks:
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait(download_tasks, timeout=10)
+                # Follow a newly opened tab, as a user would
+                fresh = [p for p in new_tabs if not p.is_closed()]
+                extra = list(result.console_logs)
+                for p in fresh:
+                    with contextlib.suppress(Exception):
+                        await p.wait_for_load_state("domcontentloaded", timeout=5000)
+                    _watch(p)
+                    extra.append(f"[new tab] {_page_url(p)}")
+                if fresh:
+                    page = fresh[-1]  # subsequent steps act on the newest tab
+                extra += [f"[download] {name}" for name in downloads]
+                if extra != result.console_logs:
+                    result = result.model_copy(update={"console_logs": extra})
                 step_results.append(result)
                 if result.status == StepStatus.FAILED:
                     log.warning(
@@ -294,6 +339,38 @@ async def _execute_step(
         page.remove_listener("dialog", _on_dialog)
 
 
+# Actions that can open a tab or start a download, and how long to wait after
+# one for that to show: long for an element that links to a tab or a file,
+# short for anything else (a script may still call window.open)
+_MAY_OPEN = frozenset({ActionType.CLICK, ActionType.PRESS, ActionType.DRAG})
+_OPEN_GRACE_LINKED_S = 1.0
+_OPEN_GRACE_OTHER_S = 0.15
+_OPENS_SOMETHING_JS = r"""el => {
+  const host = el.closest('a, area, form');
+  const target = ((el.getAttribute('formtarget') || (host && host.getAttribute('target')) || '')).toLowerCase();
+  if (target && !['_self', '_parent', '_top'].includes(target)) return true;
+  if (!host || host.tagName === 'FORM') return false;
+  if (host.hasAttribute('download')) return true;
+  return /\.(pdf|zip|gz|tgz|tar|csv|xlsx?|docx?|pptx?|txt|json|xml|png|jpe?g|gif|svg|mp3|mp4|exe|msi|dmg|apk)([?#]|$)/i
+    .test(host.getAttribute('href') || '');
+}"""
+
+
+async def _open_grace(page: Page, step: Step) -> float:
+    """Seconds to wait after *step* for a new tab or a download (0 for actions that open neither)."""
+    if step.action not in _MAY_OPEN:
+        return 0.0
+    if step.target is None:  # a key press on the page
+        return _OPEN_GRACE_OTHER_S
+    loc = page.locator(step.target.primary_locator).first
+    with contextlib.suppress(PlaywrightError, PlaywrightTimeoutError):
+        # count() answers at once; a missing element (about to be healed) is not waited for
+        if await page.locator(step.target.primary_locator).count() and await loc.evaluate(
+                _OPENS_SOMETHING_JS, timeout=500):
+            return _OPEN_GRACE_LINKED_S
+    return _OPEN_GRACE_OTHER_S
+
+
 async def _accept_dialog(dialog: object) -> None:
     """Answer alert / confirm / prompt as a user pressing OK would (Playwright
     would otherwise dismiss them, so a "Delete? OK" flow always cancelled)."""
@@ -305,7 +382,7 @@ async def _accept_dialog(dialog: object) -> None:
 # passes when nothing matches; press without a target goes to the page)
 _ELEMENT_ACTIONS = frozenset({
     ActionType.CLICK, ActionType.FILL, ActionType.PRESS, ActionType.SELECT, ActionType.CHECK,
-    ActionType.UNCHECK, ActionType.HOVER, ActionType.UPLOAD, ActionType.ASSERT_TEXT, ActionType.ASSERT_VALUE, ActionType.ASSERT_VISIBLE,
+    ActionType.UNCHECK, ActionType.HOVER, ActionType.UPLOAD, ActionType.DRAG, ActionType.ASSERT_TEXT, ActionType.ASSERT_VALUE, ActionType.ASSERT_VISIBLE,
 })
 
 
@@ -472,6 +549,10 @@ async def _perform_action_with_locator(
 
     elif action == ActionType.HOVER:
         await loc.hover(timeout=timeout)
+
+    elif action == ActionType.DRAG:
+        # target is the element to drag; value is the destination's selector
+        await loc.drag_to(page.locator(_require_value(step, "drag")).first, timeout=timeout)
 
     elif action == ActionType.UPLOAD:
         # The value names a file; its content is generated, so a test (or a

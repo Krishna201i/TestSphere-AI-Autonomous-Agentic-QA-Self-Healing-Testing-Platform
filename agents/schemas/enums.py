@@ -112,6 +112,7 @@ class TestAction(str, Enum):
     UNCHECK       Yes             No
     HOVER         Yes             No
     UPLOAD        Yes             Yes (file name)
+    DRAG          Yes             Yes (target selector)
     PRESS         No              Yes (key name)
     WAIT          No              No
     ============  ==============  ==============
@@ -125,6 +126,7 @@ class TestAction(str, Enum):
     UNCHECK = "uncheck"
     HOVER = "hover"
     UPLOAD = "upload"
+    DRAG = "drag"
     PRESS = "press"
     WAIT = "wait"
 

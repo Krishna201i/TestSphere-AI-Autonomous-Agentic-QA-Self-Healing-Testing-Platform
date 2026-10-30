@@ -51,6 +51,7 @@ class ActionType(str, Enum):
     UNCHECK = "uncheck"
     HOVER = "hover"
     UPLOAD = "upload"
+    DRAG = "drag"
     ASSERT_TEXT = "assert_text"
     ASSERT_VISIBLE = "assert_visible"
     ASSERT_HIDDEN = "assert_hidden"

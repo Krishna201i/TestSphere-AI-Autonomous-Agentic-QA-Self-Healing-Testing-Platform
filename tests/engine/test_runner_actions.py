@@ -222,3 +222,111 @@ async def test_a_confirm_dialog_is_answered_ok_and_recorded(site: str) -> None:
     assert result.status == TestStatus.PASSED, [s.error for s in result.steps]
     click = next(s for s in result.steps if s.step_id == "delete")
     assert "[dialog confirm] Delete this item?" in click.console_logs
+
+
+DRAGDROP = """<!doctype html><html><head><title>Drag</title></head><body>
+<div id="src" draggable="true">handle</div>
+<div id="zone">drop here</div>
+<p id="dropped"></p>
+<script>
+const zone = document.getElementById('zone');
+document.getElementById('src').addEventListener('dragstart', e => e.dataTransfer.setData('t', '1'));
+zone.addEventListener('dragover', e => e.preventDefault());
+zone.addEventListener('drop', e => { e.preventDefault(); document.getElementById('dropped').textContent = 'yes'; });
+</script></body></html>"""
+
+TABS = """<!doctype html><html><head><title>Opener</title></head><body>
+<a id="open" href="/other" target="_blank">Open other</a>
+<a id="dl" href="data:text/plain,hello" download="note.txt">Download</a>
+<a id="report" href="/files/report.pdf">Report</a>
+<button id="popup" onclick="window.open('/other')">Pop up</button>
+<button id="plain">Plain</button>
+</body></html>"""
+
+
+class _MultiHandler(BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802
+        body = {"/drag": DRAGDROP, "/tabs": TABS, "/other": "<!doctype html><title>Other</title><h1 id='h'>Other page</h1>"}.get(
+            self.path, "<!doctype html><title>x</title>").encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_):
+        pass
+
+
+@pytest.fixture(scope="module")
+def multisite():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _MultiHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+async def test_drag_moves_an_element_onto_a_target(multisite: str) -> None:
+    plan = TestPlan(test_id="drag", name="drag", base_url=multisite, steps=[
+        Step(step_id="open", action=ActionType.GOTO, value=f"{multisite}/drag"),
+        Step(step_id="drag", action=ActionType.DRAG, target=Target(description="handle", primary_locator="#src"), value="#zone"),
+        Step(step_id="check", action=ActionType.ASSERT_TEXT, target=Target(description="result", primary_locator="#dropped"),
+             expected="yes", exact=True),
+    ])
+    result = await run_test(plan, RunOptions(min_action_timeout_ms=2000))
+    assert result.status == TestStatus.PASSED, [s.error for s in result.steps]
+
+
+async def test_a_click_that_opens_a_new_tab_is_followed(multisite: str) -> None:
+    plan = TestPlan(test_id="tabs", name="tabs", base_url=multisite, steps=[
+        Step(step_id="open", action=ActionType.GOTO, value=f"{multisite}/tabs"),
+        Step(step_id="click", action=ActionType.CLICK, target=Target(description="open", primary_locator="#open")),
+        # This assertion only passes if the run switched to the newly opened tab
+        Step(step_id="check", action=ActionType.ASSERT_TEXT, target=Target(description="heading", primary_locator="#h"),
+             expected="Other page", exact=True),
+    ])
+    result = await run_test(plan, RunOptions(min_action_timeout_ms=2000))
+    assert result.status == TestStatus.PASSED, [s.error for s in result.steps]
+    assert any("[new tab]" in log for log in result.steps[1].console_logs)
+
+
+async def test_a_download_is_captured(multisite: str) -> None:
+    plan = TestPlan(test_id="dl", name="dl", base_url=multisite, steps=[
+        Step(step_id="open", action=ActionType.GOTO, value=f"{multisite}/tabs"),
+        Step(step_id="dl", action=ActionType.CLICK, target=Target(description="download", primary_locator="#dl")),
+    ])
+    result = await run_test(plan, RunOptions(min_action_timeout_ms=2000))
+    # The download is recorded against the step that triggered it
+    await_logs = result.steps[1].console_logs
+    assert any("[download] note.txt" in log for log in await_logs), await_logs
+
+
+async def test_a_tab_a_script_opens_is_followed(multisite: str) -> None:
+    plan = TestPlan(test_id="popup", name="popup", base_url=multisite, steps=[
+        Step(step_id="open", action=ActionType.GOTO, value=f"{multisite}/tabs"),
+        Step(step_id="click", action=ActionType.CLICK, target=Target(description="pop up", primary_locator="#popup")),
+        Step(step_id="check", action=ActionType.ASSERT_TEXT, target=Target(description="heading", primary_locator="#h"),
+             expected="Other page", exact=True),
+    ])
+    result = await run_test(plan, RunOptions(min_action_timeout_ms=2000))
+    assert result.status == TestStatus.PASSED, [s.error for s in result.steps]
+
+
+async def test_only_links_to_a_tab_or_a_file_wait_long_for_one(multisite: str) -> None:
+    from playwright.async_api import async_playwright
+
+    from engine.runner import _OPEN_GRACE_LINKED_S, _OPEN_GRACE_OTHER_S, _open_grace
+
+    def click(selector: str) -> Step:
+        return Step(step_id="c", action=ActionType.CLICK, target=Target(description="x", primary_locator=selector))
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(f"{multisite}/tabs")
+        for selector in ("#open", "#dl", "#report"):
+            assert await _open_grace(page, click(selector)) == _OPEN_GRACE_LINKED_S, selector
+        for selector in ("#plain", "#popup", "#missing"):  # a missing element is not waited for
+            assert await _open_grace(page, click(selector)) == _OPEN_GRACE_OTHER_S, selector
+        fill = Step(step_id="f", action=ActionType.FILL, target=Target(description="x", primary_locator="#plain"), value="v")
+        assert await _open_grace(page, fill) == 0.0
+        await browser.close()

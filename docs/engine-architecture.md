@@ -69,6 +69,7 @@ Executes granular actions against resolved DOM elements:
   - `FILL`: Text input with pre-clearing and typing delay options.
   - `SELECT_OPTION`: Dropdown selection by value or visible label.
   - `HOVER`: Pointer hover for flyout menus and tooltip activations.
+  - `DRAG`: Drags the target element onto the element named by the step's value (a selector).
   - `PRESS_KEY`: Keyboard keystrokes (`Enter`, `Tab`, `Escape`).
   - `ASSERT_VISIBLE`: Verifies presence and visibility of elements.
   - `ASSERT_TEXT`: Verifies text containment within target elements.

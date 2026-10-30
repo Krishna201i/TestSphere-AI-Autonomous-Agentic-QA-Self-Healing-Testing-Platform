@@ -60,6 +60,7 @@ SUPPORTED ACTIONS (use only these):
 | uncheck  | Uncheck a checkbox                    | Yes             | No             |
 | hover    | Move the pointer over an element      | Yes             | No             |
 | upload   | Attach a file to a file input         | Yes             | Yes (file name)|
+| drag     | Drag an element onto another          | Yes             | Yes (target sel)|
 | press    | Press a keyboard key                  | No              | Yes (key name) |
 | wait     | Wait for a condition or fixed time    | No              | No             |
 """

@@ -12,6 +12,7 @@
         "uncheck",
         "hover",
         "upload",
+        "drag",
         "assert_text",
         "assert_visible",
         "assert_hidden",

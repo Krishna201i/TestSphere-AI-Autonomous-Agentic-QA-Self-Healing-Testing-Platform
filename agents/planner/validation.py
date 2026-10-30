@@ -58,6 +58,7 @@ ACTION_REQUIREMENTS: dict[TestAction, tuple[bool, bool]] = {
     TestAction.UNCHECK: (True, False),
     TestAction.HOVER: (True, False),
     TestAction.UPLOAD: (True, True),     # value = file name
+    TestAction.DRAG: (True, True),       # target = source, value = destination selector
     TestAction.PRESS: (False, True),      # value = key name
     TestAction.WAIT: (False, False),
 }

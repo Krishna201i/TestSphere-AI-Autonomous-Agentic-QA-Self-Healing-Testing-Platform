@@ -327,6 +327,7 @@ def map_action_to_engine(action: TestAction) -> ActionType:
         TestAction.UNCHECK: ActionType.UNCHECK,
         TestAction.HOVER: ActionType.HOVER,
         TestAction.UPLOAD: ActionType.UPLOAD,
+        TestAction.DRAG: ActionType.DRAG,
         TestAction.WAIT: ActionType.WAIT_FOR,
     }
     if action not in mapping:

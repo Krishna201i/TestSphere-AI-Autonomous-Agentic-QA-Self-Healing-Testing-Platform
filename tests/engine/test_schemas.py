@@ -125,7 +125,7 @@ def full_test_result(
 
 
 def test_action_type_values() -> None:
-    expected = {"goto", "click", "fill", "press", "select", "check", "uncheck", "hover", "upload", "assert_text", "assert_visible",
+    expected = {"goto", "click", "fill", "press", "select", "check", "uncheck", "hover", "upload", "drag", "assert_text", "assert_visible",
                 "assert_hidden", "assert_url", "assert_value",
                 "wait_for"}
     assert {a.value for a in ActionType} == expected
