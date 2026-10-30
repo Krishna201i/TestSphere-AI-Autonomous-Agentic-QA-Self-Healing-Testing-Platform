@@ -23,7 +23,7 @@ from backend.database.session import get_db
 from backend.database.store import Record, Store
 from backend.models import DEPLOYMENTS, PIPELINE_RUNS, PROJECTS
 from backend.pipeline import deploy, scheduler
-from backend.pipeline.runner import active_run, start_run
+from backend.pipeline.runner import active_run, cancel_run, start_run
 from backend.ratelimit import limit_runs
 from backend.services.project_service import ProjectService
 
@@ -137,6 +137,22 @@ def junit_xml(run: dict[str, Any]) -> str:
         "id": run.get("id"),
     }, "".join(cases))
     return f"<?xml version='1.0' encoding='utf-8'?>\n<testsuites>{suite}</testsuites>"
+
+
+
+
+@router.post("/runs/{run_id}/cancel", status_code=status.HTTP_200_OK)
+def cancel_pipeline_run(
+    run_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict[str, Any]:
+    """Cancel a queued or running pipeline run."""
+    run = ensure_owned(user, db.get(PIPELINE_RUNS, run_id), "Pipeline run")
+    if run["status"] not in ("queued", "running"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run #{run_id} is already {run['status']} \u2014 cannot cancel.",
+        )
+    return cancel_run(db, run)
 
 
 @router.get("/runs/{run_id}/junit")

@@ -71,10 +71,14 @@ def _clone_error(detail: str, auth: GitAuth | None, host: str) -> str:
     if not _AUTH_FAILED.search(detail):
         return f"Clone failed: {detail}"
     if auth:
-        return (f"Clone failed: {host} refused the saved credentials ({detail}). Check that the token has not "
-                "expired and can read this repository (GitHub: Contents read access).")
-    return (f"Clone failed: {detail}. If the repository is private, connect GitHub (Profile → Integrations) "
-            f"or add a Git credential for {host}.")
+        return (f"Clone failed: {host} refused the saved credentials ({detail}). The token may have expired or "
+                "been revoked, or cannot read this repository: reconnect in Profile → Integrations with a token "
+                "that has read access (GitHub: Contents read). A fine-grained GitHub token only reaches your own "
+                "or your organisations' repositories; for one owned by another account, use a classic token "
+                "with the repo scope.")
+    return (f"Clone failed: {detail}. The repository is private or does not exist, and this TestSphere account "
+            f"has no credentials for {host}. Connect GitHub in Profile → Integrations (each sign-in method is a "
+            f"separate account), or add a Git credential for {host}.")
 
 
 def is_git_url(source: str) -> bool:

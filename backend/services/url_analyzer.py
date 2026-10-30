@@ -141,6 +141,11 @@ class URLAnalyzerService:
             dom = await cls._render_in_browser(normalized_url)
             if dom:
                 html, rendered = dom, True
+                # The app's scripts often set the title ("Sign in · Patient portal"
+                # replacing the shell's "CareLink"); tests check the rendered one
+                rendered_title = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+                if rendered_title and rendered_title.group(1).strip():
+                    page_title = re.sub(r"\s+", " ", rendered_title.group(1).strip())
 
         # DOM Element Extraction
         inputs = cls._extract_inputs(html)
@@ -390,7 +395,8 @@ class URLAnalyzerService:
     def _extract_headings(cls, html: str) -> list[str]:
         headings = []
         for match in re.finditer(r"<h[1-3][^>]*>(.*?)</h[1-3]>", html, re.IGNORECASE | re.DOTALL):
-            text = re.sub(r"<[^>]+>", "", match.group(1)).strip()
+            # A <br> is a space to the reader ("Insights.<br>Healthier"); other tags join
+            text = re.sub(r"<[^>]+>", "", re.sub(r"(?i)<br\s*/?>", " ", match.group(1))).strip()
             clean = re.sub(r"\s+", " ", text)
             if clean:
                 headings.append(clean[:60])

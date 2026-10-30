@@ -160,6 +160,7 @@ export const getDeployments = (limit = 20) => request(`/api/pipelines/deployment
 export const quickPipeline = (payload) => request('/api/pipelines/quick', { method: 'POST', body: payload });
 export const getPipelineRuns = (limit = 30) => request(`/api/pipelines/runs?limit=${limit}`);
 export const getPipelineRun = (id) => request(`/api/pipelines/runs/${id}`);
+export const cancelPipelineRun = (id) => request(`/api/pipelines/runs/${id}/cancel`, { method: 'POST' });
 /** The run's tests as JUnit XML (for CI dashboards), as a Blob. */
 export const getRunJunit = (id) => request(`/api/pipelines/runs/${id}/junit`, { raw: true });
 

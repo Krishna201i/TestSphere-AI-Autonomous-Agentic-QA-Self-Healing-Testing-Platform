@@ -560,15 +560,13 @@ async def _perform_action_with_locator(
         await loc.set_input_files(_upload_payload(_require_value(step, "upload")), timeout=timeout)
 
     elif action == ActionType.ASSERT_TEXT:
-        expected = step.expected or ""
-        actual = (await loc.inner_text(timeout=timeout)).strip()
+        expected = " ".join((step.expected or "").split())
+        actual = " ".join((await loc.inner_text(timeout=timeout)).split())
         if step.exact:
-            assert " ".join(actual.split()) == " ".join(expected.split()), (
-                f"assert_text failed: expected exactly {expected!r}, got {actual!r}"
-            )
+            assert actual == expected, f"assert_text failed: expected exactly {_quote(expected)}, got {_quote(actual)}"
         else:
-            assert expected.casefold() in actual.casefold(), (
-                f"assert_text failed: expected {expected!r} in {actual!r}"
+            assert _text_contains(actual, expected), (
+                f"assert_text failed: expected {_quote(expected)} in {_quote(actual)}"
             )
 
     elif action == ActionType.ASSERT_VALUE:
@@ -598,6 +596,28 @@ async def _perform_action_with_locator(
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
+
+
+_QUOTE_MAX = 300
+
+
+def _quote(text: str) -> str:
+    """*text* in quotes for a failure message: long page text is cut to its start."""
+    if len(text) <= _QUOTE_MAX:
+        return f"'{text}'"
+    return f"'{text[:_QUOTE_MAX].rstrip()}…' ({len(text):,} characters)"
+
+
+def _text_contains(actual: str, expected: str) -> bool:
+    """Whether *expected* is in *actual* as a reader sees it: case-insensitive,
+    whitespace collapsed (*inner_text* splits a heading at a <br> or a block),
+    and failing that with whitespace ignored, since a heading read from markup
+    can lose the space a line break stood for ("Insights.Healthier")."""
+    actual, expected = actual.casefold(), expected.casefold()
+    if expected in actual:
+        return True
+    squeeze = str.maketrans("", "", " \t\r\n\f\v ")
+    return bool(expected.translate(squeeze)) and expected.translate(squeeze) in actual.translate(squeeze)
 
 
 def _require_value(step: Step, action_name: str) -> str:

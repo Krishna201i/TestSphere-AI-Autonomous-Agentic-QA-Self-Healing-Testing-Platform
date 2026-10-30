@@ -67,6 +67,7 @@ TRIGGERS = ("manual", "schedule", "webhook")
 GENERATED_PREFIX = "pipe-"
 
 _tasks: set = set()
+_run_tasks: dict[int, asyncio.Task] = {}  # run_id -> Task, for cancellation
 _lock_state: dict[str, Any] = {"loop": None, "lock": None}
 
 
@@ -91,6 +92,18 @@ def active_run(db: Store, project_id: int) -> Record | None:
     return None
 
 
+def cancel_run(db: Store, run: Record) -> Record:
+    """Mark run cancelled in DB and cancel the asyncio Task if it is still running."""
+    state = _RunState(db, run)
+    state.end("Cancelled by user.")
+    db.update(PIPELINE_RUNS, run["id"], status="cancelled")
+    state.doc["status"] = "cancelled"
+    task = _run_tasks.pop(run["id"], None)
+    if task and not task.done():
+        task.cancel()
+    return db.get(PIPELINE_RUNS, run["id"]) or state.doc
+
+
 def create_run(db: Store, project: Record, *, trigger: str, actor: str, detail: str | None = None,
                ingest: bool = False, commit_sha: str | None = None) -> Record:
     if trigger not in TRIGGERS:
@@ -113,7 +126,9 @@ def start_run(db: Store, project: Record, *, trigger: str, actor: str, detail: s
     if settings.PIPELINE_EXECUTION != "worker" or executor is not None:
         task = asyncio.get_running_loop().create_task((executor or execute_run)(run["id"]))
         _tasks.add(task)
+        _run_tasks[run["id"]] = task
         task.add_done_callback(_tasks.discard)
+        task.add_done_callback(lambda t, rid=run["id"]: _run_tasks.pop(rid, None))
     record_audit(db, actor=actor, kind="pipeline", ref=str(run["id"]), owner_uid=project.get("owner_uid"),
                  message=f"Pipeline #{run['id']} queued for {project['name']} ({trigger}{f': {detail}' if detail else ''})")
     return run
@@ -206,6 +221,8 @@ async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None
     run = db.get(PIPELINE_RUNS, run_id)
     if run is None:
         return None
+    if run.get("status") == "cancelled":
+        return run
     async with _run_lock():
         state = _RunState(db, run)
         project = db.get(PROJECTS, run["project_id"])

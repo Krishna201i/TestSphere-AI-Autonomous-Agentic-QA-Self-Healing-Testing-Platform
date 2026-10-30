@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  CheckCircle2, Circle, Copy, Database, GitBranch, Loader2, MinusCircle, Play, RefreshCw, Rocket, Unplug, XCircle, Zap,
+  CheckCircle2, Circle, Copy, Database, Download, GitBranch, Loader2, MinusCircle, Play, RefreshCw, Rocket, Unplug, X, XCircle, Zap,
 } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import {
+  cancelPipelineRun,
   deployProject,
   getPipelineRun,
   getProjectDatabase,
+  getRunJunit,
   linkProjectDatabase,
   quickPipeline,
   rotateWebhookSecret,
@@ -90,7 +92,37 @@ function QuickRun({ onStarted }) {
   );
 }
 
-function RunDetail({ run, onOpen }) {
+function RunDetail({ run, onOpen, onClear, onCancelled }) {
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState(null);
+
+  const isActive = run && ACTIVE.includes(run.status);
+
+  async function handleCancel() {
+    setCancelError(null);
+    setCancelling(true);
+    try {
+      await cancelPipelineRun(run.id);
+      onCancelled();
+    } catch (err) {
+      setCancelError(err.message);
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function handleJunit() {
+    try {
+      const blob = await getRunJunit(run.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `testsphere-run-${run.id}.xml`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { /* silent */ }
+  }
+
   if (!run) {
     return (
       <section className="card">
@@ -106,9 +138,23 @@ function RunDetail({ run, onOpen }) {
         <h3>Run #{run.id} · {run.project_name}</h3>
         <span className="row"><RunStatus status={run.status} /> <span className="muted small">{TRIGGER_LABEL[run.trigger] || run.trigger}{run.trigger_detail ? ` · ${run.trigger_detail}` : ''} · {timeAgo(run.started_at || run.created_at)}</span></span>
       </div>
-      <div className="row">
+      <div className="row" style={{ gap: '0.5rem', flexWrap: 'wrap' }}>
         <button type="button" className="btn btn-sm" onClick={() => onOpen(run.id)}>Open run: steps, screenshots and trace</button>
+        {s && (
+          <button type="button" className="btn btn-sm" onClick={handleJunit} title="Download JUnit XML for CI">
+            <Download size={13} /> JUnit XML
+          </button>
+        )}
+        {isActive && (
+          <button type="button" className="btn btn-sm bad-text" onClick={handleCancel} disabled={cancelling}>
+            <X size={13} /> {cancelling ? 'Cancelling…' : 'Cancel run'}
+          </button>
+        )}
+        <button type="button" className="btn btn-sm btn-ghost" onClick={onClear} title="Deselect this run">
+          <X size={13} /> Clear
+        </button>
       </div>
+      {cancelError && <div className="error-text" role="alert">{cancelError}</div>}
       {run.error && <div className="subbox small cell-wrap bad-text">{run.error}</div>}
 
       <ol className="stage-list">
@@ -151,9 +197,9 @@ function RunDetail({ run, onOpen }) {
             <tbody>
               {run.tests.map((t) => (
                 <tr key={t.execution_id} className="selectable" {...selectableRow(() => onOpen(run.id, t.execution_id), false)}>
-                  <td className="cell-wrap">{t.name}<div className="small muted">{t.category || 'saved'} · execution #{t.execution_id}</div></td>
+                  <td className="cell-name">{t.name}<div className="small muted">{t.category || 'saved'} · execution #{t.execution_id}</div></td>
                   <td><span className="row"><span className={`status ${t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}`}>{t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}</span>{t.flaky && <span className="status FLAKY">Flaky</span>}</span></td>
-                  <td className="small cell-wrap">{t.error ? t.error.split('\n')[0] : '—'}</td>
+                  <td className="small">{t.error ? <div className="cell-clamp" title={t.error}>{t.error.split('\n')[0].replace(/\\n/g, ' ')}</div> : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -423,7 +469,12 @@ export default function Autopilot({ onNavigate }) {
       </div>
 
       <QuickRun onStarted={started} />
-      <RunDetail run={shown} onOpen={(id, exec) => onNavigate('runs', { tab: exec ? `${id}/${exec}` : String(id) })} />
+      <RunDetail
+        run={shown}
+        onOpen={(id, exec) => onNavigate('runs', { tab: exec ? `${id}/${exec}` : String(id) })}
+        onClear={() => setSelectedId(null)}
+        onCancelled={() => { refreshRuns(); refresh(); }}
+      />
 
       <section className="card">
         <div className="card-head"><h3>Projects</h3><span className="muted small">{projects.length}</span></div>

@@ -73,8 +73,10 @@ def test_clone_keeps_the_token_out_of_the_command_and_explains_failures(tmp_path
     assert "https://github.com/a/b" in cmd and not any("ghp_" in part for part in cmd)
     assert env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
     assert "refused the saved credentials" in str(err.value) and "ghp_" not in str(err.value)
+    # Says what to do, including the fine-grained token limit for another account's repository
+    assert "expired" in str(err.value) and "classic token" in str(err.value)
 
-    with pytest.raises(SourceError, match="If the repository is private, connect GitHub"):
+    with pytest.raises(SourceError, match="has no credentials for github.com. Connect GitHub"):
         source.clone("https://github.com/a/b", tmp_path)
 
 

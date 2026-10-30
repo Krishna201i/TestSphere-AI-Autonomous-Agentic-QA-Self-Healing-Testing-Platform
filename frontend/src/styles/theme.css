@@ -579,6 +579,14 @@ table.table { width: 100%; border-collapse: collapse; font-size: var(--fs-base);
 .table tr.row-detail td { background: var(--surface-2); }
 .table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .cell-wrap { overflow-wrap: anywhere; }
+/* A name column next to long text: wide enough to read, broken only between words */
+.cell-name { min-width: 14rem; overflow-wrap: break-word; }
+/* Long text in a table cell: the first lines; the full text is in the title and the row's detail */
+.cell-clamp {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+@media (max-width: 640px) { .cell-name { min-width: 9rem; } }
 
 pre.code {
   margin: 0; padding: var(--s-3) var(--s-4);
@@ -919,6 +927,7 @@ details > ul { margin-top: var(--s-2); }
   .card { box-shadow: none; break-inside: avoid; }
   .grid-2 { grid-template-columns: 1fr 1fr; }
   .table-wrap { overflow: visible; }
+  .cell-clamp { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
 }
 
 /* ── Spacing utilities win over component defaults ───────── */
