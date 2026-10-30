@@ -25,6 +25,8 @@ from backend.models import DEPLOYMENTS, PIPELINE_RUNS, PROJECTS
 from backend.pipeline import deploy, scheduler
 from backend.pipeline.runner import active_run, cancel_run, start_run
 from backend.ratelimit import limit_runs
+from backend.reporting.document import build_report, render_html
+from backend.reporting.pdf import html_to_pdf
 from backend.services.project_service import ProjectService
 
 router = APIRouter(prefix="/pipelines", tags=["Automated Pipeline"])
@@ -160,6 +162,41 @@ def get_run_junit(run_id: int, db: Store = Depends(get_db), user: User = Depends
     run = ensure_owned(user, db.get(PIPELINE_RUNS, run_id), "Pipeline run")
     return Response(content=junit_xml(run), media_type="application/xml",
                     headers={"Content-Disposition": f'attachment; filename="testsphere-run-{run_id}.xml"'})
+
+
+# A report holds page text from the tested site: show it as a static document only
+REPORT_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+
+def _finished_run(db: Store, user: User, run_id: int) -> Record:
+    run = ensure_owned(user, db.get(PIPELINE_RUNS, run_id), "Pipeline run")
+    if run.get("status") not in ("passed", "failed", "cancelled", "interrupted"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The run has not finished yet.")
+    return run
+
+
+def report_html_response(db: Store, run: Record, *, shared: bool = False) -> Response:
+    html_doc = render_html(build_report(db, run), shared=shared)
+    return Response(content=html_doc, media_type="text/html; charset=utf-8",
+                    headers={"Content-Security-Policy": REPORT_CSP, "X-Robots-Tag": "noindex", "Cache-Control": "private, no-store"})
+
+
+async def report_pdf_response(db: Store, run: Record, *, shared: bool = False) -> Response:
+    pdf = await html_to_pdf(render_html(build_report(db, run), shared=shared))
+    return Response(content=pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="testsphere-run-{run["id"]}-report.pdf"', "Cache-Control": "private, no-store"})
+
+
+@router.get("/runs/{run_id}/report")
+def get_run_report(run_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Response:
+    """The run's report as a self-contained HTML document (the PDF's content)."""
+    return report_html_response(db, _finished_run(db, user, run_id))
+
+
+@router.get("/runs/{run_id}/report.pdf")
+async def get_run_report_pdf(run_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Response:
+    """The run's report as a PDF: summary, stages, each failure with its diagnosis and screenshot, all tests."""
+    return await report_pdf_response(db, _finished_run(db, user, run_id))
 
 
 @router.post("/projects/{project_id}/deploy", status_code=status.HTTP_201_CREATED)

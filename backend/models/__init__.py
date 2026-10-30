@@ -41,9 +41,10 @@ INTEGRATIONS = "integrations"
 AGENT_MEMORY = "agent_memory"  # agents.memory.persistent_store.COLLECTION
 API_TOKENS = "api_tokens"
 RATE_LIMITS = "rate_limits"  # RATE_LIMIT_BACKEND=database: recent run starts per user
+REPORT_SHARES = "report_shares"  # read-only links to one run's report (token stored hashed)
 
 __all__ = [
     "TestExecutionStatus", "PROJECTS", "APPLICATIONS", "TEST_CASES", "TEST_EXECUTIONS",
     "SECURITY_FINDINGS", "AUDIT_EVENTS", "BLUEPRINTS", "USERS", "PIPELINE_RUNS", "FIX_PATCHES", "DEPLOYMENTS", "INTEGRATIONS",
-    "AGENT_MEMORY", "API_TOKENS", "RATE_LIMITS",
+    "AGENT_MEMORY", "API_TOKENS", "RATE_LIMITS", "REPORT_SHARES",
 ]

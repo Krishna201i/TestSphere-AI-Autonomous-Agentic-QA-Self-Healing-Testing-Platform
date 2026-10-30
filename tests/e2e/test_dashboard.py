@@ -410,3 +410,64 @@ def test_reports_are_organised_by_run_and_test_type_with_details_for_every_test(
         page.emulate_media(media="print")
         page.pdf(path=os.path.join(shots, "report.pdf"), format="A4", print_background=True)
     page.close()
+
+
+def test_run_page_explains_failures_summarises_the_run_and_shares_its_report(server, browser):
+    diagnosis = {"kind": "ASSERTION_FAILURE", "label": "Check did not hold", "confidence": "high",
+                 "explanation": "The expected application state does not match the observed state.",
+                 "expected": "/hospital/", "actual": "https://carelink.example/",
+                 "next_step": "Compare expected and actual: wrong content is an app bug; an outdated path means the check needs updating."}
+    run = {"id": 52, "project_id": 1, "project_name": "CareLink", "status": "passed", "trigger": "manual",
+           "created_at": "2026-10-31T05:00:00Z", "started_at": "2026-10-31T05:00:00Z", "finished_at": "2026-10-31T05:04:00Z",
+           "stages": [{"key": k, "label": k.title(), "status": "done", "detail": None} for k in STAGE_KEYS],
+           "summary": {"total": 2, "passed": 1, "failed": 0, "quarantined_failed": 1, "healed": 0, "flaky": 0, "findings": None,
+                       "narrative": ["1 of 2 tests passed (50%).", "Nothing that passed in run #50 fails now.",
+                                     "Verdict: the app looks healthy, but review the quarantined failures."]},
+           "tests": [{"test_case_id": 1, "name": "Smoke: CareLink", "execution_id": 61, "status": "PASSED", "category": "smoke"},
+                     {"test_case_id": 2, "name": "AI: Navigate to Hospital portal", "execution_id": 62, "status": "FAILED",
+                      "category": "ai", "quarantined": True, "diagnosis": diagnosis,
+                      "error": "assert_url failed: expected '/hospital/' in 'https://carelink.example/'"}],
+           "regressions": []}
+    execution = {"id": 62, "test_case_id": 2, "status": "FAILED", "duration_ms": 5100, "created_at": "2026-10-31T05:01:00Z",
+                 "diagnosis": diagnosis, "steps": [{"step_id": "s1", "description": "URL contains '/hospital/'", "status": "failed",
+                                                     "error": "assert_url failed: expected '/hospital/' in 'https://carelink.example/'"}]}
+    shares: list[dict] = []
+
+    def share_route(route):
+        if route.request.method == "POST":
+            link = {"id": 1, "run_id": 52, "created_at": "2026-10-31T05:05:00Z", "expires_at": "2026-11-07T05:05:00Z",
+                    "revoked": False, "active": True, "created_by": "Krishna", "url": "https://testsphere.example/api/shared/abc"}
+            shares.append(link)
+            return route.fulfill(status=201, json=link)
+        return route.fulfill(json=[{k: v for k, v in s.items() if k != "url"} for s in shares])
+
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.route("**/api/pipelines/runs/52", lambda r: r.fulfill(json=run))
+    page.route("**/api/test-executions/62", lambda r: r.fulfill(json=execution))
+    page.route("**/api/pipelines/runs/52/shares", share_route)
+    page.route("**/api/pipelines/shares/1", lambda r: r.fulfill(status=204, body=""))
+    page.goto(f"{server}/#/runs/52/62")
+    page.wait_for_selector(".diagnosis")
+
+    assert "Verdict: the app looks healthy" in page.locator(".run-summary").first.inner_text()
+    why = page.locator(".diagnosis").inner_text()
+    assert "Check did not hold" in why and "high confidence" in why and "/hospital/" in why and "Next step:" in why
+    assert page.get_by_role("button", name="PDF report").count() == 1
+
+    page.get_by_role("button", name="Create read-only link").click()
+    page.wait_for_selector("#share-url")
+    assert page.locator("#share-url").input_value() == "https://testsphere.example/api/shared/abc"
+    assert "expires" in page.locator("section[aria-labelledby=share-title]").inner_text()
+
+    page.add_script_tag(path=str(AXE))
+    violations = page.evaluate("tags => axe.run(document, {runOnly: {type: 'tag', values: tags}}).then(r => r.violations)", WCAG_AA)
+    assert [f"{v['id']} {[n['target'] for n in v['nodes']]}: {v['help']}" for v in violations] == []
+    if os.getenv("E2E_SCREENSHOT_DIR"):
+        page.screenshot(path=os.path.join(os.environ["E2E_SCREENSHOT_DIR"], "run-page.png"), full_page=True)
+
+    page.get_by_role("button", name="Revoke link 1").click()
+    page.wait_for_selector("#share-url", state="detached")
+    assert errors == []
+    page.close()

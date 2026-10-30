@@ -7,15 +7,17 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRight, Check, Download, ExternalLink, FileCode2, Image, Link2, ShieldOff, Shield, Wand2, X,
+  ArrowLeft, ArrowRight, Check, Download, ExternalLink, FileCode2, FileText, Image, Link2, ShieldOff, Shield, Wand2, X,
 } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import {
-  acceptVisual, getArtifact, getPipelineRun, getRunJunit, getTestExecution, updateTestCase,
+  acceptVisual, getArtifact, getPipelineRun, getRunJunit, getRunReportPdf, getTestExecution, updateTestCase,
 } from '../services/api';
 import { timeAgo, toDate } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
 import { Skeleton } from '../components/charts';
+import { Diagnosis, RunSummary } from '../components/TestResult';
+import ShareReport from '../components/ShareReport';
 import { RunStatus, StageIcon } from './Autopilot';
 
 const ACTIVE = ['queued', 'running'];
@@ -186,6 +188,7 @@ function ExecutionDetail({ test, onQuarantine, onVisualAccepted }) {
         {test.quarantined && <span className="pill gray">Quarantined</span>}
         {test.visual_changed && <span className="pill violet">Visual change</span>}
       </div>
+      {test.status === 'FAILED' && <Diagnosis diagnosis={ex?.diagnosis || test.diagnosis} />}
       <div className="row">
         {ex?.trace && (
           <>
@@ -259,6 +262,18 @@ export default function RunDetail({ params, onNavigate }) {
   const [run, setRun] = useState(null);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+
+  async function downloadReport() {
+    setPdfBusy(true);
+    try {
+      saveBlob(await getRunReportPdf(run.id), `testsphere-run-${run.id}-report.pdf`);
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setPdfBusy(false);
+    }
+  }
   const [notice, setNotice] = useState(null); // e.g. a download that failed
   const selectedExec = Number(execParam) || null;
 
@@ -334,6 +349,11 @@ export default function RunDetail({ params, onNavigate }) {
           </p>
         </div>
         <div className="page-actions">
+          {!ACTIVE.includes(run.status) && (
+            <button type="button" className="btn btn-primary" onClick={downloadReport} disabled={pdfBusy}>
+              <FileText size={16} /> {pdfBusy ? 'Preparing PDF…' : 'PDF report'}
+            </button>
+          )}
           {tests.length > 0 && (
             <button type="button" className="btn" onClick={() => getRunJunit(run.id).then((b) => saveBlob(b, `testsphere-run-${run.id}.xml`)).catch((err) => setNotice(err.message))}>
               <Download size={16} /> JUnit XML
@@ -351,6 +371,7 @@ export default function RunDetail({ params, onNavigate }) {
         </div>
       )}
       {notice && <div className="alert-banner inline" role="alert">{notice}</div>}
+      <RunSummary lines={s?.narrative} />
 
       <ol className="stage-list" aria-label="Stages">
         {run.stages.map((st) => (
@@ -377,6 +398,8 @@ export default function RunDetail({ params, onNavigate }) {
           )}
         </div>
       )}
+
+      {!ACTIVE.includes(run.status) && <ShareReport runId={run.id} />}
 
       <div className={selected ? 'grid-side-main' : ''}>
         <section className="card">

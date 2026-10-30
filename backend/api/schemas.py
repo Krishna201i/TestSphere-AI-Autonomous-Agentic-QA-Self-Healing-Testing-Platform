@@ -308,3 +308,5 @@ class TestExecutionDetail(TestExecutionResponse):
     steps: list[ExecutionStep] = Field(default_factory=list)
     trace: str | None = None
     visual: dict[str, Any] | None = Field(None, description="Visual check: changed, ratio, current/diff/baseline keys")
+    diagnosis: dict[str, Any] | None = Field(
+        None, description="Why it failed: kind, label, explanation, next_step, confidence, expected, actual")

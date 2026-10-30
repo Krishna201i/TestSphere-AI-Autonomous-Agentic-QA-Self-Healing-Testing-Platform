@@ -46,6 +46,7 @@ from backend.models import (
 from backend.models.test_execution import TestExecutionStatus
 from backend.notify import notify_run
 from backend.pipeline import ai_plan, explore, suite
+from backend.reporting.summary import run_summary
 from backend.services.security_service import record_audit
 from backend.services.test_case_service import TestCaseService
 from backend.services.test_execution_service import TestExecutionService
@@ -586,12 +587,12 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
     for idx, tc in enumerate(test_cases, start=1):
         state.stage("execute", "running", f"Running {idx} of {len(test_cases)}: {tc['name']}")
         execution = TestExecutionService.create_execution(db, test_case_id=tc["id"], owner_uid=owner)
-        visual, duration_ms = None, None
+        visual, duration_ms, diagnosis = None, None, None
         try:
             res = await orch.execute_test_run(db=db, execution_id=execution["id"], options=RunOptions(headless=True),
                                               **_signed_in_kwargs(tc, sign_in_first, session))
             status, error = res.get("status", "FAILED"), res.get("error_message")
-            visual, duration_ms = res.get("visual"), res.get("duration_ms")
+            visual, duration_ms, diagnosis = res.get("visual"), res.get("duration_ms"), res.get("diagnosis")
         except StoreUnavailableError:
             raise
         except Exception as exc:
@@ -604,7 +605,7 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
                         "execution_id": execution["id"], "status": status, "error": error, "healed": healed,
                         "quarantined": bool(tc.get("quarantined")),
                         "visual_changed": bool((visual or {}).get("changed")),
-                        "duration_ms": duration_ms, **_what_it_checks(tc)})
+                        "duration_ms": duration_ms, "diagnosis": diagnosis, **_what_it_checks(tc)})
         state.save(tests=results)
     all_failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value)
     failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value and not r.get("quarantined"))
@@ -695,6 +696,7 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
         "visual_changes": sum(1 for r in results if r.get("visual_changed")),
         "database": state.doc.get("database"),
     }
+    summary["narrative"] = run_summary(summary, results, regressions)
     status = "failed" if failed else "passed"
     state.stage("report", "done", f"{summary['passed']}/{summary['total']} passed"
                                   + (f" · {len(regressions)} regression(s)" if regressions else "")

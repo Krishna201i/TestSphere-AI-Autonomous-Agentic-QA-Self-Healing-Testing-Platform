@@ -17,7 +17,7 @@ import {
   updateProject,
   webhookUrl,
 } from '../services/api';
-import { ResultBadges, ResultDetail } from '../components/TestResult';
+import { ResultBadges, ResultDetail, RunSummary } from '../components/TestResult';
 import { timeAgo, timeUntil, urlError } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
 
@@ -179,6 +179,8 @@ function RunDetail({ run, onOpen, onClear, onCancelled }) {
           <div className="stat-tile"><div className="v">{(run.regressions || []).length}</div><div className="l">Regressions</div></div>
         </div>
       )}
+
+      <RunSummary lines={s?.narrative} />
 
       {(run.regressions || []).length > 0 && (
         <div className="subbox">

@@ -70,6 +70,7 @@ from backend.orchestration.converters import (
     learned_targets_by_locator,
     test_case_to_engine_plan,
 )
+from backend.reporting.diagnosis import diagnosis_of
 from engine.runner import run_test
 from engine.schemas import (
     EngineConfig,
@@ -567,6 +568,12 @@ class PlatformWorkflowOrchestrator:
 
         # Retrieve AI state & dashboard summary
         state = self.ai_orchestrator.get_state(workflow_id)
+        # Why it failed, for the run page and reports (the analyzer ran during the workflow)
+        diagnosis = None
+        if final_status == TestExecutionStatus.FAILED.value and state is not None:
+            diagnosis = diagnosis_of(state.failure_analysis)
+            if diagnosis:
+                execution = db.update(TEST_EXECUTIONS, execution.id, diagnosis=diagnosis)
         dashboard_summary = (
             build_dashboard_summary(state)
             if state
@@ -594,6 +601,7 @@ class PlatformWorkflowOrchestrator:
             "engine_steps": [st.model_dump(mode="json") for st in shown_result.steps],
             "visual": visual,
             "analysis": analysis_data,
+            "diagnosis": diagnosis,
         }
 
     def _submit_ready(self, engine_result: EngineTestResult, workflow_id: str, test_id: str,

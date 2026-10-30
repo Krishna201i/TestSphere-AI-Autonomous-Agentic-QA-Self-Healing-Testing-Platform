@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from agents.analyzer.schemas import (
     FailureAnalysis,
@@ -62,6 +63,22 @@ from agents.schemas.enums import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ── The engine's check failures ───────────────────────────────
+
+# "assert_url failed: …", "assert_text failed: …", "assert_visible failed: …"
+_ENGINE_CHECK_FAILED = re.compile(r"\bassert_[a-z]+ failed\b")
+# Expected and actual in the engine's wording: "expected 'X' in 'Y'",
+# "expected exactly 'X', got 'Y'", "expected 'X', got 'Y'"
+_EXPECTED_ACTUAL = re.compile(
+    r"expected (?:exactly )?'(?P<expected>.*?)'(?:,? got | in )'(?P<actual>.*?)'(?: \(|$)", re.DOTALL)
+
+
+def engine_expected_actual(error_message: str) -> tuple[str, str] | None:
+    """Expected and actual named in an engine check failure, when it names both."""
+    match = _EXPECTED_ACTUAL.search(error_message or "")
+    return (match.group("expected"), match.group("actual")) if match else None
 
 
 # ── Missing-element detection ─────────────────────────────────
@@ -541,7 +558,15 @@ class FailureAnalyzerAgent:
             or "assert failed" in error_lower
             or "assert error" in error_lower
             or "mismatch" in error_lower
+            or bool(_ENGINE_CHECK_FAILED.search(error_lower))
         )
+        # The engine names expected and actual in its message; use them when
+        # the context did not carry them separately
+        if (failure.expected_result is None or failure.actual_result is None) and is_assertion_keyword:
+            named = engine_expected_actual(failure.error_message)
+            if named:
+                failure = failure.model_copy(update={"expected_result": failure.expected_result or named[0],
+                                                     "actual_result": failure.actual_result or named[1]})
 
         # Also check if expected ≠ actual (explicit state mismatch)
         has_state_mismatch = (

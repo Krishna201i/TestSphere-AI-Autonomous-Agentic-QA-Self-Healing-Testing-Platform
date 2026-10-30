@@ -1,8 +1,8 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Download, FileJson, Printer, Search } from 'lucide-react';
+import { Download, FileJson, FileText, Printer, Search } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
-import { getPipelineRuns } from '../services/api';
-import { ResultBadges, ResultDetail } from '../components/TestResult';
+import { getPipelineRuns, getRunReportPdf } from '../services/api';
+import { ResultBadges, ResultDetail, RunSummary } from '../components/TestResult';
 import { SEVERITY_ORDER, formatDuration, groupedResults, resultLabel, testDetail, timeAgo, toDate } from '../lib/derive';
 import { RunStatus } from './Autopilot';
 import usePersistentState from '../lib/usePersistentState';
@@ -191,6 +191,28 @@ function download(name, type, text) {
 
 const csvCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
+/** Downloads one run's PDF report (made on the server: summary, failures with diagnosis and screenshots, all tests). */
+function RunPdfButton({ runId }) {
+  const [state, setState] = useState(null);  // null | 'busy' | error message
+  async function save() {
+    setState('busy');
+    try {
+      const url = URL.createObjectURL(await getRunReportPdf(runId));
+      const a = Object.assign(document.createElement('a'), { href: url, download: `testsphere-run-${runId}-report.pdf` });
+      a.click();
+      URL.revokeObjectURL(url);
+      setState(null);
+    } catch (err) {
+      setState(err.message);
+    }
+  }
+  return (
+    <button type="button" className="btn btn-sm no-print" onClick={save} disabled={state === 'busy'} title={state && state !== 'busy' ? state : 'Download this run as a PDF report'}>
+      <FileText size={14} /> {state === 'busy' ? 'Preparing…' : 'PDF report'}
+    </button>
+  );
+}
+
 /** One run in the report: what ran, when, and its tests grouped by type (failures first). */
 function RunReport({ run, tests, onNavigate, printOnly }) {
   const s = run.summary || {};
@@ -204,9 +226,10 @@ function RunReport({ run, tests, onNavigate, printOnly }) {
     <section className={`card report-run ${printOnly ? 'print-only-block' : ''}`} aria-label={`Run ${run.id}`}>
       <div className="card-head">
         <h3>Run #{run.id} · {run.project_name}</h3>
-        <span className="row"><RunStatus status={run.status} /><button type="button" className="btn btn-sm no-print" onClick={() => open()}>Open run</button></span>
+        <span className="row"><RunStatus status={run.status} /><RunPdfButton runId={run.id} /><button type="button" className="btn btn-sm no-print" onClick={() => open()}>Open run</button></span>
       </div>
       <p className="muted small report-run-meta">{meta.join(' · ')}</p>
+      <RunSummary lines={s.narrative} />
       {tests.length === 0 ? <div className="empty">No tests ran in this run.</div> : groupedResults(tests).map((g) => {
         const failed = g.tests.filter((t) => t.status === 'FAILED').length;
         return (

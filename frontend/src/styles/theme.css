@@ -599,6 +599,19 @@ table.table { width: 100%; border-collapse: collapse; font-size: var(--fs-base);
 .report-table .cell-name { min-width: 0; }
 @media (max-width: 640px) { .report-table { table-layout: auto; } }
 .print-only-block { display: none; }
+/* Why a test failed (run page) and a run in plain sentences */
+.diagnosis {
+  display: flex; flex-direction: column; gap: var(--s-2);
+  padding: var(--s-3); border: 1px solid var(--danger-border); border-left-width: 3px;
+  border-radius: var(--r-md); background: var(--surface-2);
+}
+.run-summary {
+  display: flex; flex-direction: column; gap: var(--s-1);
+  padding: var(--s-3) var(--s-4); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2);
+}
+.run-verdict { font-weight: var(--fw-semibold); }
+.share-fresh { display: flex; flex-direction: column; gap: var(--s-1); }
+.share-fresh .input { flex: 1; min-width: 0; }
 
 pre.code {
   margin: 0; padding: var(--s-3) var(--s-4);

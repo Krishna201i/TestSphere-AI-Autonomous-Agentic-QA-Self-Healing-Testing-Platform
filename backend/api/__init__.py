@@ -12,6 +12,8 @@ from backend.api.patches import router as patches_router
 from backend.api.pipelines import router as pipelines_router
 from backend.api.projects import router as projects_router
 from backend.api.security import router as security_router
+from backend.api.shares import public_router as shared_reports_router
+from backend.api.shares import router as shares_router
 from backend.api.system import router as system_router
 from backend.api.test_cases import router as test_cases_router
 from backend.api.test_executions import router as test_executions_router
@@ -24,6 +26,8 @@ __all__ = [
     "patches_router",
     "pipelines_router",
     "webhooks_router",
+    "shares_router",
+    "shared_reports_router",
     "ingest_router",
     "system_router",
     "audit_router",

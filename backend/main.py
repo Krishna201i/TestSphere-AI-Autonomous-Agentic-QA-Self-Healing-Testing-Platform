@@ -28,6 +28,8 @@ from backend.api import (
     pipelines_router,
     projects_router,
     security_router,
+    shared_reports_router,
+    shares_router,
     system_router,
     test_cases_router,
     test_executions_router,
@@ -145,6 +147,8 @@ api_routers = [
     integrations_router,
     patches_router,
     pipelines_router,
+    shares_router,
+    shared_reports_router,
     webhooks_router,
 ]
 for router in api_routers:

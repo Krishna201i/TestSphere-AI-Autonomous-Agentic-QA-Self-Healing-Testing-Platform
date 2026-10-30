@@ -163,6 +163,10 @@ export const getPipelineRun = (id) => request(`/api/pipelines/runs/${id}`);
 export const cancelPipelineRun = (id) => request(`/api/pipelines/runs/${id}/cancel`, { method: 'POST' });
 /** The run's tests as JUnit XML (for CI dashboards), as a Blob. */
 export const getRunJunit = (id) => request(`/api/pipelines/runs/${id}/junit`, { raw: true });
+export const getRunReportPdf = (id) => request(`/api/pipelines/runs/${id}/report.pdf`, { raw: true });
+export const createRunShare = (id, days = 7) => request(`/api/pipelines/runs/${id}/shares`, { method: 'POST', body: { days } });
+export const getRunShares = (id) => request(`/api/pipelines/runs/${id}/shares`);
+export const revokeRunShare = (shareId) => request(`/api/pipelines/shares/${shareId}`, { method: 'DELETE' });
 
 export const getMe = () => request('/api/me');
 export const recordLogin = () => request('/api/me/login', { method: 'POST' });
