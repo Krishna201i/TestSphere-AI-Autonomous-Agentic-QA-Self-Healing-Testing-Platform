@@ -4,6 +4,7 @@ Store the backend's secrets in SSM Parameter Store, encrypted, for the EC2 serve
     python deploy/aws-ec2/store-secrets.py                 # from the repository root
     python deploy/aws-ec2/store-secrets.py --env-file path/to/.env
     python deploy/aws-ec2/store-secrets.py --env-file render.env --all   # every setting in the file
+    python deploy/aws-ec2/store-secrets.py --env-file render.env --only TOKEN_ENCRYPTION_KEY,LLM_TIMEOUT
 
 Reads the keys below from the .env file (FIREBASE_CREDENTIALS may be a path to
 the service-account JSON or the JSON itself) and writes each one as a
@@ -49,9 +50,11 @@ def main() -> int:
     parser.add_argument("--profile", default="testsphere")
     parser.add_argument("--region", default="ap-southeast-2")
     parser.add_argument("--all", action="store_true", help="store every setting in the file, not only KEYS")
+    parser.add_argument("--only", default="", help="comma-separated names: store just these settings from the file")
     args = parser.parse_args()
 
-    aws = shutil.which("aws") or str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Amazon/AWSCLIV2/aws.exe")
+    # On PATH, else where the AWS CLI's Windows per-user installer puts it
+    aws = shutil.which("aws") or str(Path.home() / "AppData/Local/Programs/Amazon/AWSCLIV2/aws.exe")
     env = read_env(Path(args.env_file))
     creds = env.get("FIREBASE_CREDENTIALS", "")
     if creds and not creds.lstrip().startswith("{"):
@@ -65,7 +68,9 @@ def main() -> int:
         env["FIREBASE_CREDENTIALS"] = json.dumps(json.loads(creds), separators=(",", ":"))
 
     keys = KEYS
-    if args.all:
+    if args.only:
+        keys = [k.strip() for k in args.only.split(",") if k.strip()]
+    elif args.all:
         keys = [k for k in env if k not in SERVER_SET and not k.startswith("RENDER")]
         skipped = sorted(k for k in env if k not in keys)
         if skipped:
