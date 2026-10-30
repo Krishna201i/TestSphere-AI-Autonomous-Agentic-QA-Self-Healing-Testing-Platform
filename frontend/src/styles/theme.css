@@ -983,3 +983,12 @@ details > ul { margin-top: var(--s-2); }
   .timeline li { grid-template-columns: 72px 12px 1fr; }
   .auth-main { padding: var(--s-8) var(--s-4); }
 }
+
+/* AI triage note on a security finding (Attacker Agent) */
+.ai-note {
+  margin: var(--s-3) 0; padding: var(--s-3);
+  border: 1px solid var(--accent-border); border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
+.ai-note-head { display: flex; align-items: center; gap: var(--s-2); font-weight: var(--fw-medium); }
+.ai-note p { margin: var(--s-2) 0 0; }

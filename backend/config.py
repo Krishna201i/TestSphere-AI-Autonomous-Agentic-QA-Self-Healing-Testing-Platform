@@ -187,6 +187,13 @@ class Settings(BaseSettings):
         default_factory=lambda: os.getenv("SECURITY_ACTIVE_SCAN", "false").lower() in ("true", "1"))
     SECURITY_ACTIVE_MAX_REQUESTS: int = Field(
         default_factory=lambda: max(1, int(os.getenv("SECURITY_ACTIVE_MAX_REQUESTS", "300"))))
+    # AI triage of scan findings (prioritize, explain, draft fixes). Like the
+    # planner: "auto" uses it when a real model is configured, else "on"/"off".
+    # It only reasons over findings the scanners already produced in scope; it
+    # never contacts the target itself.
+    SECURITY_AI: str = Field(default_factory=lambda: os.getenv("SECURITY_AI", "auto").lower())
+    SECURITY_AI_TIMEOUT: float = Field(
+        default_factory=lambda: float(os.getenv("SECURITY_AI_TIMEOUT", "60")))
 
     # Agent healing memory: "database" persists it (survives restarts),
     # "memory" keeps it in-process only (tests).

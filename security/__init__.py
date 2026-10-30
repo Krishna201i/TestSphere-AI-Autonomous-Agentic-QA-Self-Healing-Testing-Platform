@@ -5,6 +5,7 @@ Scope-checked scanning: ``passive_scanner`` (safe, always on) and
 """
 
 from security.active_scanner import ACTIVE_CHECK_IDS, ActiveScanError, ActiveScanner
+from security.ai import AIInsight, triage as ai_triage
 from security.findings import (
     Finding,
     FindingSource,
@@ -20,4 +21,5 @@ __all__ = [
     "Finding", "FindingSource", "FindingStatus", "RetestResult", "Severity", "dedupe",
     "PassiveScanner", "ScanError", "ActiveScanner", "ActiveScanError", "ACTIVE_CHECK_IDS",
     "OutOfScopeError", "ScopePolicy",
+    "AIInsight", "ai_triage",
 ]

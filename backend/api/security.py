@@ -25,6 +25,7 @@ from backend.database.session import get_db
 from backend.database.store import Store
 from backend.ratelimit import limit_runs
 from backend.services import security_service as store
+from security import ai as security_ai
 from security import (
     ACTIVE_CHECK_IDS,
     ActiveScanError,
@@ -113,8 +114,31 @@ async def scan(
         store.record_audit(db, actor=actor, kind="scan", level="error", message=f"Scan refused/failed for {req.url}: {exc}",
                            owner_uid=user.uid)
         raise _translate(exc) from exc
-    return scan_result(db, scanner, snap, req.url, actor=actor, owner_uid=None if user.local else user.uid,
-                       extra_findings=active_findings)
+    result = scan_result(db, scanner, snap, req.url, actor=actor, owner_uid=None if user.local else user.uid,
+                         extra_findings=active_findings)
+    # Best-effort AI triage: reasons only over findings already produced in
+    # scope, never contacts the target, and leaves the result untouched on any
+    # failure.  analyze() re-runs on the already-fetched snapshot (cheap, no I/O).
+    if security_ai.enabled():
+        await _attach_ai(result, req.url, scanner.analyze(snap) + active_findings)
+    return result
+
+
+async def _attach_ai(result: dict[str, Any], url: str, findings: list[Finding]) -> None:
+    """Annotate each returned finding with the model's triage, in place."""
+    insights = await security_ai.triage(url, findings)
+    if not insights:
+        return
+    for row in result["findings"]:
+        insight = insights.get(row.get("key"))
+        if insight:
+            row["ai"] = insight.model_dump()
+    # Surface the model's ordering without touching severity: most urgent first,
+    # then fall back to the existing (severity) order for anything unranked.
+    ranked = {row["key"]: row["ai"]["priority"] for row in result["findings"] if row.get("ai", {}).get("priority")}
+    if ranked:
+        result["findings"].sort(key=lambda r: ranked.get(r.get("key"), 10_000))
+        result["ai_triage"] = True
 
 
 def scan_result(db: Store, scanner: PassiveScanner, snap, url: str, *, actor: str, owner_uid: str | None,

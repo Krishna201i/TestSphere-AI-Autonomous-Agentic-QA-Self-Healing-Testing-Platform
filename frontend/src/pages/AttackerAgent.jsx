@@ -124,6 +124,13 @@ export default function AttackerAgent({ onNavigate }) {
             <h3>{selected.title}</h3>
             <span className={`sev ${selected.severity}`}>{selected.severity}</span>
           </div>
+          {selected.ai && (
+            <div className="ai-note">
+              <div className="ai-note-head"><span className="pill blue">AI triage</span>{selected.ai.summary}</div>
+              {selected.ai.explanation && <p className="muted small">{selected.ai.explanation}</p>}
+              {selected.ai.remediation && <p><b>Suggested fix:</b> {selected.ai.remediation}</p>}
+            </div>
+          )}
           <dl className="kv">
             <dt>Check</dt><dd className="mono">{selected.check_id}</dd>
             <dt>Component</dt><dd>{selected.component}</dd>

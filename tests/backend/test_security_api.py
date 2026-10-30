@@ -54,6 +54,44 @@ def test_scan_returns_sorted_findings_and_summary(client) -> None:
     assert all(len(f["key"]) == 16 and f["status"] == "open" for f in body["findings"])
 
 
+def test_ai_triage_enriches_and_reorders_findings(client, monkeypatch) -> None:
+    """When AI triage is on, each finding carries `ai` and is ordered by priority."""
+    from backend.api import security as sec
+    from security.ai import AIInsight
+
+    async def fake_triage(url, findings, **kw):
+        # Rank one real finding first regardless of severity.
+        out = {}
+        for f in findings:
+            pri = 1 if f.check_id == "SEC-HDR-XCTO" else 5
+            out[f.key] = AIInsight(priority=pri, summary=f"note:{f.check_id}",
+                                   explanation="why", remediation="do X")
+        return out
+
+    monkeypatch.setattr(sec.security_ai, "enabled", lambda: True)
+    monkeypatch.setattr(sec.security_ai, "triage", fake_triage)
+
+    body = _scan(client)
+    assert body.get("ai_triage") is True
+    assert body["findings"][0]["check_id"] == "SEC-HDR-XCTO"  # AI priority wins ordering
+    assert all(f["ai"]["summary"] == f"note:{f['check_id']}" for f in body["findings"])
+
+
+def test_ai_triage_failure_leaves_findings_intact(client, monkeypatch) -> None:
+    """A triage that returns nothing must not alter the rule-based result."""
+    from backend.api import security as sec
+
+    async def empty_triage(url, findings, **kw):
+        return {}
+
+    monkeypatch.setattr(sec.security_ai, "enabled", lambda: True)
+    monkeypatch.setattr(sec.security_ai, "triage", empty_triage)
+
+    body = _scan(client)
+    assert "ai_triage" not in body
+    assert all("ai" not in f for f in body["findings"])
+
+
 def test_out_of_scope_is_403_and_audited(client) -> None:
     resp = client.post("/api/security/scan", json={"url": "https://elsewhere.test/"})
     assert resp.status_code == 403

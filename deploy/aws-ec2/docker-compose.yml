@@ -19,6 +19,14 @@ x-testsphere: &testsphere
     # The dashboard is served by the API on the same origin, so no CORS origins
     DASHBOARD_URL: https://${DOMAIN}
     LOG_FORMAT: json
+    # Security scanning scope: ONLY hosts we own or are authorized to test
+    # (loopback is always allowed). List individual hosts, never a shared
+    # platform apex (e.g. vercel.app, onrender.com, hf.space) — that would
+    # authorize attacks on other people's apps. Add a new owned host here.
+    SECURITY_SCAN_ALLOWED_HOSTS: "54-153-148-247.sslip.io,test-sphere-ai-autonomous-agentic-q-brown.vercel.app"
+    # Active (DAST) scanning sends real XSS/SQLi/open-redirect payloads.
+    # On for authorized testing — aim it at staging/demo, not live prod data.
+    SECURITY_ACTIVE_SCAN: "true"
   volumes:
     - testsphere-data:/app/data   # artifacts (screenshots, traces) the API serves and the worker writes
 
