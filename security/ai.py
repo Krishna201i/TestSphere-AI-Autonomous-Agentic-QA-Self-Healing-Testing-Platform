@@ -51,7 +51,6 @@ class AIInsight(BaseModel):
 def enabled() -> bool:
     """True when AI triage should run (mirrors the planner's gate)."""
     from agents.llm.config import LLMConfig
-
     from backend.config import settings
 
     mode = settings.SECURITY_AI
@@ -132,7 +131,7 @@ async def triage(
             from agents.llm.factory import create_llm_client
 
             client = create_llm_client()
-        except Exception as exc:  # misconfigured provider, missing key, …
+        except Exception as exc:  # noqa: BLE001 - misconfigured provider, missing key, …
             logger.warning("security AI triage disabled: %s", exc)
             return {}
 
@@ -144,10 +143,10 @@ async def triage(
 
     try:
         raw = await asyncio.wait_for(client.generate_json(request), timeout=timeout)
-    except (asyncio.TimeoutError, LLMError) as exc:
+    except (TimeoutError, LLMError) as exc:
         logger.warning("security AI triage failed (%s); keeping rule-based findings", exc)
         return {}
-    except Exception as exc:  # never let triage break a scan
+    except Exception as exc:  # noqa: BLE001 - never let triage break a scan
         logger.warning("security AI triage errored (%s); keeping rule-based findings", exc)
         return {}
 

@@ -25,7 +25,6 @@ from backend.database.session import get_db
 from backend.database.store import Store
 from backend.ratelimit import limit_runs
 from backend.services import security_service as store
-from security import ai as security_ai
 from security import (
     ACTIVE_CHECK_IDS,
     ActiveScanError,
@@ -36,6 +35,7 @@ from security import (
     ScanError,
     ScopePolicy,
 )
+from security import ai as security_ai
 from security.remediation import propose, redact_headers
 from security.scope import LOOPBACK_HOSTS
 
