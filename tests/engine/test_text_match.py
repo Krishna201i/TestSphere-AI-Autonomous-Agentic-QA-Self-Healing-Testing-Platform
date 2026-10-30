@@ -27,3 +27,11 @@ def test_a_long_page_is_quoted_by_its_start_and_length():
     long = _quote("word " * 1000)
     assert long.startswith("'word word") and "…' (5,000 characters)" in long and len(long) < 360
     assert "\\n" not in _quote("a\nb")  # never Python's escaped form
+
+
+def test_hyphenation_does_not_decide_a_match():
+    # A goal says "reach the sign-in page"; CareLink's page says "Sign in"
+    page = " ".join("CareLink Patient portal\nWelcome Back\nSign in to your account".split())
+    assert _text_contains(page, "sign-in")
+    assert _text_contains("Log in with e-mail", "email")
+    assert not _text_contains(page, "sign-up")  # a different word still fails

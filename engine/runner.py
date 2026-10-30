@@ -611,12 +611,15 @@ def _quote(text: str) -> str:
 def _text_contains(actual: str, expected: str) -> bool:
     """Whether *expected* is in *actual* as a reader sees it: case-insensitive,
     whitespace collapsed (*inner_text* splits a heading at a <br> or a block),
-    and failing that with whitespace ignored, since a heading read from markup
-    can lose the space a line break stood for ("Insights.Healthier")."""
+    and failing that with whitespace and hyphens ignored, since a heading read
+    from markup can lose the space a line break stood for ("Insights.Healthier")
+    and a goal's wording rarely matches the page's hyphenation ("sign-in" for
+    "Sign in")."""
     actual, expected = actual.casefold(), expected.casefold()
     if expected in actual:
         return True
-    squeeze = str.maketrans("", "", " \t\r\n\f\v ")
+    # Whitespace (including a no-break space) and hyphens (ASCII, Unicode hyphen, no-break hyphen)
+    squeeze = str.maketrans("", "", " \t\r\n\f\v\u00a0-\u2010\u2011")
     return bool(expected.translate(squeeze)) and expected.translate(squeeze) in actual.translate(squeeze)
 
 
