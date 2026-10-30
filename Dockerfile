@@ -27,8 +27,10 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --require-hashes -r requirements.txt
 
-# Chromium plus the system libraries it needs (this stage runs as root)
+# Chromium plus the system libraries it needs (this stage runs as root), and
+# git: repository ingestion clones with it, and fix patches and deploy checks use it
 RUN python -m playwright install --with-deps chromium \
+    && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
