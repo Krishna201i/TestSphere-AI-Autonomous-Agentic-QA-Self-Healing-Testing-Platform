@@ -1,0 +1,54 @@
+# TestSphere on one EC2 instance: API (+ dashboard), pipeline worker, Caddy for HTTPS.
+#   cd /opt/testsphere/app/deploy/aws-ec2 && ./fetch-env.sh && docker compose up -d --build
+# Secrets come from SSM Parameter Store (/testsphere/*) via fetch-env.sh into
+# /opt/testsphere/secrets.env; settings that are not secret live here.
+
+x-testsphere: &testsphere
+  build:
+    context: ../..
+  image: testsphere:latest
+  restart: unless-stopped
+  env_file: /opt/testsphere/secrets.env
+  environment: &env
+    APP_ENV: production
+    # Runs are queued by the API and executed by the worker, so an API restart
+    # never interrupts a scan
+    PIPELINE_EXECUTION: worker
+    # 2 GB instance: one browser at a time; further runs queue
+    ENGINE_MAX_BROWSERS: "1"
+    # The dashboard is served by the API on the same origin, so no CORS origins
+    DASHBOARD_URL: https://${DOMAIN}
+    LOG_FORMAT: json
+  volumes:
+    - testsphere-data:/app/data   # artifacts (screenshots, traces) the API serves and the worker writes
+
+services:
+  api:
+    <<: *testsphere
+    # Behind Caddy: trust its X-Forwarded-* headers (the API port is not published)
+    command: ["sh", "-c", "exec uvicorn backend.main:app --host 0.0.0.0 --port 8000 --no-access-log --proxy-headers --forwarded-allow-ips '*'"]
+    expose: ["8000"]
+
+  worker:
+    <<: *testsphere
+    command: ["python", "-m", "backend.worker"]
+    healthcheck:
+      disable: true   # the image's check probes the API's HTTP port, which the worker has none of
+    depends_on: [api]
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN, e.g. 54-153-148-247.sslip.io}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [api]
+
+volumes:
+  testsphere-data:
+  caddy-data:
+  caddy-config:
