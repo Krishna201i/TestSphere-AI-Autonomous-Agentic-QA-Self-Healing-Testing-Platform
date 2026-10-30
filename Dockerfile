@@ -23,7 +23,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Exact, hash-checked dependency versions (the same lock Render installs)
+# Exact, hash-checked dependency versions (the same lock CI installs)
 COPY requirements.txt ./
 RUN pip install --require-hashes -r requirements.txt
 

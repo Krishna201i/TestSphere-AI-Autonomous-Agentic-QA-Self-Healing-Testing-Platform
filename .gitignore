@@ -6,6 +6,8 @@
 .env
 .env.local
 .env.production
+# any other env file, e.g. a copy of a previous host's environment
+*.env
 
 # --- Python ---
 __pycache__/
@@ -60,7 +62,7 @@ benchmark_results.md
 # --- Browser automation output ---
 .playwright-mcp/
 
-# --- Playwright browsers installed by build.sh / render-build.sh ---
+# --- Playwright browsers installed by build.sh ---
 .playwright-browsers/
 
 # --- Ingested repositories (INGEST_WORKSPACE) ---

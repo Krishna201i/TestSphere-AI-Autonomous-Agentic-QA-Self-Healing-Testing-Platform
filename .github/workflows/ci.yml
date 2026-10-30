@@ -1,4 +1,4 @@
-# Runs on every pull request and on pushes to main (which Render deploys).
+# Runs on every pull request and on pushes to main.
 # Both jobs must pass before a PR is merged.
 name: CI
 

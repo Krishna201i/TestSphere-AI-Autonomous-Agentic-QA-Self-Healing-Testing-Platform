@@ -2,7 +2,7 @@
  * TestSphere-AI — API client for the FastAPI backend.
  *
  * Base URL: VITE_API_URL when set (a dashboard hosted apart from the API,
- * e.g. on Vercel); otherwise the page's own origin: the backend serves the
+ * on another host); otherwise the page's own origin: the backend serves the
  * built dashboard itself, and the Vite dev server proxies /api.  (Guessing
  * from the port broke hosted pages: on Render the port is the default 443,
  * so the dashboard called http://127.0.0.1:8000 on the visitor's machine.)
@@ -54,12 +54,12 @@ async function request(path, { method = 'GET', body, raw = false } = {}) {
     err.kind = 'network';
     throw err;
   }
-  // An HTML page instead of JSON: the dashboard's host answered (e.g. Vercel's
-  // single-page rewrite), not the backend, so VITE_API_URL is missing or wrong
+  // An HTML page instead of JSON: the dashboard's host answered (e.g. a static
+  // host's single-page rewrite), not the backend, so VITE_API_URL is missing or wrong
   if ((res.headers.get('content-type') || '').includes('text/html') && path.startsWith('/api/')) {
     const err = new Error(`${API_BASE_LABEL} answered ${path.split('?')[0]} with a web page, not the TestSphere API. `
-      + 'If the dashboard is hosted apart from the backend (e.g. on Vercel), set VITE_API_URL to the backend URL '
-      + '(e.g. https://your-api.onrender.com) and build again.');
+      + 'If the dashboard is hosted apart from the backend, set VITE_API_URL to the backend URL '
+      + '(e.g. https://api.example.com) and build again.');
     err.kind = 'misconfigured';
     err.status = res.status;
     throw err;

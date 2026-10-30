@@ -35,7 +35,7 @@ playwright install chromium
 
 `requirements.in` lists the allowed version ranges; `requirements.txt` is the
 lock generated from it (exact versions + hashes, for Linux and Windows) and is
-what Render installs. Edit `requirements.in`, then regenerate the lock:
+what the Docker image installs. Edit `requirements.in`, then regenerate the lock:
 
 ```powershell
 uv pip compile requirements.in --universal --python-version 3.11 --generate-hashes -o requirements.txt

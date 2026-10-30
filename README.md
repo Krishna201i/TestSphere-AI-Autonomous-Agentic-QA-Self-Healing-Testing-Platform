@@ -145,7 +145,8 @@ python -m security http://127.0.0.1:8000/?q=x --active  # also send DAST probes 
 
 ## Configuration and deployment
 
-Production runs on Render with Firebase (Authentication and Firestore). The most important settings:
+Production runs on one AWS EC2 instance (API with the dashboard, a pipeline worker and Caddy for HTTPS; see
+[`deploy/aws-ec2`](deploy/aws-ec2/README.md)) with Firebase (Authentication and Firestore). The most important settings:
 
 | Setting | Purpose |
 | --- | --- |

@@ -41,9 +41,9 @@ All settings can be configured via environment variables or a `.env` file at rep
 Firebase console setup for sign-in: **Authentication → Get started**, enable **Email/Password** (and **Google** if wanted)
 under *Sign-in method*, and add the dashboard's domain under *Settings → Authorized domains*.
 
-**Dashboard hosted apart from the API (e.g. Vercel + Render).** Build the dashboard with `VITE_API_URL` set to the
-backend's URL (e.g. `https://your-api.onrender.com`; in Vercel: Project → Settings → Environment Variables, then
-redeploy), and set `CORS_ORIGINS` on the backend to the dashboard's origin. Without `VITE_API_URL` the dashboard
+**Dashboard hosted apart from the API.** The API serves the built dashboard itself, which needs no extra settings.
+To host the dashboard elsewhere instead, build it with `VITE_API_URL` set to the backend's URL (e.g.
+`https://api.example.com`), and set `CORS_ORIGINS` on the backend to the dashboard's origin. Without `VITE_API_URL` the dashboard
 calls its own host, which answers with the app's HTML page; the dashboard then says so instead of failing to parse
 it. For a local build, `VITE_API_URL` is read from the `.env` at the repository root. Google and GitHub sign-in use a
 pop-up; when the browser blocks it, the dashboard asks the user to allow pop-ups. The redirect fallback is only used
@@ -207,6 +207,9 @@ docker run -p 8000:8000 -e AUTH_REQUIRED=false -e DATABASE_BACKEND=local testsph
 
 `PORT` (default 8000) sets the listening port. The image does not include `tests/` or `docs/`.
 
+Production runs this image on AWS EC2 with Docker Compose (API, worker and Caddy for HTTPS), secrets in SSM
+Parameter Store and no SSH: see [`deploy/aws-ec2/README.md`](../deploy/aws-ec2/README.md) for setup, updates and rollback.
+
 ### 3.1 Separate pipeline worker
 
 By default pipeline runs (Autopilot, scheduled and webhook runs) execute inside the API process: one
@@ -216,7 +219,7 @@ With a worker:
 1. Set `PIPELINE_EXECUTION=worker` on **both** the API and the worker (same environment otherwise,
    including Firestore credentials; the worker refuses to start without a shared database).
 2. Run the worker: `python -m backend.worker` (Docker: `docker run --env-file .env testsphere python -m backend.worker`;
-   Render: a *Background Worker* service with that start command, which needs a paid instance type).
+   on AWS EC2: the `worker` service in [`deploy/aws-ec2/docker-compose.yml`](../deploy/aws-ec2/docker-compose.yml)).
 
 The API then only queues runs. The worker claims the oldest queued run atomically (several workers never
 take the same run), executes one at a time, refreshes `heartbeat_at`, and runs the scheduler, so
@@ -235,7 +238,7 @@ Interactive runs from the Pipeline page (`/api/workflow/*`) still execute in the
 | Frontend | `npm ci`, `npm run build`, `npm audit --omit=dev --audit-level=high` |
 
 Make both jobs required checks on `main` (GitHub → Settings → Branches → branch protection rule) so
-nothing reaches Render without passing them.
+nothing reaches `main`, and from there the server, without passing them.
 
 ---
 
