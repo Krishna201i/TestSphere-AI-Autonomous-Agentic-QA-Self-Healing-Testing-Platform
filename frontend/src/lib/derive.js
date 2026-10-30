@@ -239,3 +239,53 @@ export function urlError(value) {
   }
   return null;
 }
+
+// ── Test results in reports ────────────────────────────────
+
+/** Test types in report order, with what a passing test of that type verified (for runs before checks were recorded). */
+export const TEST_GROUPS = [
+  { key: 'smoke', label: 'Smoke', about: 'Page loads; title and body render' },
+  { key: 'functional', label: 'Goal scenario', about: 'The written goal: form filled and its outcome checked' },
+  { key: 'explored', label: 'AI-explored goal', about: 'The goal as the AI explorer reached it, replayed' },
+  { key: 'content', label: 'Content', about: 'The main heading is on the page' },
+  { key: 'link', label: 'Linked pages', about: 'Linked page loads with its title and heading' },
+  { key: 'route', label: 'Code routes', about: 'Route found in the code loads' },
+  { key: 'ai', label: 'AI-written tests', about: 'Scenario written by the AI planner' },
+  { key: 'saved', label: 'Saved tests', about: 'Saved test' },
+];
+const GROUP_KEYS = new Set(TEST_GROUPS.map((g) => g.key));
+
+export const groupOf = (t) => (GROUP_KEYS.has(t.category) ? t.category : 'saved');
+
+export function resultLabel(t) {
+  return t.healed && t.status === 'PASSED' ? 'HEALED' : t.status;
+}
+
+export function formatDuration(ms) {
+  if (ms == null) return null;
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
+}
+
+/** What a result says in its Details cell: the error when it failed, else what it checked. */
+export function testDetail(t) {
+  const time = formatDuration(t.duration_ms);
+  if (t.status === 'FAILED' && t.error) {
+    return { kind: 'error', text: t.error.split('\n')[0].replace(/\\n/g, ' '), time };
+  }
+  const checks = (t.checks || []).filter(Boolean);
+  const about = TEST_GROUPS.find((g) => g.key === groupOf(t)).about;
+  const parts = [checks.length ? checks.join(' · ') : about];
+  if (t.healed) parts.push('a broken locator was healed');
+  if (t.status === 'FAILED') parts.push('failed without an error message');
+  return { kind: t.status === 'FAILED' ? 'error' : 'ok', text: parts.join(' — '), time };
+}
+
+/** A run's results in report order: by test type, failures first within each type. */
+export function groupedResults(tests = []) {
+  const rank = { FAILED: 0, HEALED: 1, PASSED: 2 };
+  return TEST_GROUPS.map((g) => ({
+    ...g,
+    tests: tests.filter((t) => groupOf(t) === g.key)
+      .sort((a, b) => (rank[resultLabel(a)] ?? 1) - (rank[resultLabel(b)] ?? 1) || a.execution_id - b.execution_id),
+  })).filter((g) => g.tests.length);
+}

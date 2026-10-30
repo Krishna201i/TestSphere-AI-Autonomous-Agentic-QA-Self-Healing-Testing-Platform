@@ -587,6 +587,18 @@ table.table { width: 100%; border-collapse: collapse; font-size: var(--fs-base);
   overflow: hidden; overflow-wrap: anywhere;
 }
 @media (max-width: 640px) { .cell-name { min-width: 9rem; } }
+.text-danger { color: var(--danger-text); }
+/* Reports: one card per run, its tests grouped by type */
+.report-run-meta { margin: 0; }
+.report-group { display: flex; flex-direction: column; gap: var(--s-2); }
+.report-group-title { margin: 0; font-size: var(--fs-base); font-weight: var(--fw-semibold); display: flex; align-items: baseline; gap: var(--s-2); }
+/* Every group's table has the same columns, so they line up down the run */
+.report-table { table-layout: fixed; }
+.report-table th:nth-child(1) { width: 36%; }
+.report-table th:nth-child(2) { width: 17%; }
+.report-table .cell-name { min-width: 0; }
+@media (max-width: 640px) { .report-table { table-layout: auto; } }
+.print-only-block { display: none; }
 
 pre.code {
   margin: 0; padding: var(--s-3) var(--s-4);
@@ -928,6 +940,11 @@ details > ul { margin-top: var(--s-2); }
   .grid-2 { grid-template-columns: 1fr 1fr; }
   .table-wrap { overflow: visible; }
   .cell-clamp { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
+  /* The PDF has every filtered run (not only those shown), each from a new page */
+  .print-only-block { display: flex; }
+  .report-run { break-before: page; }
+  .table tr { break-inside: avoid; }
+  .report-group-title { break-after: avoid; }
 }
 
 /* ── Spacing utilities win over component defaults ───────── */

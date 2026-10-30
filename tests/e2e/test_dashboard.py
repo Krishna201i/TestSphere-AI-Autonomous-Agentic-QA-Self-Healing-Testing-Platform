@@ -364,3 +364,49 @@ def test_a_long_failure_does_not_squeeze_the_report_table(server, browser):
     if os.getenv("E2E_SCREENSHOT_DIR"):
         page.locator(".table-wrap", has_text="execution #264").screenshot(path=os.path.join(os.environ["E2E_SCREENSHOT_DIR"], "report-table.png"))
     page.close()
+
+
+def _report_run(run_id, finished, tests):
+    passed = sum(t["status"] == "PASSED" for t in tests)
+    return {"id": run_id, "project_id": 1, "project_name": "CareLink", "status": "failed" if passed < len(tests) else "passed",
+            "trigger": "manual", "created_at": finished, "started_at": finished, "finished_at": finished,
+            "stages": [{"key": k, "label": k.title(), "status": "done", "detail": None} for k in STAGE_KEYS],
+            "summary": {"total": len(tests), "passed": passed, "failed": len(tests) - passed, "healed": 0},
+            "tests": tests, "regressions": []}
+
+
+def test_reports_are_organised_by_run_and_test_type_with_details_for_every_test(server, browser):
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    latest = _report_run(31, now, [
+        {"test_case_id": 1, "name": "Smoke: CareLink", "category": "smoke", "execution_id": 308, "status": "PASSED",
+         "checks": ["Page title contains 'CareLink'", "Page shows the body"], "duration_ms": 1830},
+        {"test_case_id": 2, "name": "Linked page: /hospital/", "category": "link", "execution_id": 316, "status": "PASSED",
+         "duration_ms": 2400},  # an older result: no recorded checks
+        {"test_case_id": 3, "name": "AI: Navigate to Hospital Portal", "category": "ai", "execution_id": 312, "status": "FAILED",
+         "quarantined": True, "error": "assert_url failed: expected '/hospital/', got '/'", "duration_ms": 5200},
+    ])
+    older = _report_run(30, now, [
+        {"test_case_id": 1, "name": "Smoke: CareLink", "category": "smoke", "execution_id": 290, "status": "PASSED"}])
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900})
+    page.route("**/api/pipelines/runs?*", lambda r: r.fulfill(json=[latest, older]))
+    page.goto(f"{server}/#/reports")
+    run = page.locator("section.report-run", has_text="Run #31")
+    run.wait_for()
+
+    assert page.locator("section.report-run").count() == 2
+    assert "2/3 passed" in run.locator(".report-run-meta").inner_text()
+    groups = [t.split("\n")[0] for t in run.locator(".report-group-title").all_inner_texts()]
+    assert [g.split(" ")[0] for g in groups] == ["Smoke", "Linked", "AI-written"]  # report order, not run order
+    details = {r.locator("td").nth(0).inner_text().split("\n")[0]: r.locator("td").nth(2).inner_text()
+               for r in run.locator("tbody tr").all()}
+    assert details["Smoke: CareLink"].startswith("Page title contains 'CareLink' · Page shows the body") and "1.8 s" in details["Smoke: CareLink"]
+    assert details["Linked page: /hospital/"].startswith("Linked page loads with its title and heading")
+    assert details["AI: Navigate to Hospital Portal"].startswith("assert_url failed")
+    assert all(d.strip() not in ("", "—") for d in details.values()), "a test without details"
+
+    if os.getenv("E2E_SCREENSHOT_DIR"):
+        shots = os.environ["E2E_SCREENSHOT_DIR"]
+        run.screenshot(path=os.path.join(shots, "report-run.png"))
+        page.emulate_media(media="print")
+        page.pdf(path=os.path.join(shots, "report.pdf"), format="A4", print_background=True)
+    page.close()

@@ -17,6 +17,7 @@ import {
   updateProject,
   webhookUrl,
 } from '../services/api';
+import { ResultBadges, ResultDetail } from '../components/TestResult';
 import { timeAgo, timeUntil, urlError } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
 
@@ -198,8 +199,8 @@ function RunDetail({ run, onOpen, onClear, onCancelled }) {
               {run.tests.map((t) => (
                 <tr key={t.execution_id} className="selectable" {...selectableRow(() => onOpen(run.id, t.execution_id), false)}>
                   <td className="cell-name">{t.name}<div className="small muted">{t.category || 'saved'} · execution #{t.execution_id}</div></td>
-                  <td><span className="row"><span className={`status ${t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}`}>{t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}</span>{t.flaky && <span className="status FLAKY">Flaky</span>}</span></td>
-                  <td className="small">{t.error ? <div className="cell-clamp" title={t.error}>{t.error.split('\n')[0].replace(/\\n/g, ' ')}</div> : '—'}</td>
+                  <td><ResultBadges test={t} /></td>
+                  <td className="small"><ResultDetail test={t} /></td>
                 </tr>
               ))}
             </tbody>

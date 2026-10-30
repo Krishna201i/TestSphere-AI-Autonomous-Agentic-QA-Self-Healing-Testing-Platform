@@ -2,7 +2,8 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { Download, FileJson, Printer, Search } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { getPipelineRuns } from '../services/api';
-import { SEVERITY_ORDER, timeAgo, toDate } from '../lib/derive';
+import { ResultBadges, ResultDetail } from '../components/TestResult';
+import { SEVERITY_ORDER, formatDuration, groupedResults, resultLabel, testDetail, timeAgo, toDate } from '../lib/derive';
 import { RunStatus } from './Autopilot';
 import usePersistentState from '../lib/usePersistentState';
 
@@ -14,7 +15,7 @@ const RESULT_SERIES = [
   { key: 'healed', label: 'Self-healed' },
   { key: 'failed', label: 'Failed' },
 ];
-const PAGE_SIZE = 100;
+const RUN_PAGE = 5;  // runs shown before "Show more"; the PDF has them all
 
 function useWidth() {
   const ref = useRef(null);
@@ -190,6 +191,48 @@ function download(name, type, text) {
 
 const csvCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
+/** One run in the report: what ran, when, and its tests grouped by type (failures first). */
+function RunReport({ run, tests, onNavigate, printOnly }) {
+  const s = run.summary || {};
+  const regressions = (run.regressions || []).length;
+  const meta = [run.trigger, toDate(run.finished_at || run.started_at || run.created_at).toLocaleString()];
+  if (s.total != null) meta.push(`${s.passed}/${s.total} passed`);
+  if (s.healed) meta.push(`${s.healed} healed`);
+  if (regressions) meta.push(`${regressions} regression${regressions === 1 ? '' : 's'}`);
+  const open = (executionId) => onNavigate('runs', { tab: executionId ? `${run.id}/${executionId}` : String(run.id) });
+  return (
+    <section className={`card report-run ${printOnly ? 'print-only-block' : ''}`} aria-label={`Run ${run.id}`}>
+      <div className="card-head">
+        <h3>Run #{run.id} · {run.project_name}</h3>
+        <span className="row"><RunStatus status={run.status} /><button type="button" className="btn btn-sm no-print" onClick={() => open()}>Open run</button></span>
+      </div>
+      <p className="muted small report-run-meta">{meta.join(' · ')}</p>
+      {tests.length === 0 ? <div className="empty">No tests ran in this run.</div> : groupedResults(tests).map((g) => {
+        const failed = g.tests.filter((t) => t.status === 'FAILED').length;
+        return (
+          <div key={g.key} className="report-group">
+            <h4 className="report-group-title">{g.label} <span className="muted small">{g.tests.length} test{g.tests.length === 1 ? '' : 's'}{failed ? ` · ${failed} failed` : ''}</span></h4>
+            <div className="table-wrap">
+              <table className="table report-table">
+                <thead><tr><th>Test</th><th>Result</th><th>Details</th></tr></thead>
+                <tbody>
+                  {g.tests.map((t) => (
+                    <tr key={t.execution_id}>
+                      <td className="cell-name">{t.name}<div className="small"><button type="button" className="link-btn" onClick={() => open(t.execution_id)}>execution #{t.execution_id}</button></div></td>
+                      <td><ResultBadges test={t} /></td>
+                      <td className="small"><ResultDetail test={t} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 export default function Reports({ onNavigate }) {
   const { projects, findings } = useWorkspace();
   const [runs, setRuns] = useState(null);
@@ -198,7 +241,7 @@ export default function Reports({ onNavigate }) {
   const [period, setPeriod] = usePersistentState('reports.period', '30');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = usePersistentState('reports.status', 'all');
-  const [shown, setShown] = useState(PAGE_SIZE);
+  const [shownRuns, setShownRuns] = useState(RUN_PAGE);
 
   useEffect(() => {
     getPipelineRuns(200).then(setRuns).catch((err) => setError(err.message));
@@ -231,11 +274,17 @@ export default function Reports({ onNavigate }) {
   const resolved = data.scopedFindings.filter((f) => f.status === 'resolved').length;
 
   const q = query.trim().toLowerCase();
-  const results = data.results.filter((t) => {
-    const label = t.healed && t.status === 'PASSED' ? 'HEALED' : t.status;
+  const matches = (t, run) => {
+    const label = resultLabel(t);
     return (statusFilter === 'all' || label === statusFilter || (statusFilter === 'FLAKY' && t.flaky))
-      && (!q || `${t.name} ${t.run.project_name} ${t.error || ''}`.toLowerCase().includes(q));
-  });
+      && (!q || `${t.name} ${run.project_name} ${t.error || ''} ${(t.checks || []).join(' ')}`.toLowerCase().includes(q));
+  };
+  const filtering = statusFilter !== 'all' || Boolean(q);
+  // Newest run first; a run with no matching test drops out while filtering
+  const reportRuns = [...data.inScope].sort((a, b) => b.id - a.id)
+    .map((run) => ({ run, tests: (run.tests || []).filter((t) => matches(t, run)) }))
+    .filter(({ run, tests }) => tests.length || (!filtering && FINISHED.includes(run.status)));
+  const matchingTests = reportRuns.reduce((n, r) => n + r.tests.length, 0);
 
   const perProject = projects
     .filter((p) => !project || p.id === project.id)
@@ -263,9 +312,9 @@ export default function Reports({ onNavigate }) {
   }
 
   function exportCsv() {
-    const rows = [['run', 'project', 'trigger', 'finished_at', 'test', 'category', 'result', 'error', 'execution_id']];
+    const rows = [['run', 'project', 'trigger', 'finished_at', 'test', 'category', 'result', 'details', 'duration', 'execution_id']];
     data.results.forEach((t) => rows.push([t.run.id, t.run.project_name, t.run.trigger, t.run.finished_at, t.name, t.category,
-      t.healed && t.status === 'PASSED' ? 'HEALED' : t.status, (t.error || '').split('\n')[0], t.execution_id]));
+      resultLabel(t), testDetail(t).text, formatDuration(t.duration_ms) || '', t.execution_id]));
     download(`testsphere-results-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv', rows.map((r) => r.map(csvCell).join(',')).join('\n'));
   }
 
@@ -284,7 +333,7 @@ export default function Reports({ onNavigate }) {
       </div>
 
       <div className="form-row center no-print">
-        <select className="input select-sm" aria-label="Project" value={projectId} onChange={(e) => { setProjectId(e.target.value); setShown(PAGE_SIZE); }}>
+        <select className="input select-sm" aria-label="Project" value={projectId} onChange={(e) => { setProjectId(e.target.value); setShownRuns(RUN_PAGE); }}>
           <option value="all">All projects</option>
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
@@ -393,43 +442,29 @@ export default function Reports({ onNavigate }) {
           </section>
 
           <section className="card">
-            <div className="card-head"><h3>All results</h3><span className="muted small">{results.length} of {data.results.length} test results</span></div>
+            <div className="card-head"><h3>Runs</h3><span className="muted small">{reportRuns.length} run{reportRuns.length === 1 ? '' : 's'} · {matchingTests} test result{matchingTests === 1 ? '' : 's'}</span></div>
             <div className="form-row center no-print">
               <div className="search">
                 <Search size={18} />
-                <input value={query} onChange={(e) => { setQuery(e.target.value); setShown(PAGE_SIZE); }} placeholder="Search tests, projects, errors..." aria-label="Search results" />
+                <input value={query} onChange={(e) => { setQuery(e.target.value); setShownRuns(RUN_PAGE); }} placeholder="Search tests, projects, errors..." aria-label="Search results" />
               </div>
               <div className="tabs" role="tablist" aria-label="Filter by result">
                 {['all', 'PASSED', 'HEALED', 'FAILED', 'FLAKY'].map((s) => (
-                  <button key={s} type="button" role="tab" aria-selected={statusFilter === s} className={`tab ${statusFilter === s ? 'active' : ''}`} onClick={() => { setStatusFilter(s); setShown(PAGE_SIZE); }}>{s === 'all' ? 'all' : s.toLowerCase()}</button>
+                  <button key={s} type="button" role="tab" aria-selected={statusFilter === s} className={`tab ${statusFilter === s ? 'active' : ''}`} onClick={() => { setStatusFilter(s); setShownRuns(RUN_PAGE); }}>{s === 'all' ? 'all' : s.toLowerCase()}</button>
                 ))}
               </div>
             </div>
-            {results.length === 0 ? <div className="empty">No test results match.</div> : (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead><tr><th>Run</th><th>Project</th><th>Test</th><th>Result</th><th>Details</th><th>When</th></tr></thead>
-                  <tbody>
-                    {results.slice(0, shown).map((t) => (
-                      <tr key={`${t.run.id}-${t.execution_id}`}>
-                        <td className="small"><button type="button" className="link-btn" onClick={() => onNavigate('runs', { tab: `${t.run.id}/${t.execution_id}` })}>#{t.run.id}</button><div className="muted">{t.run.trigger}</div></td>
-                        <td className="cell-wrap small">{t.run.project_name}</td>
-                        <td className="cell-wrap">{t.name}<div className="small muted">{t.category || 'saved'}</div></td>
-                        <td><span className="row"><span className={`status ${t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}`}>{t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}</span>{t.flaky && <span className="status FLAKY">Flaky</span>}{t.quarantined && <span className="pill gray">Quarantined</span>}</span></td>
-                        <td className="small cell-wrap">{t.error ? t.error.split('\n')[0] : '—'}</td>
-                        <td className="small muted">{timeAgo(t.run.finished_at || t.run.started_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {results.length > shown && (
-              <button type="button" className="btn btn-sm no-print self-center" onClick={() => setShown(shown + PAGE_SIZE)}>
-                Show {Math.min(PAGE_SIZE, results.length - shown)} more
-              </button>
-            )}
+            {reportRuns.length === 0 && <div className="empty">No test results match.</div>}
           </section>
+
+          {reportRuns.map(({ run, tests }, i) => (
+            <RunReport key={run.id} run={run} tests={tests} onNavigate={onNavigate} printOnly={i >= shownRuns} />
+          ))}
+          {reportRuns.length > shownRuns && (
+            <button type="button" className="btn btn-sm no-print self-center" onClick={() => setShownRuns(shownRuns + RUN_PAGE)}>
+              Show {Math.min(RUN_PAGE, reportRuns.length - shownRuns)} more run{Math.min(RUN_PAGE, reportRuns.length - shownRuns) === 1 ? '' : 's'}
+            </button>
+          )}
         </>
       )}
     </div>

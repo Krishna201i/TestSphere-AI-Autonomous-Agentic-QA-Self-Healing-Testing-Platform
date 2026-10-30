@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deployState, executionStats, loopModel, mergeStageStatus, pct } from '../lib/derive';
+import { deployState, executionStats, groupedResults, loopModel, mergeStageStatus, pct, testDetail } from '../lib/derive';
 
 const run = (status) => ({ status });
 
@@ -115,5 +115,34 @@ describe('deployState', () => {
     expect(deployState([{ status: 'verified', commit: null }]).state).toBe('done');
     expect(deployState([{ status: 'rolled_back' }])).toEqual({ state: 'waiting', note: 'Rolled back' });
     expect(deployState([{ status: 'rollback_failed' }])).toEqual({ state: 'failed', note: 'Rollback failed' });
+  });
+});
+
+describe('test results in reports', () => {
+  it('a passed test says what it checked and how long it took', () => {
+    const d = testDetail({ status: 'PASSED', category: 'smoke', checks: ["Page title contains 'CareLink'"], duration_ms: 1234 });
+    expect(d).toEqual({ kind: 'ok', text: "Page title contains 'CareLink'", time: '1.2 s' });
+  });
+  it('an older run without recorded checks describes the test type', () => {
+    expect(testDetail({ status: 'PASSED', category: 'link' }).text).toBe('Linked page loads with its title and heading');
+    expect(testDetail({ status: 'PASSED', category: 'whatever' }).text).toBe('Saved test');
+  });
+  it('a failure shows its error, with older escaped line breaks as spaces', () => {
+    // Older runs stored the page text escaped: a backslash and an n, not a line break
+    expect(testDetail({ status: 'FAILED', error: String.raw`expected x in "a\nb"` }))
+      .toMatchObject({ kind: 'error', text: 'expected x in "a b"' });
+  });
+  it('a healed pass says so', () => {
+    expect(testDetail({ status: 'PASSED', healed: true, category: 'smoke' }).text).toMatch(/healed$/);
+  });
+  it('groups by test type in report order, failures first', () => {
+    const groups = groupedResults([
+      { execution_id: 3, category: 'link', status: 'PASSED' },
+      { execution_id: 1, category: 'smoke', status: 'PASSED' },
+      { execution_id: 4, category: 'link', status: 'FAILED' },
+      { execution_id: 5, category: null, status: 'PASSED' },
+    ]);
+    expect(groups.map((g) => [g.label, g.tests.map((t) => t.execution_id)]))
+      .toEqual([['Smoke', [1]], ['Linked pages', [4, 3]], ['Saved tests', [5]]]);
   });
 });

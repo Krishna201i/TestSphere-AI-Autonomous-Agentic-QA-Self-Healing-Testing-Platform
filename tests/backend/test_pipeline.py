@@ -552,3 +552,16 @@ def test_active_scan_runs_in_the_pipeline_only_when_project_and_server_both_allo
     plain = make_project(fresh_store)  # active_scan defaults off
     run_once(fresh_store, plain, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
     assert calls["n"] == 0
+
+
+def test_every_result_says_what_it_checked_and_how_long_it_took(fresh_store, stub_network):
+    class Timed(FakeOrchestrator):
+        async def execute_test_run(self, db, execution_id, options=None):
+            return {**await super().execute_test_run(db, execution_id, options), "duration_ms": 1234}
+
+    run = run_once(fresh_store, make_project(fresh_store), Timed({}), OutOfScope())
+    smoke = next(t for t in run["tests"] if t["category"] == "smoke")
+    # A passed test reports what passed, not only that it did
+    assert smoke["status"] == "PASSED" and smoke["duration_ms"] == 1234
+    assert smoke["step_count"] >= 2 and any(c.startswith("Page title contains") for c in smoke["checks"])
+    assert all(len(t["checks"]) <= runner.MAX_LISTED_CHECKS for t in run["tests"])
