@@ -330,3 +330,37 @@ def test_fix_patch_opens_a_pull_request(server, browser):
     assert "bbbbbbb" in page.locator("#patch-title").locator("xpath=ancestor::section").inner_text()
     assert errors == []
     page.close()
+
+
+def test_a_long_failure_does_not_squeeze_the_report_table(server, browser):
+    """A test's name stays readable and a long error shows its first lines, not the whole page text."""
+    # Older runs stored the page text escaped: a backslash and an n for each line break
+    page_text = r"Skip to main content\nCareLink\nECOSYSTEM\n" + "Portals and the mobile app share one backend. " * 80
+    tests = [
+        {"test_case_id": 1, "name": "Content: heading 'The Modern Operating System for National'", "category": "content",
+         "execution_id": 264, "status": "FAILED",
+         "error": f"assert_text failed: expected 'The Modern Operating System for National' in \"{page_text}\""},
+        {"test_case_id": 2, "name": "AI: Load Home Page", "category": "ai", "execution_id": 265, "status": "PASSED", "error": None},
+    ]
+    run = {"id": 12, "project_id": 1, "project_name": "CareLink", "status": "failed", "trigger": "manual",
+           "created_at": "2026-10-30T08:40:00Z", "started_at": "2026-10-30T08:40:00Z", "finished_at": "2026-10-30T08:45:00Z",
+           "stages": [{"key": k, "label": k.title(), "status": "done", "detail": None} for k in STAGE_KEYS],
+           "summary": {"total": 2, "passed": 1, "failed": 1}, "tests": tests, "regressions": []}
+    page = browser.new_page(bypass_csp=True, viewport={"width": 1440, "height": 900})
+    page.route("**/api/pipelines/runs?*", lambda r: r.fulfill(json=[run]))
+    page.goto(f"{server}/#/autopilot")
+    row = page.locator("tr", has_text="execution #264")
+    row.wait_for()
+    name_cell, error_cell = row.locator("td").nth(0), row.locator("td").nth(2)
+
+    assert name_cell.bounding_box()["width"] >= 200, "the name column is squeezed"
+    clamp = error_cell.locator(".cell-clamp")
+    line_height, shown, full = clamp.evaluate(
+        "e => [parseFloat(getComputedStyle(e).lineHeight), e.clientHeight, e.scrollHeight]")
+    assert shown <= line_height * 3 + 2, "the error is not cut to 3 lines"
+    assert full > shown, "the rest of a long error is hidden"
+    assert "\\n" not in error_cell.inner_text()  # old, escaped messages read as plain text
+    assert error_cell.locator(".cell-clamp").get_attribute("title").startswith("assert_text failed")  # full text on hover
+    if os.getenv("E2E_SCREENSHOT_DIR"):
+        page.locator(".table-wrap", has_text="execution #264").screenshot(path=os.path.join(os.environ["E2E_SCREENSHOT_DIR"], "report-table.png"))
+    page.close()

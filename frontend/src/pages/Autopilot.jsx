@@ -138,7 +138,7 @@ function RunDetail({ run, onOpen, onClear, onCancelled }) {
         <h3>Run #{run.id} · {run.project_name}</h3>
         <span className="row"><RunStatus status={run.status} /> <span className="muted small">{TRIGGER_LABEL[run.trigger] || run.trigger}{run.trigger_detail ? ` · ${run.trigger_detail}` : ''} · {timeAgo(run.started_at || run.created_at)}</span></span>
       </div>
-      <div className="row" style={{ gap: '0.5rem', flexWrap: 'wrap' }}>
+      <div className="row">
         <button type="button" className="btn btn-sm" onClick={() => onOpen(run.id)}>Open run: steps, screenshots and trace</button>
         {s && (
           <button type="button" className="btn btn-sm" onClick={handleJunit} title="Download JUnit XML for CI">
