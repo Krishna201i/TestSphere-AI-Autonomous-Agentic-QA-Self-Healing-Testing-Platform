@@ -124,6 +124,14 @@ def collect_learned_targets(
             "fallback_locators": fallbacks,
             "fingerprint": fingerprint.model_dump(mode="json") if fingerprint else None,
         }
+        if executed.target.primary_locator != locator:
+            healed_loc = executed.target.primary_locator
+            healed_fallbacks = [locator, *[f for f in fallbacks if f != healed_loc]][:MAX_LEARNED_FALLBACKS]
+            entries[healed_loc] = {
+                "locator": healed_loc,
+                "fallback_locators": healed_fallbacks,
+                "fingerprint": fingerprint.model_dump(mode="json") if fingerprint else None,
+            }
     return list(entries.values())
 
 

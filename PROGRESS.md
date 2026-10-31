@@ -14,7 +14,7 @@
 | Task ID | Description | Status | Commit | Files Touched |
 |---------|-------------|--------|--------|---------------|
 | **STEP 0** | Orient & establish baseline | [x] done | `initial` | `PROGRESS.md` |
-| **T1** | Healed-selector write-back | [ ] pending | | |
+| **T1** | Healed-selector write-back | [x] done | `pending` | `backend/orchestration/orchestrator.py`, `backend/orchestration/converters.py`, `tests/backend/test_self_healing_runs.py` |
 | **T2** | Dependency-bump fixes (git-applyable edits) | [ ] pending | | |
 | **T3** | Fixes for active findings (FastAPI/Flask/Django/Express) | [ ] pending | | |
 | **T4** | Live event streaming (SSE + Store persistence + UI) | [ ] pending | | |
@@ -45,5 +45,13 @@
 - **What changed**: Verified project structure, setup isolated Python venv and node_modules, ran full test suites to record baseline (1720 Python passed, 42 frontend passed, 0 failures), created `phase2` branch, generated `PROGRESS.md`.
 - **Files touched**: `PROGRESS.md`
 - **Tests passing**: 1720 Python, 42 Frontend
-- **Commit hash**: Pending push
+- **Commit hash**: 751e972
 - **NEXT STEP**: Begin Task T1 (Healed-selector write-back) in backend/orchestration/orchestrator.py.
+
+### T1: Healed-Selector Write-Back
+- **Status**: [x] done
+- **What changed**: Implemented write-back of validated healed selectors into stored test case steps (`backend/orchestration/orchestrator.py: _learn_from_run`), preserved broken selectors as first fallback in `fallback_locators` (`apply_healed_selector` and `converters.py`), bumped test case version, logged `test_case_healed` audit event, and added test verifying that a second run passes directly without healing.
+- **Files touched**: `backend/orchestration/orchestrator.py`, `backend/orchestration/converters.py`, `tests/backend/test_self_healing_runs.py`, `PROGRESS.md`
+- **Tests passing**: 25 in test_self_healing_runs.py, 42 Frontend, ruff clean
+- **Commit hash**: Pending push
+- **NEXT STEP**: Begin Task T2 (Dependency-bump fixes) in security/patcher.py.

@@ -69,6 +69,7 @@ from backend.orchestration.converters import (
     learned_targets_by_locator,
     test_case_to_engine_plan,
 )
+from backend.services.security_service import record_audit
 from engine.runner import run_test
 from engine.schemas import (
     EngineConfig,
@@ -111,8 +112,15 @@ def apply_healed_selector(
     steps: list[EngineStep] = []
     for step, hit in zip(plan.steps, matches, strict=True):
         step_copy = step.model_copy(deep=True)
-        if hit:
+        if hit and step_copy.target is not None:
+            old_loc = step_copy.target.primary_locator
             step_copy.target.primary_locator = healed_selector
+            if old_loc and old_loc != healed_selector:
+                current_fallbacks = [loc for loc in step_copy.target.fallback_locators if loc != healed_selector]
+                if old_loc not in current_fallbacks:
+                    step_copy.target.fallback_locators = [old_loc, *current_fallbacks]
+                else:
+                    step_copy.target.fallback_locators = current_fallbacks
         steps.append(step_copy)
     return plan.model_copy(update={"steps": steps})
 
@@ -712,6 +720,82 @@ class PlatformWorkflowOrchestrator:
         targets = collect_learned_targets(engine_plan, shown_plan, shown_result)
         if targets != (test_case.get("healing_targets") or []):
             db.update(TEST_CASES, test_case.id, healing_targets=targets)
+
+        # Collect validated healed selector replacements from AI healer or engine healer
+        healed_replacements: dict[str, str] = {}
+        for original, step in zip(engine_plan.steps, shown_plan.steps, strict=False):
+            if (
+                original.target is not None
+                and step.target is not None
+                and original.target.primary_locator
+                and step.target.primary_locator
+                and original.target.primary_locator != step.target.primary_locator
+            ):
+                healed_replacements[original.target.primary_locator] = step.target.primary_locator
+
+        if passed:
+            for step_res in shown_result.steps:
+                if (
+                    step_res.status == StepStatus.HEALED
+                    and step_res.healing
+                    and step_res.healing.original_locator
+                    and step_res.healing.selected_locator
+                    and step_res.healing.original_locator != step_res.healing.selected_locator
+                ):
+                    healed_replacements[step_res.healing.original_locator] = step_res.healing.selected_locator
+
+        # Write-back healed selectors into stored test steps, keep old locator as fallback, bump version & audit
+        if passed and healed_replacements and test_case.get("description"):
+            try:
+                desc_obj = json.loads(test_case["description"])
+            except (ValueError, TypeError):
+                desc_obj = None
+
+            if desc_obj is not None:
+                updated_any = False
+                raw_steps = desc_obj.get("steps", []) if isinstance(desc_obj, dict) else desc_obj
+                if isinstance(raw_steps, list):
+                    for s in raw_steps:
+                        if not isinstance(s, dict):
+                            continue
+                        current_target = s.get("target") or s.get("target_selector")
+                        if current_target and current_target in healed_replacements:
+                            healed_sel = healed_replacements[current_target]
+                            if "target" in s:
+                                s["target"] = healed_sel
+                            if "target_selector" in s:
+                                s["target_selector"] = healed_sel
+                            fallbacks = s.get("fallback_locators") or s.get("fallbacks") or []
+                            if isinstance(fallbacks, list):
+                                current_fallbacks = [f for f in fallbacks if f != healed_sel]
+                                if current_target not in current_fallbacks:
+                                    s["fallback_locators"] = [current_target, *current_fallbacks]
+                                else:
+                                    s["fallback_locators"] = current_fallbacks
+                            else:
+                                s["fallback_locators"] = [current_target]
+                            updated_any = True
+
+                if updated_any:
+                    current_version = int(test_case.get("version") or 1)
+                    new_version = current_version + 1
+                    new_desc = json.dumps(desc_obj)
+                    db.update(TEST_CASES, test_case.id, description=new_desc, version=new_version)
+                    try:
+                        record_audit(
+                            db,
+                            actor="ai-healer",
+                            kind="test_case_healed",
+                            level="info",
+                            message=(
+                                f"Healed selector written back for test case #{test_case.id} (v{new_version}): "
+                                + ", ".join(f"{old} -> {new}" for old, new in healed_replacements.items())
+                            ),
+                            ref=str(test_case.id),
+                            owner_uid=test_case.get("owner_uid"),
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.warning("Could not record audit event for healed test case #%s", test_case.id)
 
     @staticmethod
     def _remember_element(memory: MemoryStore, record: Any) -> None:

@@ -36,7 +36,7 @@ from agents.memory.persistent_store import (
 from agents.orchestration.workflow_schemas import AgentState, WorkflowStep
 from agents.schemas.enums import FailureType
 from backend.database.session import get_store
-from backend.models import AGENT_MEMORY, TEST_CASES, TEST_EXECUTIONS
+from backend.models import AGENT_MEMORY, AUDIT_EVENTS, TEST_CASES, TEST_EXECUTIONS
 from backend.orchestration import orchestrator as orchestration
 from backend.orchestration.converters import (
     collect_learned_targets,
@@ -158,6 +158,48 @@ class TestAIHealingOnARun:
         # ... and the next run of the test case tries the replacement first
         targets = learned_targets_by_locator(db.get(TEST_CASES, tc.id)["healing_targets"])
         assert targets["#login-button"]["fallback_locators"][0] == "#sign-in"
+
+    async def test_healed_selector_is_written_back_and_second_run_passes_without_healing(self, tmp_path):
+        snapshot = tmp_path / "dom.html"
+        snapshot.write_text(FAILED_PAGE, encoding="utf-8")
+        failed = _result(TestStatus.FAILED, _ok("step-1"), StepResult(
+            step_id="step-2", status=StepStatus.FAILED, duration_ms=1500, error=LOCATOR_TIMEOUT,
+            dom_snapshot_path=str(snapshot), page_url="https://shop.example/login"))
+        validated = _result(TestStatus.PASSED, _ok("step-1"), _ok("step-2"))
+        db, tc, execution1 = _setup(LOGIN_STEPS, _known_login_button())
+        memory = InMemoryStore()
+        service = _service(memory)
+
+        # Run 1: breaks on #login-button, heals with #sign-in, ends as HEALED
+        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(side_effect=[failed, validated])) as run1:
+            res1 = await service.execute_test_run(db=db, execution_id=execution1.id)
+
+        assert res1["status"] == "HEALED"
+        assert run1.await_count == 2
+
+        # Check write-back into stored test steps, fallback retained, version bumped, audit logged
+        tc_after = db.get(TEST_CASES, tc.id)
+        desc_after = json.loads(tc_after["description"])
+        assert desc_after["steps"][1]["target"] == "#sign-in"
+        assert "#login-button" in desc_after["steps"][1]["fallback_locators"]
+        assert tc_after["version"] == 2
+
+        audit_events = db.find(AUDIT_EVENTS, ref=str(tc.id))
+        assert any(e["kind"] == "test_case_healed" and "#login-button -> #sign-in" in e["message"] for e in audit_events)
+
+        # Run 2: starts with updated stored steps (#sign-in) and passes without healing
+        execution2 = TestExecutionService.create_execution(db, tc.id)
+        passed2 = _result(TestStatus.PASSED, _ok("step-1"), _ok("step-2"))
+
+        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(return_value=passed2)) as run2:
+            res2 = await service.execute_test_run(db=db, execution_id=execution2.id)
+
+        assert res2["status"] == "PASSED"
+        assert run2.await_count == 1
+        plan2 = run2.await_args_list[0].args[0]
+        # The primary locator tried on the second run is the healed selector
+        assert plan2.steps[1].target.primary_locator == "#sign-in"
+        assert "#login-button" in plan2.steps[1].target.fallback_locators
 
     async def test_a_replacement_that_does_not_pass_is_recorded_as_failed(self, tmp_path):
         snapshot = tmp_path / "dom.html"
