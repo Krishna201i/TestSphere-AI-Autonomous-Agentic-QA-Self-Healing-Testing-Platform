@@ -321,3 +321,100 @@ def test_typescript_express_patches_are_syntax_checked(tmp_path):
     assert result.files[0].verified in (True, None)  # None only on Node older than 22.13
     if result.files[0].verified is None:
         assert "Node 22.13" in result.files[0].check_note
+
+
+def test_dependency_bump_package_json(tmp_path):
+    root = write(tmp_path / "repo", {"package.json": """{
+  "name": "shop-app",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "react": "18.2.0"
+  }
+}
+"""})
+    findings = [
+        finding("SEC-DEP-GHSA-aaaa", recommendation="Upgrade axios to 1.8.2 or later.", package="axios", fixed_in="1.8.2"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert [f.path for f in result.files] == ["package.json"]
+    assert result.files[0].verified is True
+    assert '"axios": "^1.8.2"' in result.patch
+    assert result.manual == []
+    assert len(result.applied) == 1
+    assert result.applied[0].check_id == "SEC-DEP-GHSA-aaaa"
+
+    git_apply(root, result.patch)
+    import json
+    content = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    assert content["dependencies"]["axios"] == "^1.8.2"
+    assert content["dependencies"]["react"] == "18.2.0"
+
+
+def test_dependency_bump_requirements_txt(tmp_path):
+    root = write(tmp_path / "repo", {"requirements.txt": """Flask==2.2.2
+requests>=2.25.0
+gunicorn[gevent]==21.2.0
+"""})
+    findings = [
+        finding("SEC-DEP-FLASK-01", recommendation="Upgrade Flask to 2.2.5 or later.", package="Flask", fixed_in="2.2.5"),
+        finding("SEC-DEP-GUNICORN-01", recommendation="Upgrade gunicorn to 21.2.2 or later.", package="gunicorn", fixed_in="21.2.2"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert [f.path for f in result.files] == ["requirements.txt"]
+    assert result.files[0].verified is True
+    assert "+Flask==2.2.5" in result.patch
+    assert "+gunicorn[gevent]==21.2.2" in result.patch
+    assert result.manual == []
+
+    git_apply(root, result.patch)
+    text = (root / "requirements.txt").read_text(encoding="utf-8")
+    assert "Flask==2.2.5\n" in text
+    assert "gunicorn[gevent]==21.2.2\n" in text
+    assert "requests>=2.25.0\n" in text
+
+
+def test_dependency_bump_pyproject_toml(tmp_path):
+    root = write(tmp_path / "repo", {"pyproject.toml": """[project]
+name = "shop"
+version = "0.1.0"
+dependencies = [
+    "flask>=2.2.0,<3.0",
+    "requests==2.25.0",
+]
+"""})
+    findings = [
+        finding("SEC-DEP-REQ-01", recommendation="Upgrade requests to 2.31.0 or later.", package="requests", fixed_in="2.31.0"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert [f.path for f in result.files] == ["pyproject.toml"]
+    assert result.files[0].verified is True
+    assert '"requests==2.31.0"' in result.patch
+
+    git_apply(root, result.patch)
+    import tomllib
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "requests==2.31.0" in data["project"]["dependencies"]
+
+
+def test_dependency_bump_no_fixed_version_goes_to_manual(tmp_path):
+    root = write(tmp_path / "repo", {"requirements.txt": "evil-pkg==1.0.0\n"})
+    findings = [
+        finding("SEC-DEP-EVIL-01", recommendation="No fixed version of evil-pkg is published yet; see advisory for workarounds."),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert result.files == []
+    assert len(result.manual) == 1
+    assert result.manual[0].check_id == "SEC-DEP-EVIL-01"
+    assert "No fixed version" in result.manual[0].reason
+
+
+def test_dependency_bump_not_found_in_manifest_goes_to_manual(tmp_path):
+    root = write(tmp_path / "repo", {"requirements.txt": "Flask==2.2.2\n"})
+    findings = [
+        finding("SEC-DEP-MISSING-01", recommendation="Upgrade non-existent-pkg to 1.2.3 or later.", package="non-existent-pkg", fixed_in="1.2.3"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert result.files == []
+    assert len(result.manual) == 1
+    assert result.manual[0].check_id == "SEC-DEP-MISSING-01"
+    assert "not found in package.json" in result.manual[0].reason

@@ -27,11 +27,13 @@ from __future__ import annotations
 
 import ast
 import difflib
+import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -55,6 +57,7 @@ class Fix:
     cors: bool = False
     cookies: set[str] = field(default_factory=set)                  # cookie names ("*" = any)
     sources: dict[str, str] = field(default_factory=dict)           # header / topic -> check_id
+    dependencies: list[tuple[str, str, str]] = field(default_factory=list)  # (check_id, pkg_name, fixed_version)
 
 
 @dataclass
@@ -114,6 +117,33 @@ def fixes_for(findings: list[dict]) -> tuple[Fix, list[Manual]]:
             name = component.rsplit("(cookie: ", 1)[-1].rstrip(")") if "(cookie: " in component else "*"
             fix.cookies.add(name)
             fix.sources["cookie"] = cid
+        elif cid.startswith("SEC-DEP-"):
+            rec = f.get("recommendation") or ""
+            fixed_version = None
+            pkg_name = f.get("package")
+
+            m_rec = re.search(r"Upgrade\s+([^\s]+)\s+to\s+([^\s]+)\s+or later", rec, re.IGNORECASE)
+            if m_rec:
+                pkg_name = pkg_name or m_rec.group(1)
+                fixed_version = m_rec.group(2)
+            elif "no fixed version" in rec.lower():
+                fixed_version = None
+            else:
+                fixed_version = f.get("fixed_in") or f.get("fixed_version")
+
+            if not pkg_name:
+                component = f.get("component") or ""
+                m_comp = re.search(r":([^@]+)@", component)
+                if m_comp:
+                    pkg_name = m_comp.group(1)
+                elif f.get("title"):
+                    pkg_name = f["title"].split()[0]
+
+            if fixed_version and pkg_name:
+                fix.dependencies.append((cid, pkg_name, str(fixed_version)))
+                fix.sources[cid] = cid
+            else:
+                manual.append(Manual(cid, rec or f"No fixed version for {cid} is published yet; see advisory for workarounds."))
         else:
             manual.append(Manual(cid, f.get("recommendation") or "Needs a change no config patch can make."))
     return fix, manual
@@ -432,6 +462,116 @@ def _patch_nginx(text: str, fix: Fix) -> tuple[str, list[tuple[str, str]]]:
     return text, done
 
 
+def _patch_package_json(content: str, package_name: str, fixed_version: str) -> tuple[str, bool]:
+    """Update a dependency version in package.json, preserving indentation and formatting."""
+    try:
+        data = json.loads(content)
+    except (ValueError, TypeError):
+        return content, False
+
+    found_section = None
+    real_pkg_name = package_name
+    for sec in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+        deps = data.get(sec)
+        if isinstance(deps, dict):
+            for k in deps:
+                if k.lower() == package_name.lower():
+                    found_section = sec
+                    real_pkg_name = k
+                    break
+        if found_section:
+            break
+
+    if not found_section:
+        return content, False
+
+    pattern = re.compile(
+        r'([ \t]*"' + re.escape(real_pkg_name) + r'"\s*:\s*")([^"]*)(")',
+        re.IGNORECASE
+    )
+    match = pattern.search(content)
+    if not match:
+        return content, False
+
+    old_spec = match.group(2)
+    if old_spec.startswith("^"):
+        new_spec = f"^{fixed_version}"
+    elif old_spec.startswith("~"):
+        new_spec = f"~{fixed_version}"
+    elif old_spec.startswith(">="):
+        new_spec = f">={fixed_version}"
+    else:
+        new_spec = fixed_version
+
+    new_content = pattern.sub(r'\g<1>' + new_spec + r'\g<3>', content, count=1)
+    try:
+        json.loads(new_content)
+    except (ValueError, TypeError):
+        return content, False
+
+    return new_content, True
+
+
+def _patch_requirements_txt(content: str, package_name: str, fixed_version: str) -> tuple[str, bool]:
+    """Update a pinned dependency in requirements*.txt / *.in."""
+    pattern = re.compile(
+        r'^(?P<indent>[ \t]*)(?P<pkg>' + re.escape(package_name) + r'(?:\[[^\]]*\])?)\s*'
+        r'(?P<op>==|>=|<=|~=|[<>]=?)\s*(?P<ver>[^\s#;,]+)(?P<rest>.*)$',
+        re.IGNORECASE | re.MULTILINE
+    )
+    match = pattern.search(content)
+    if not match:
+        return content, False
+
+    op = match.group("op")
+    new_op = "==" if op in ("==", "~=") else op
+    new_line = f"{match.group('indent')}{match.group('pkg')}{new_op}{fixed_version}{match.group('rest')}"
+    new_content = pattern.sub(lambda _: new_line, content, count=1)
+    return new_content, True
+
+
+def _patch_pyproject_toml(content: str, package_name: str, fixed_version: str) -> tuple[str, bool]:
+    """Update dependency in pyproject.toml (PEP 621 dependencies array or Poetry table)."""
+    pattern_pep621 = re.compile(
+        r'("|\')(' + re.escape(package_name) + r'(?:\[[^\]]*\])?)\s*([~><=!]+)\s*([^\'",;]+)(.*?)\1',
+        re.IGNORECASE
+    )
+    match_pep = pattern_pep621.search(content)
+    if match_pep:
+        quote = match_pep.group(1)
+        pkg = match_pep.group(2)
+        op = match_pep.group(3)
+        extra = match_pep.group(5)
+        new_op = ">=" if ">=" in op else "=="
+        repl = f"{quote}{pkg}{new_op}{fixed_version}{extra}{quote}"
+        new_content = pattern_pep621.sub(lambda _: repl, content, count=1)
+        try:
+            tomllib.loads(new_content)
+            return new_content, True
+        except Exception:  # noqa: BLE001
+            pass
+
+    pattern_poetry = re.compile(
+        r'^([ \t]*' + re.escape(package_name) + r'\s*=\s*("|\'))([~><=!^]*)\s*([^"\']+)(\2)',
+        re.IGNORECASE | re.MULTILINE
+    )
+    match_poetry = pattern_poetry.search(content)
+    if match_poetry:
+        prefix = match_poetry.group(1)
+        quote = match_poetry.group(2)
+        op = match_poetry.group(3)
+        new_op = op if op in ("^", "~", ">=") else ""
+        repl = f"{prefix}{new_op}{fixed_version}{quote}"
+        new_content = pattern_poetry.sub(lambda _: repl, content, count=1)
+        try:
+            tomllib.loads(new_content)
+            return new_content, True
+        except Exception:  # noqa: BLE001
+            pass
+
+    return content, False
+
+
 # ── Verification and diff ──────────────────────────────────────────────────
 
 # TypeScript: strip the types with Node's built-in stripTypeScriptTypes (Node 22.13+),
@@ -452,6 +592,22 @@ if (r.status) { console.error(r.stderr.split("\\n").filter(Boolean).slice(-2).jo
 
 
 def _verify(path: Path, text: str) -> tuple[bool | None, str | None]:
+    if path.name == "package.json" or path.suffix == ".json":
+        try:
+            json.loads(text)
+            return True, None
+        except (ValueError, TypeError) as exc:
+            return False, f"JSON syntax error: {exc}"
+    if path.name == "pyproject.toml" or path.suffix == ".toml":
+        try:
+            tomllib.loads(text)
+            return True, None
+        except Exception as exc:  # noqa: BLE001
+            return False, f"TOML syntax error: {exc}"
+    if path.name.startswith("requirements") and path.suffix in (".txt", ".in"):
+        if "\0" in text:
+            return False, "NUL byte in requirements file"
+        return True, None
     if path.suffix == ".py":
         try:
             compile(text, str(path), "exec")
@@ -595,6 +751,38 @@ def build_patch(root: Path, findings: list[dict], site_url: str | None = None) -
             if n:
                 save(p, new)
                 mark("cookie", p, f"httponly/secure/samesite on {n} set_cookie(...) call(s)")
+
+    # Dependency-bump fixes (package.json, requirements*.txt / *.in, pyproject.toml)
+    if fix.dependencies:
+        pkg_json_files = [p for p in _files(root, (".json",)) if p.name == "package.json"]
+        req_files = [p for p in _files(root, (".txt", ".in")) if p.name.startswith("requirements") or p.name in ("requirements.txt", "requirements.in")]
+        pyproj_files = [p for p in _files(root, (".toml",)) if p.name == "pyproject.toml"]
+
+        for cid, pkg_name, fixed_version in fix.dependencies:
+            patched_any = False
+            for p in pkg_json_files:
+                new_text, changed = _patch_package_json(current(p), pkg_name, fixed_version)
+                if changed and new_text != current(p):
+                    save(p, new_text)
+                    mark(cid, p, f"bump {pkg_name} to {fixed_version} in {p.relative_to(root).as_posix()}")
+                    patched_any = True
+
+            for p in req_files:
+                new_text, changed = _patch_requirements_txt(current(p), pkg_name, fixed_version)
+                if changed and new_text != current(p):
+                    save(p, new_text)
+                    mark(cid, p, f"bump {pkg_name} to {fixed_version} in {p.relative_to(root).as_posix()}")
+                    patched_any = True
+
+            for p in pyproj_files:
+                new_text, changed = _patch_pyproject_toml(current(p), pkg_name, fixed_version)
+                if changed and new_text != current(p):
+                    save(p, new_text)
+                    mark(cid, p, f"bump {pkg_name} to {fixed_version} in {p.relative_to(root).as_posix()}")
+                    patched_any = True
+
+            if not patched_any:
+                manual.append(Manual(cid, f"Vulnerable package '{pkg_name}' (fixed in {fixed_version}) was not found in package.json, requirements*.txt, or pyproject.toml."))
 
     for topic, cid in fix.sources.items():
         if topic not in handled and not any(m.check_id == cid for m in manual):
