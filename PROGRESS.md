@@ -15,7 +15,7 @@
 |---------|-------------|--------|--------|---------------|
 | **STEP 0** | Orient & establish baseline | [x] done | `5522089` | `PROGRESS.md` |
 | **T1** | Healed-selector write-back | [x] done | `7f1f6ac` | `backend/orchestration/orchestrator.py`, `backend/orchestration/converters.py`, `tests/backend/test_self_healing_runs.py` |
-| **T2** | Dependency-bump fixes (git-applyable edits) | [x] done | `pending` | `security/patcher.py`, `tests/security/test_patcher.py` |
+| **T2** | Dependency-bump fixes (git-applyable edits) | [x] done | `4be53fb` | `security/patcher.py`, `tests/security/test_patcher.py` |
 | **T3** | Fixes for active findings (FastAPI/Flask/Django/Express) | [ ] pending | | |
 | **T4** | Live event streaming (SSE + Store persistence + UI) | [ ] pending | | |
 | **T5** | Firefox & WebKit project options & benchmarks | [ ] pending | | |
@@ -61,5 +61,5 @@
 - **What changed**: In `security/patcher.py`, added dependency bump patch generation for `SEC-DEP-*` findings targeting `package.json`, `requirements*.txt`, and `pyproject.toml`. Added syntax verification for JSON, TOML, and requirements in `_verify`. Guided unpinned / missing fixed versions to `manual`. Added comprehensive unit tests in `tests/security/test_patcher.py`.
 - **Files touched**: `security/patcher.py`, `tests/security/test_patcher.py`, `PROGRESS.md`
 - **Tests passing**: 19/19 in test_patcher.py, 4/4 in test_dependency_vulns.py, 4/4 in test_patches_api.py, 32 frontend, ruff clean
-- **Commit hash**: Pending push
+- **Commit hash**: 4be53fb
 - **NEXT STEP**: Begin Task T3 (Fixes for active findings: XSS, SQLi, Open Redirect) in security/patcher.py.
