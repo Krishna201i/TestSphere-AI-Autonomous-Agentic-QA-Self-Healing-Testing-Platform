@@ -618,12 +618,18 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
 
 async def _stage_security(state: _RunState, app_url: str, owner: str | None, scanner: Any,
                           *, active: bool = False) -> dict[str, Any] | None:
-    from backend.api.security import get_active_scanner, get_scanner, scan_result
+    from backend.api.security import (
+        active_scan_refusal,
+        get_active_scanner,
+        get_scanner,
+        scan_result,
+    )
     from security import ActiveScanError, OutOfScopeError, ScanError
 
     scanner = scanner or get_scanner()
-    # Active scanning only when the project asked for it and the server allows it
-    run_active = active and settings.SECURITY_ACTIVE_SCAN
+    # Active scanning only when the project asked for it and the server allows it for the owner
+    refusal = active_scan_refusal(owner) if active else None
+    run_active = active and refusal is None
     state.stage("security", "running")
     try:
         snap = await scanner.fetch(app_url)
@@ -640,6 +646,8 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
     detail = ", ".join(f"{counts[s]} {s}" for s in ("critical", "high", "medium", "low", "info") if counts[s]) or "no findings"
     if result["reopened"]:
         detail += f" · {len(result['reopened'])} reappeared"
+    if refusal:
+        detail += f" · active scan skipped: {refusal}"
     state.stage("security", "done", detail)
     return result
 

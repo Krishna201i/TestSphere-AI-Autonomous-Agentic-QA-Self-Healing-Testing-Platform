@@ -266,3 +266,32 @@ def test_an_active_finding_can_be_retested(active_client) -> None:
         "/api/security/scan", json={"url": "http://app.test/search?q=hi", "active": True}).json()["findings"])["SEC-XSS-REFLECTED"]["key"]
     resp = active_client.post(f"/api/security/findings/{key}/retest", json={})
     assert resp.status_code == 200 and resp.json()["retest_result"] == "fail"  # still vulnerable
+
+
+def test_signed_in_users_need_to_be_listed_to_run_active_scans(active_client, monkeypatch) -> None:
+    """With sign-in on, only SECURITY_ACTIVE_SCAN_USERS may send attack payloads (guests included)."""
+    from backend import auth
+
+    monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
+    tokens = {"guest": {"uid": "anon1", "firebase": {"sign_in_provider": "anonymous"}},
+              "bob": {"uid": "bob", "email": "b@x.example", "firebase": {"sign_in_provider": "password"}},
+              "ann": {"uid": "ann", "email": "a@x.example", "firebase": {"sign_in_provider": "password"}}}
+    monkeypatch.setattr(auth, "verify_token", lambda t: tokens[t])
+    body = {"url": "http://app.test/search?q=hi", "active": True}
+
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "")  # nobody by default
+    resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": "Bearer ann"})
+    assert resp.status_code == 403 and "not enabled for this account" in resp.json()["detail"]
+
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "ann, carol")
+    for who in ("guest", "bob"):
+        resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": f"Bearer {who}"})
+        assert resp.status_code == 403, who
+    resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": "Bearer ann"})
+    assert resp.status_code == 200
+    key = _by_id(resp.json()["findings"])["SEC-XSS-REFLECTED"]["key"]
+
+    # Taken off the list: the active finding can no longer be retested either
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "carol")
+    resp = active_client.post(f"/api/security/findings/{key}/retest", json={}, headers={"Authorization": "Bearer ann"})
+    assert resp.status_code == 403 and "cannot be retested" in resp.json()["detail"]
