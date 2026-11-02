@@ -477,6 +477,18 @@ async def _perform_action(page: Page, step: Step, config: EngineConfig) -> str |
                 await page.wait_for_load_state(state, timeout=wait_ms)
         return None
 
+    # ---- reload / back: what a person does to the page itself ---------
+    if action in (ActionType.RELOAD, ActionType.GO_BACK):
+        nav_timeout = max(timeout or 15000, 15000)
+        if action == ActionType.RELOAD:
+            await page.reload(timeout=nav_timeout, wait_until="domcontentloaded")
+        elif await page.go_back(timeout=nav_timeout, wait_until="domcontentloaded") is None:
+            raise AssertionError("go_back failed: there is no earlier page in this tab")
+        for state, wait_ms in (("load", 10_000), ("networkidle", 2_000)):
+            with contextlib.suppress(PlaywrightTimeoutError, PlaywrightError):
+                await page.wait_for_load_state(state, timeout=wait_ms)
+        return None
+
     # ---- element-less wait --------------------------------------------
     if action == ActionType.WAIT_FOR:
         value = (step.value or "").strip()

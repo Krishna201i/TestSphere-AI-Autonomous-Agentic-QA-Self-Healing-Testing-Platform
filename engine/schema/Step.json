@@ -18,7 +18,9 @@
         "assert_hidden",
         "assert_url",
         "assert_value",
-        "wait_for"
+        "wait_for",
+        "reload",
+        "go_back"
       ],
       "title": "ActionType",
       "type": "string"

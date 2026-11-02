@@ -143,6 +143,36 @@ class TestSignUp:
         assert all("{{unique}}" not in str(s.get("value")) for t in tests.values() for s in t)  # never an account
 
 
+class TestAfterSignIn:
+    def planned(self, html, prompt=None, **options):
+        return {t["slug"]: t for t in U._auth_tests(URL, U._extract_inputs(html), U._extract_buttons(html), prompt,
+                                                     **options)}
+
+    def test_with_credentials_the_session_is_checked_after_signing_in(self):
+        tests = self.planned(LOGIN, "log in with demo@x.io / Secret-1")
+        reload_ = tests["login-session-survives-reload"]["steps"]
+        assert [s["action"] for s in reload_][-3:] == ["ASSERT_HIDDEN", "RELOAD", "ASSERT_HIDDEN"]
+        assert [s["value"] for s in reload_ if s["action"] == "FILL"] == ["demo@x.io", "Secret-1"]
+        logout = tests["login-logout"]
+        assert [s["action"] for s in logout["steps"]][-5:] == ["CLICK", "ASSERT_HIDDEN", "GO_BACK", "RELOAD",
+                                                               "ASSERT_HIDDEN"]
+        assert logout["steps"][-1]["target"] == auth_plan.LOG_OUT
+        assert logout.get("quarantined") and not tests["login-session-survives-reload"].get("quarantined")
+
+    def test_without_credentials_or_behind_a_captcha_there_is_nothing_after_signing_in(self):
+        assert not {"login-session-survives-reload", "login-logout"} & set(self.planned(LOGIN))
+        blocked = self.planned(LOGIN, "log in with demo@x.io / Secret-1", blocked="a CAPTCHA blocks automated submits")
+        assert set(blocked) == {"auth-password-masked", "auth-empty-submit"}
+
+    def test_a_second_sign_up_with_the_same_email_must_be_refused(self):
+        assert "signup-duplicate-email" not in self.planned(SIGN_UP)  # never without test accounts
+        test = self.planned(SIGN_UP, allow_test_accounts=True, email_domain="qa.acme.dev")["signup-duplicate-email"]
+        emails = [s["value"] for s in test["steps"] if s["target"] == "#email"]
+        assert emails == ["qa+{{unique}}@qa.acme.dev"] * 2  # one run, one token: the same new email twice
+        assert [s["action"] for s in test["steps"]][-3:] == ["ASSERT_VISIBLE", "ASSERT_VISIBLE", "ASSERT_HIDDEN"]
+        assert test.get("quarantined")
+
+
 def test_the_engine_gives_every_run_its_own_unique_value():
     plan_ = TestPlan(test_id="t", name="t", base_url="https://x.example", steps=[
         Step(step_id="a", action=ActionType.FILL, value="qa+{{unique}}@x.io"),

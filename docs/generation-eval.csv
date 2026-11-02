@@ -93,6 +93,24 @@ login-with-credentials,login-wrong-password,2,login-empty-submit,True,
 login-with-credentials,login-wrong-password,2,password-visible,True,
 login-with-credentials,login-wrong-password,2,session-lost-on-reload,True,
 login-with-credentials,login-wrong-password,2,logout-broken,True,
+login-with-credentials,login-session-survives-reload,2,healthy-1,True,
+login-with-credentials,login-session-survives-reload,2,healthy-2,True,
+login-with-credentials,login-session-survives-reload,2,login-rejects-valid,False,assert_hidden failed: '#password' is still visible
+login-with-credentials,login-session-survives-reload,2,login-accepts-wrong-password,True,
+login-with-credentials,login-session-survives-reload,2,login-no-error-message,True,
+login-with-credentials,login-session-survives-reload,2,login-empty-submit,True,
+login-with-credentials,login-session-survives-reload,2,password-visible,True,
+login-with-credentials,login-session-survives-reload,2,session-lost-on-reload,False,assert_hidden failed: '#password' is still visible
+login-with-credentials,login-session-survives-reload,2,logout-broken,True,
+login-with-credentials,login-logout,3,healthy-1,True,
+login-with-credentials,login-logout,3,healthy-2,True,
+login-with-credentials,login-logout,3,login-rejects-valid,False,assert_hidden failed: '#password' is still visible
+login-with-credentials,login-logout,3,login-accepts-wrong-password,True,
+login-with-credentials,login-logout,3,login-no-error-message,True,
+login-with-credentials,login-logout,3,login-empty-submit,True,
+login-with-credentials,login-logout,3,password-visible,True,
+login-with-credentials,login-logout,3,session-lost-on-reload,True,
+login-with-credentials,login-logout,3,logout-broken,False,"assert_hidden failed: ':is(a, button, [role=button], [role=menuitem]):text-matches(""^\\\\s*(?:log ?out|sign ?out|log off)\\\\s*$"", ""i""):visible' is still visibl"
 login-with-credentials,content,0,healthy-1,True,
 login-with-credentials,content,0,healthy-2,True,
 login-with-credentials,content,0,login-rejects-valid,True,
@@ -200,6 +218,24 @@ store-login-with-credentials,login-wrong-password,2,login-empty-submit,True,
 store-login-with-credentials,login-wrong-password,2,password-visible,True,
 store-login-with-credentials,login-wrong-password,2,session-lost-on-reload,True,
 store-login-with-credentials,login-wrong-password,2,logout-broken,True,
+store-login-with-credentials,login-session-survives-reload,2,healthy-1,True,
+store-login-with-credentials,login-session-survives-reload,2,healthy-2,True,
+store-login-with-credentials,login-session-survives-reload,2,login-rejects-valid,False,assert_hidden failed: '#password' is still visible
+store-login-with-credentials,login-session-survives-reload,2,login-accepts-wrong-password,True,
+store-login-with-credentials,login-session-survives-reload,2,login-no-error-message,True,
+store-login-with-credentials,login-session-survives-reload,2,login-empty-submit,True,
+store-login-with-credentials,login-session-survives-reload,2,password-visible,True,
+store-login-with-credentials,login-session-survives-reload,2,session-lost-on-reload,False,assert_hidden failed: '#password' is still visible
+store-login-with-credentials,login-session-survives-reload,2,logout-broken,True,
+store-login-with-credentials,login-logout,3,healthy-1,True,
+store-login-with-credentials,login-logout,3,healthy-2,True,
+store-login-with-credentials,login-logout,3,login-rejects-valid,False,assert_hidden failed: '#password' is still visible
+store-login-with-credentials,login-logout,3,login-accepts-wrong-password,True,
+store-login-with-credentials,login-logout,3,login-no-error-message,True,
+store-login-with-credentials,login-logout,3,login-empty-submit,True,
+store-login-with-credentials,login-logout,3,password-visible,True,
+store-login-with-credentials,login-logout,3,session-lost-on-reload,True,
+store-login-with-credentials,login-logout,3,logout-broken,False,"assert_hidden failed: ':is(a, button, [role=button], [role=menuitem]):text-matches(""^\\\\s*(?:log ?out|sign ?out|log off)\\\\s*$"", ""i""):visible' is still visibl"
 store-login-with-credentials,content,0,healthy-1,True,
 store-login-with-credentials,content,0,healthy-2,True,
 store-login-with-credentials,content,0,login-rejects-valid,True,
@@ -347,6 +383,13 @@ signup-no-goal-accounts-on,signup-invalid-email,2,signup-mismatch-accepted,True,
 signup-no-goal-accounts-on,signup-invalid-email,2,signup-invalid-email-accepted,False,Locator.wait_for: Timeout 10000ms exceeded.
 signup-no-goal-accounts-on,signup-invalid-email,2,signup-duplicate-crash,True,
 signup-no-goal-accounts-on,signup-invalid-email,2,signup-no-confirmation,True,
+signup-no-goal-accounts-on,signup-duplicate-email,5,healthy-1,True,
+signup-no-goal-accounts-on,signup-duplicate-email,5,healthy-2,True,
+signup-no-goal-accounts-on,signup-duplicate-email,5,signup-broken,False,"assert_hidden failed: ':is(h1, h2, h3, p, [role=alert]):text-matches(""internal server error|something went wrong|unexpected error|bad gateway|service unavailabl"
+signup-no-goal-accounts-on,signup-duplicate-email,5,signup-mismatch-accepted,True,
+signup-no-goal-accounts-on,signup-duplicate-email,5,signup-invalid-email-accepted,True,
+signup-no-goal-accounts-on,signup-duplicate-email,5,signup-duplicate-crash,False,Locator.wait_for: Timeout 10000ms exceeded.
+signup-no-goal-accounts-on,signup-duplicate-email,5,signup-no-confirmation,False,assert_hidden failed: '#password' is still visible
 signup-no-goal-accounts-on,content,0,healthy-1,True,
 signup-no-goal-accounts-on,content,0,healthy-2,True,
 signup-no-goal-accounts-on,content,0,signup-broken,True,
@@ -400,6 +443,13 @@ signup-goal-accounts-on,signup-invalid-email,2,signup-mismatch-accepted,True,
 signup-goal-accounts-on,signup-invalid-email,2,signup-invalid-email-accepted,False,Locator.wait_for: Timeout 10000ms exceeded.
 signup-goal-accounts-on,signup-invalid-email,2,signup-duplicate-crash,True,
 signup-goal-accounts-on,signup-invalid-email,2,signup-no-confirmation,True,
+signup-goal-accounts-on,signup-duplicate-email,5,healthy-1,True,
+signup-goal-accounts-on,signup-duplicate-email,5,healthy-2,True,
+signup-goal-accounts-on,signup-duplicate-email,5,signup-broken,False,"assert_hidden failed: ':is(h1, h2, h3, p, [role=alert]):text-matches(""internal server error|something went wrong|unexpected error|bad gateway|service unavailabl"
+signup-goal-accounts-on,signup-duplicate-email,5,signup-mismatch-accepted,True,
+signup-goal-accounts-on,signup-duplicate-email,5,signup-invalid-email-accepted,True,
+signup-goal-accounts-on,signup-duplicate-email,5,signup-duplicate-crash,False,Locator.wait_for: Timeout 10000ms exceeded.
+signup-goal-accounts-on,signup-duplicate-email,5,signup-no-confirmation,False,assert_hidden failed: '#password' is still visible
 signup-goal-accounts-on,content,0,healthy-1,True,
 signup-goal-accounts-on,content,0,healthy-2,True,
 signup-goal-accounts-on,content,0,signup-broken,True,

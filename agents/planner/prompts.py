@@ -63,6 +63,8 @@ SUPPORTED ACTIONS (use only these):
 | drag     | Drag an element onto another          | Yes             | Yes (target sel)|
 | press    | Press a keyboard key                  | No              | Yes (key name) |
 | wait     | Wait for a condition or fixed time    | No              | No             |
+| reload   | Reload the current page               | No              | No             |
+| go_back  | Go back to the previous page          | No              | No             |
 """
 
 # ── Assertion Vocabulary ─────────────────────────────────────

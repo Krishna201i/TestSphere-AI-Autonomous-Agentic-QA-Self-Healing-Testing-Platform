@@ -171,6 +171,21 @@ def test_a_login_forms_own_tests_run_and_a_goal_it_could_not_run_says_why(fresh_
     assert run["goal_untested"] is False and run["goal_untested_parts"] == ["test the login (needs credentials in the goal)"]
 
 
+def test_a_test_planned_as_unconfirmed_starts_quarantined(fresh_store, stub_network):
+    """The logout test assumes a visible "Log out": it reports, but cannot fail a run until confirmed."""
+    logout = {"slug": "login-logout", "name": "Login: logging out ends the session", "category": "functional",
+              "quarantined": True, "steps": [{"step_number": 1, "action": "NAVIGATE", "value": URL}]}
+    stub_network["analysis"] = analysis(auth_tests=[logout])
+    project = make_project(fresh_store, prompt="log in with demo / secret")
+    run = run_once(fresh_store, project, FakeOrchestrator({"logging out": ("FAILED", "assert_hidden failed")}),
+                   scanner_for({"content-type": "text/html"}))
+
+    row = fresh_store.find_one(TEST_CASES, name="Login: logging out ends the session")
+    assert row["quarantined"] is True
+    assert run["status"] == "passed"  # its failure is reported, not counted against the run
+    assert any(t["name"] == row["name"] and t["status"] == "FAILED" and t["quarantined"] for t in run["tests"])
+
+
 def test_second_run_reuses_generated_tests_and_reports_regressions(fresh_store, stub_network):
     project = make_project(fresh_store)
     first = run_once(fresh_store, project, FakeOrchestrator({}), OutOfScope())

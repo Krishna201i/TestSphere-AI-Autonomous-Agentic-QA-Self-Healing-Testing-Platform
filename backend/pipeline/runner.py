@@ -513,8 +513,9 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
                 db, application_id=application["id"], external_id=external_id, name=test["name"][:255],
                 description=description, category=test["category"], priority="normal", owner_uid=owner,
             )
-            if test["category"] == "ai":
-                # A model wrote it: it runs and reports, but cannot fail a run until someone un-quarantines it
+            if test["category"] == "ai" or test.get("quarantined"):
+                # A model wrote it, or it assumes what the analysis could not see (a "Log out"
+                # control): it runs and reports, but cannot fail a run until someone un-quarantines it
                 row = db.update(TEST_CASES, row["id"], quarantined=True)
             created += 1
         elif row.get("description") != description or row.get("name") != test["name"][:255]:

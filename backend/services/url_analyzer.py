@@ -186,7 +186,8 @@ class URLAnalyzerService:
             email_domain=email_domain,
             blocked=blocked,
         )
-        auth_tests = cls._auth_tests(normalized_url, inputs, buttons, prompt, blocked)
+        auth_tests = cls._auth_tests(normalized_url, inputs, buttons, prompt, blocked,
+                                     allow_test_accounts=allow_test_accounts, email_domain=email_domain)
 
         # Generate real telemetry event logs
         events = cls._generate_telemetry_events(
@@ -687,15 +688,24 @@ class URLAnalyzerService:
 
     @classmethod
     def _auth_tests(cls, url: str, inputs: list[dict[str, Any]], buttons: list[dict[str, Any]],
-                    prompt: str | None, blocked: str | None = None) -> list[dict[str, Any]]:
-        """The login or sign-up form's own tests (wrong password, empty form, ...)."""
+                    prompt: str | None, blocked: str | None = None, *, allow_test_accounts: bool = False,
+                    email_domain: str | None = None) -> list[dict[str, Any]]:
+        """The login or sign-up form's own tests (wrong password, empty form,
+        the session after signing in, ...)."""
         form_inputs, form_buttons = cls._form_of_goal(inputs, buttons, prompt)
         form_kind = auth_plan.kind(form_inputs, prompt, form_buttons)
         if form_kind is None:
             return []
-        return auth_plan.negative_tests(
-            form_kind, url, form_inputs, cls._primary_button(form_buttons, True), cls.prompt_values(prompt),
-            lambda fields, values: cls._fill_steps(fields, values, prompt), blocked=bool(blocked))
+        button, given = cls._primary_button(form_buttons, True), cls.prompt_values(prompt)
+
+        def fill(fields: list[dict[str, Any]], values: dict[str, str]) -> list[dict[str, Any]]:
+            return cls._fill_steps(fields, values, prompt)
+
+        tests = auth_plan.negative_tests(form_kind, url, form_inputs, button, given, fill, blocked=bool(blocked))
+        if not blocked:
+            tests += auth_plan.after_sign_in_tests(form_kind, url, form_inputs, button, given, fill,
+                                                   allow_test_accounts=allow_test_accounts, email_domain=email_domain)
+        return tests
 
     @classmethod
     def _plan_scenario(

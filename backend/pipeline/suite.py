@@ -10,7 +10,8 @@ has an ingested codebase, its HTTP routes into a suite of browser tests:
 - auth-*, login-*, signup-*
                a login or sign-up form's own tests: a wrong password or
                different passwords are refused, an empty form is not sent,
-               the password is masked (``backend/services/auth_plan.py``)
+               the password is masked; with credentials or test accounts,
+               the session after signing in (``backend/services/auth_plan.py``)
 - content      the main heading is on the page
 - link-*       same-site pages linked from the target render; the first few
                are analyzed too, and also check their title, heading and
