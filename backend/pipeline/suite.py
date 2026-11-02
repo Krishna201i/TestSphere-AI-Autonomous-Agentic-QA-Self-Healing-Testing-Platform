@@ -7,6 +7,10 @@ has an ingested codebase, its HTTP routes into a suite of browser tests:
 - smoke        page loads, title and body render
 - interaction  fill the discovered inputs and press the primary button
                (or the user's "what to test" scenario)
+- auth-*, login-*, signup-*
+               a login or sign-up form's own tests: a wrong password or
+               different passwords are refused, an empty form is not sent,
+               the password is masked (``backend/services/auth_plan.py``)
 - content      the main heading is on the page
 - link-*       same-site pages linked from the target render; the first few
                are analyzed too, and also check their title, heading and
@@ -70,6 +74,9 @@ def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict
     if any(str(s.get("action", "")).upper() in ("FILL", "CLICK", "PRESS") for s in synthesized):
         name = f"Scenario: {prompt.strip()[:60]}" if prompt and prompt.strip() else f"Interaction: {title[:50] or url}"
         tests.append({"slug": "interaction", "name": name, "category": "functional", "steps": synthesized})
+
+    # A login or sign-up form's own tests (backend/services/auth_plan.py)
+    tests += analysis.get("auth_tests") or []
 
     headings = inventory.get("headings") or []
     if headings:

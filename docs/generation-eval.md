@@ -8,20 +8,22 @@ healthy site? Produced by `python -m scripts.generation_eval` against the local 
 * **Healthy fails**: tests failing on the working site, on the first run and on the next one
   (the account the first run created now exists). Every one blames the site wrongly.
 * **Bugs caught**: bugs of that flow where a test that passed on the healthy site fails.
-* **CAPTCHA**: tests failing when a CAPTCHA guards the form, which is not a bug; they should
-  report that automation is blocked instead.
+* **CAPTCHA fails**: tests planned on the page with a CAPTCHA on its form, failing there. A
+  CAPTCHA is not a bug: the tests should leave out what it blocks and say so, not fail.
 
 ## Summary
 
 | Scenario | Tests | With a feature check | Healthy fails (run 1 / run 2) | Bugs caught | CAPTCHA fails |
 | --- | --- | --- | --- | --- | --- |
-| `login-no-goal` | 3 | 0 | 0 / 0 | 0 of 7 (0%) | 0 |
-| `login-with-credentials` | 3 | 1 | 0 / 0 | 1 of 7 (14%) | 1 |
-| `login-goal-no-credentials` | 3 | 1 | 1 / 1 | 0 of 7 (0%) | 1 |
-| `store-login-with-credentials` | 3 | 1 | 0 / 0 | 0 of 7 (0%) | 0 |
-| `signup-no-goal` | 3 | 0 | 0 / 0 | 0 of 5 (0%) | 0 |
-| `signup-goal` | 3 | 1 | 0 / 1 | 1 of 5 (20%) | 1 |
-| **All** | 18 | 4 | 3 | 2 of 38 (5%) | |
+| `login-no-goal` | 5 | 3 | 0 / 0 | 3 of 7 (43%) | 0 |
+| `login-with-credentials` | 6 | 4 | 0 / 0 | 5 of 7 (71%) | 0 |
+| `login-goal-no-credentials` | 5 | 3 | 0 / 0 | 3 of 7 (43%) | 0 |
+| `store-login-with-credentials` | 6 | 4 | 0 / 0 | 5 of 7 (71%) | 0 |
+| `signup-no-goal` | 6 | 4 | 0 / 0 | 3 of 5 (60%) | 0 |
+| `signup-goal` | 6 | 4 | 0 / 0 | 3 of 5 (60%) | 0 |
+| `signup-no-goal-accounts-on` | 7 | 5 | 0 / 0 | 4 of 5 (80%) | 0 |
+| `signup-goal-accounts-on` | 7 | 5 | 0 / 0 | 4 of 5 (80%) | 0 |
+| **All** | 48 | 32 | 0 | 30 of 48 (62%) | |
 
 ## Bugs, by scenario
 
@@ -29,21 +31,21 @@ healthy site? Produced by `python -m scripts.generation_eval` against the local 
 
 | Bug | `login-no-goal` | `login-with-credentials` | `login-goal-no-credentials` | `store-login-with-credentials` |
 | --- | --- | --- | --- | --- |
-| `login-rejects-valid` — The correct email and password are refused. | ✘ | ✔ | ✘ | ✘ |
-| `login-accepts-wrong-password` — Any password signs in. | ✘ | ✘ | ✘ | ✘ |
-| `login-no-error-message` — A wrong password shows no error; the form just reloads. | ✘ | ✘ | ✘ | ✘ |
-| `login-empty-submit` — Empty fields are not required and sign in. | ✘ | ✘ | ✘ | ✘ |
-| `password-visible` — The password field shows what is typed (type=text). | ✘ | ✘ | ✘ | ✘ |
+| `login-rejects-valid` — The correct email and password are refused. | ✘ | ✔ | ✘ | ✔ |
+| `login-accepts-wrong-password` — Any password signs in. | ✘ | ✔ | ✘ | ✔ |
+| `login-no-error-message` — A wrong password shows no error; the form just reloads. | ✔ | ✔ | ✔ | ✔ |
+| `login-empty-submit` — Empty fields are not required and sign in. | ✔ | ✔ | ✔ | ✔ |
+| `password-visible` — The password field shows what is typed (type=text). | ✔ | ✔ | ✔ | ✔ |
 | `session-lost-on-reload` — The account page signs you out when reloaded. | ✘ | ✘ | ✘ | ✘ |
 | `logout-broken` — Log out keeps you signed in. | ✘ | ✘ | ✘ | ✘ |
 
-| Bug | `signup-no-goal` | `signup-goal` |
-| --- | --- | --- |
-| `signup-broken` — Creating an account ends in a server error. | ✘ | ✘ |
-| `signup-mismatch-accepted` — Different password and confirmation are accepted. | ✘ | ✘ |
-| `signup-invalid-email-accepted` — An email without @ is accepted. | ✘ | ✘ |
-| `signup-duplicate-crash` — An email already registered ends in a server error. | ✘ | ✘ |
-| `signup-no-confirmation` — Success shows the empty form again, no account made. | ✘ | ✔ |
+| Bug | `signup-no-goal` | `signup-goal` | `signup-no-goal-accounts-on` | `signup-goal-accounts-on` |
+| --- | --- | --- | --- | --- |
+| `signup-broken` — Creating an account ends in a server error. | ✔ | ✔ | ✔ | ✔ |
+| `signup-mismatch-accepted` — Different password and confirmation are accepted. | ✔ | ✔ | ✔ | ✔ |
+| `signup-invalid-email-accepted` — An email without @ is accepted (no check in the page or on the server). | ✔ | ✔ | ✔ | ✔ |
+| `signup-duplicate-crash` — An email already registered ends in a server error. | ✘ | ✘ | ✘ | ✘ |
+| `signup-no-confirmation` — Success shows the empty form again, no account made. | ✘ | ✘ | ✔ | ✔ |
 
 ## Tests, by scenario
 
@@ -51,58 +53,118 @@ healthy site? Produced by `python -m scripts.generation_eval` against the local 
 
 A user gives only the URL. Goal: none.
 
-| Test | Feature checks | Healthy run 1 | Healthy run 2 | CAPTCHA |
-| --- | --- | --- | --- | --- |
-| Smoke: Sign in · Acme | 0 | pass | pass | pass |
-| Interaction: Sign in · Acme | 0 | pass | pass | pass |
-| Content: heading 'Sign in to your account' | 0 | pass | pass | pass |
+| Test | Feature checks | Healthy run 1 | Healthy run 2 |
+| --- | --- | --- | --- |
+| Smoke: Sign in · Acme | 0 | pass | pass |
+| Login: the password is masked | 1 | pass | pass |
+| Login: an empty form is not sent | 1 | pass | pass |
+| Login: a wrong password is refused with a message | 2 | pass | pass |
+| Content: heading 'Sign in to your account' | 0 | pass | pass |
+
+With a captcha on the form: Smoke: Sign in · Acme: pass; Login: the password is masked: pass; Login: an empty form is not sent: pass; Content: heading 'Sign in to your account': pass.
 
 ### `login-with-credentials`
 
 The goal has working credentials. Goal: "log in with demo@testsphere.test / Correct-Horse-7".
 
-| Test | Feature checks | Healthy run 1 | Healthy run 2 | CAPTCHA |
-| --- | --- | --- | --- | --- |
-| Smoke: Sign in · Acme | 0 | pass | pass | pass |
-| Scenario: log in with demo@testsphere.test / Correct-Horse-7 | 1 | pass | pass | **fail**: assert_hidden failed: '#password' is still visible |
-| Content: heading 'Sign in to your account' | 0 | pass | pass | pass |
+| Test | Feature checks | Healthy run 1 | Healthy run 2 |
+| --- | --- | --- | --- |
+| Smoke: Sign in · Acme | 0 | pass | pass |
+| Scenario: log in with demo@testsphere.test / Correct-Horse-7 | 2 | pass | pass |
+| Login: the password is masked | 1 | pass | pass |
+| Login: an empty form is not sent | 1 | pass | pass |
+| Login: a wrong password is refused with a message | 2 | pass | pass |
+| Content: heading 'Sign in to your account' | 0 | pass | pass |
+
+With a captcha on the form: Smoke: Sign in · Acme: pass; Login: the password is masked: pass; Login: an empty form is not sent: pass; Content: heading 'Sign in to your account': pass.
 
 ### `login-goal-no-credentials`
 
 The goal asks for the login, without credentials. Goal: "test the login".
 
-| Test | Feature checks | Healthy run 1 | Healthy run 2 | CAPTCHA |
-| --- | --- | --- | --- | --- |
-| Smoke: Sign in · Acme | 0 | pass | pass | pass |
-| Scenario: test the login | 1 | **fail**: assert_hidden failed: '#password' is still visible | **fail**: assert_hidden failed: '#password' is still visible | **fail**: assert_hidden failed: '#password' is still visible |
-| Content: heading 'Sign in to your account' | 0 | pass | pass | pass |
+| Test | Feature checks | Healthy run 1 | Healthy run 2 |
+| --- | --- | --- | --- |
+| Smoke: Sign in · Acme | 0 | pass | pass |
+| Login: the password is masked | 1 | pass | pass |
+| Login: an empty form is not sent | 1 | pass | pass |
+| Login: a wrong password is refused with a message | 2 | pass | pass |
+| Content: heading 'Sign in to your account' | 0 | pass | pass |
+
+With a captcha on the form: Smoke: Sign in · Acme: pass; Login: the password is masked: pass; Login: an empty form is not sent: pass; Content: heading 'Sign in to your account': pass.
 
 ### `store-login-with-credentials`
 
 Working credentials; the page also has a header search form. Goal: "log in with demo@testsphere.test / Correct-Horse-7".
 
-| Test | Feature checks | Healthy run 1 | Healthy run 2 | CAPTCHA |
-| --- | --- | --- | --- | --- |
-| Smoke: Sign in · Acme | 0 | pass | pass | pass |
-| Scenario: log in with demo@testsphere.test / Correct-Horse-7 | 1 | pass | pass | pass |
-| Content: heading 'Sign in to your account' | 0 | pass | pass | pass |
+| Test | Feature checks | Healthy run 1 | Healthy run 2 |
+| --- | --- | --- | --- |
+| Smoke: Sign in · Acme | 0 | pass | pass |
+| Scenario: log in with demo@testsphere.test / Correct-Horse-7 | 2 | pass | pass |
+| Login: the password is masked | 1 | pass | pass |
+| Login: an empty form is not sent | 1 | pass | pass |
+| Login: a wrong password is refused with a message | 2 | pass | pass |
+| Content: heading 'Sign in to your account' | 0 | pass | pass |
+
+With a captcha on the form: Smoke: Sign in · Acme: pass; Login: the password is masked: pass; Login: an empty form is not sent: pass; Content: heading 'Sign in to your account': pass.
 
 ### `signup-no-goal`
 
 A user gives only the URL. Goal: none.
 
-| Test | Feature checks | Healthy run 1 | Healthy run 2 | CAPTCHA |
-| --- | --- | --- | --- | --- |
-| Smoke: Create account · Acme | 0 | pass | pass | pass |
-| Interaction: Create account · Acme | 0 | pass | pass | pass |
-| Content: heading 'Create your account' | 0 | pass | pass | pass |
+| Test | Feature checks | Healthy run 1 | Healthy run 2 |
+| --- | --- | --- | --- |
+| Smoke: Create account · Acme | 0 | pass | pass |
+| Sign-up: the password is masked | 1 | pass | pass |
+| Sign-up: an empty form is not sent | 1 | pass | pass |
+| Sign-up: different passwords are refused | 2 | pass | pass |
+| Sign-up: an invalid email is refused | 2 | pass | pass |
+| Content: heading 'Create your account' | 0 | pass | pass |
+
+With a captcha on the form: Smoke: Create account · Acme: pass; Sign-up: the password is masked: pass; Sign-up: an empty form is not sent: pass; Content: heading 'Create your account': pass.
 
 ### `signup-goal`
 
 The goal asks for a sign-up. Goal: "sign up as a new user".
 
-| Test | Feature checks | Healthy run 1 | Healthy run 2 | CAPTCHA |
-| --- | --- | --- | --- | --- |
-| Smoke: Create account · Acme | 0 | pass | pass | pass |
-| Scenario: sign up as a new user | 1 | pass | **fail**: assert_hidden failed: '#password' is still visible | **fail**: assert_hidden failed: '#password' is still visible |
-| Content: heading 'Create your account' | 0 | pass | pass | pass |
+| Test | Feature checks | Healthy run 1 | Healthy run 2 |
+| --- | --- | --- | --- |
+| Smoke: Create account · Acme | 0 | pass | pass |
+| Sign-up: the password is masked | 1 | pass | pass |
+| Sign-up: an empty form is not sent | 1 | pass | pass |
+| Sign-up: different passwords are refused | 2 | pass | pass |
+| Sign-up: an invalid email is refused | 2 | pass | pass |
+| Content: heading 'Create your account' | 0 | pass | pass |
+
+With a captcha on the form: Smoke: Create account · Acme: pass; Sign-up: the password is masked: pass; Sign-up: an empty form is not sent: pass; Content: heading 'Create your account': pass.
+
+### `signup-no-goal-accounts-on`
+
+A user gives only the URL; the project allows test accounts. Goal: none.
+
+| Test | Feature checks | Healthy run 1 | Healthy run 2 |
+| --- | --- | --- | --- |
+| Smoke: Create account · Acme | 0 | pass | pass |
+| Interaction: Create account · Acme | 2 | pass | pass |
+| Sign-up: the password is masked | 1 | pass | pass |
+| Sign-up: an empty form is not sent | 1 | pass | pass |
+| Sign-up: different passwords are refused | 2 | pass | pass |
+| Sign-up: an invalid email is refused | 2 | pass | pass |
+| Content: heading 'Create your account' | 0 | pass | pass |
+
+With a captcha on the form: Smoke: Create account · Acme: pass; Sign-up: the password is masked: pass; Sign-up: an empty form is not sent: pass; Content: heading 'Create your account': pass.
+
+### `signup-goal-accounts-on`
+
+The goal asks for a sign-up; the project allows test accounts. Goal: "sign up as a new user".
+
+| Test | Feature checks | Healthy run 1 | Healthy run 2 |
+| --- | --- | --- | --- |
+| Smoke: Create account · Acme | 0 | pass | pass |
+| Scenario: sign up as a new user | 2 | pass | pass |
+| Sign-up: the password is masked | 1 | pass | pass |
+| Sign-up: an empty form is not sent | 1 | pass | pass |
+| Sign-up: different passwords are refused | 2 | pass | pass |
+| Sign-up: an invalid email is refused | 2 | pass | pass |
+| Content: heading 'Create your account' | 0 | pass | pass |
+
+With a captcha on the form: Smoke: Create account · Acme: pass; Sign-up: the password is masked: pass; Sign-up: an empty form is not sent: pass; Content: heading 'Create your account': pass.

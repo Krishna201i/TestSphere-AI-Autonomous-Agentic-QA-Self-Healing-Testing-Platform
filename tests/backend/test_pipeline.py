@@ -99,7 +99,8 @@ class OutOfScope:
 def stub_network(monkeypatch):
     state = {"analysis": analysis(), "codes": {"http://app.test/about": 200, "http://app.test/pricing": 404}}
 
-    async def analyze(url, prompt=None, test_case_name=None):
+    async def analyze(url, prompt=None, test_case_name=None, **options):
+        state.setdefault("analyze_options", {})[url] = options
         return state["analysis"]
 
     async def reachable(urls):
@@ -147,6 +148,27 @@ def test_full_run_chains_every_stage(fresh_store, stub_network):
 
     refreshed = fresh_store.get(PROJECTS, project["id"])
     assert refreshed["last_run_id"] == run["id"] and refreshed["last_run_status"] == "passed"
+
+
+def test_a_login_forms_own_tests_run_and_a_goal_it_could_not_run_says_why(fresh_store, stub_network):
+    """The analysis left the sign-in out (no credentials) and planned the form's own tests."""
+    wrong = {"slug": "login-wrong-password", "name": "Login: a wrong password is refused with a message",
+             "category": "functional", "steps": [{"step_number": 1, "action": "NAVIGATE", "value": URL}]}
+    stub_network["analysis"] = analysis(
+        synthesized_test_case={"steps": [{"step_number": 1, "action": "NAVIGATE", "value": URL}],
+                               "goal": {"tested": [], "untested": ["test the login (needs credentials in the goal)"]}},
+        auth_tests=[wrong])
+    project = make_project(fresh_store, prompt="test the login", allow_test_accounts=True,
+                           test_email_domain="qa.acme.dev")
+    orch = FakeOrchestrator({})
+    run = run_once(fresh_store, project, orch, scanner_for({"content-type": "text/html"}))
+
+    assert stub_network["analyze_options"][URL] == {"allow_test_accounts": True, "email_domain": "qa.acme.dev"}
+    assert "Login: a wrong password is refused with a message" in orch.ran
+    detail = stage(run, "plan")["detail"]
+    assert "Not tested from your goal: “test the login (needs credentials in the goal)”" in detail
+    assert "no form fields" not in detail  # the reason given, not a wrong guess
+    assert run["goal_untested"] is False and run["goal_untested_parts"] == ["test the login (needs credentials in the goal)"]
 
 
 def test_second_run_reuses_generated_tests_and_reports_regressions(fresh_store, stub_network):

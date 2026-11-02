@@ -52,6 +52,11 @@ class _ProjectPipelineFields(BaseModel):
                                                          "then start signed in (the session is kept in memory only)")
     active_scan: bool | None = Field(None, description="Also run the active (DAST) security scan in the pipeline; "
                                                        "only takes effect where the server has SECURITY_ACTIVE_SCAN on")
+    allow_test_accounts: bool | None = Field(None, description="Let the sign-up test create a real account on the app, "
+                                                               "a new one every run (off: the sign-up is not tested)")
+    test_email_domain: str | None = Field(None, max_length=253, pattern=r"^(?:[A-Za-z0-9-]{1,63}[.])+[A-Za-z]{2,63}$",
+                                          description="Domain of the sign-up test's emails (qa+<run>@domain); "
+                                                      "default example.com")
 
     @field_validator("deploy_hook_url")
     @classmethod
@@ -145,6 +150,8 @@ class ProjectResponse(BaseModel):
     deploy_on_pass: bool | None = None
     sign_in_first: bool | None = None
     active_scan: bool | None = None
+    allow_test_accounts: bool | None = None
+    test_email_domain: str | None = None
     last_deploy_id: int | None = None
     last_deploy_status: str | None = None
     database: str | None = None  # the linked database without credentials (the URL is never returned)

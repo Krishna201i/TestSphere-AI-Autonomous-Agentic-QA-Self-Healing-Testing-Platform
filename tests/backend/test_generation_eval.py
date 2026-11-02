@@ -179,18 +179,20 @@ def test_every_scenario_names_a_flow_with_bugs():
 def test_report_counts_caught_bugs_and_false_failures(tmp_path):
     scenario = Scenario("login-x", "/login", None, "login", "Note.")
     login_bugs = [m for m, info in MUTANTS.items() if info["page"] == "login"]
-    runs = {"healthy-1": (True, ""), "healthy-2": (False, "assert_hidden failed"), "captcha": (False, "blocked")}
+    runs = {"healthy-1": (True, ""), "healthy-2": (False, "assert_hidden failed")}
     runs |= {m: (True, "") for m in login_bugs} | {login_bugs[0]: (False, "caught it")}
     weak = CaseOutcome("smoke", "Smoke", 0, {k: (True, "") for k in runs})
     strong = CaseOutcome("interaction", "Interaction", 1, runs)
-    result = ScenarioResult(scenario, [weak, strong], 1.0)
+    on_captcha = [CaseOutcome("smoke", "Smoke", 0, {"captcha": (False, "blocked")})]
+    result = ScenarioResult(scenario, [weak, strong], 1.0, {"captcha": on_captcha})
 
     assert result.caught(login_bugs[0]) and not result.caught(login_bugs[1])
-    assert result.healthy_failures("healthy-2") == 1
+    assert result.healthy_failures("healthy-2") == 1 and result.blocked_failures("captcha") == 1
 
     md, csv_path = tmp_path / "eval.md", tmp_path / "eval.csv"
     write_report([result], md, csv_path)
     text = md.read_text(encoding="utf-8")
-    assert f"| `login-x` | 2 | 1 | 0 / 1 | 1 of {len(login_bugs)} " in text
+    assert f"| `login-x` | 2 | 1 | 0 / 1 | 1 of {len(login_bugs)} (14%) | 1 |" in text
     assert "**fail**: assert_hidden failed" in text
-    assert csv_path.read_text(encoding="utf-8").count("\n") == 1 + 2 * len(runs)
+    assert "With a captcha on the form: Smoke: **fail** (blocked)." in text
+    assert len(csv_path.read_text(encoding="utf-8").splitlines()) == 1 + 2 * len(runs) + 1

@@ -344,7 +344,9 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
 
     # ── analyze ──
     state.stage("analyze", "running")
-    analysis = await URLAnalyzerService.analyze_live_website(url=app_url, prompt=project.get("prompt"))
+    analysis = await URLAnalyzerService.analyze_live_website(
+        url=app_url, prompt=project.get("prompt"), allow_test_accounts=bool(project.get("allow_test_accounts")),
+        email_domain=project.get("test_email_domain"))
     if not analysis.get("success"):
         reason = f"HTTP {analysis['status_code']}" if analysis.get("status_code") else (analysis.get("error") or "unreachable")
         state.stage("analyze", "failed", f"{app_url} did not load ({reason})")
@@ -363,16 +365,18 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
     # ── plan ──
     state.stage("plan", "running")
     application, test_cases, plan_detail = await _plan(db, project, analysis, blueprint)
-    goal_untested = bool((project.get("prompt") or "").strip()) and not any(
+    coverage = (analysis.get("synthesized_test_case") or {}).get("goal") or {}
+    # No goal test at all, and the analysis did not say why (it does for a
+    # sign-in without credentials, a sign-up without test accounts, a CAPTCHA)
+    goal_untested = bool((project.get("prompt") or "").strip()) and not coverage.get("untested") and not any(
         str(tc.get("external_id", "")).endswith("-interaction") for tc in test_cases)
     if goal_untested:
         plan_detail += (" · Your goal was not tested: no form fields or buttons were found on the page"
                         + ("" if analysis.get("rendered_in_browser") else " (even before scripts ran)"))
     # Parts of the goal no step tests ("…and fly to the moon"): say so, never claim them
-    untested_parts = [] if goal_untested else \
-        list(((analysis.get("synthesized_test_case") or {}).get("goal") or {}).get("untested") or [])
+    untested_parts = [] if goal_untested else list(coverage.get("untested") or [])
     if untested_parts:
-        plan_detail += " · Not tested from your goal: " + "; ".join(f"“{p[:80]}”" for p in untested_parts)
+        plan_detail += " · Not tested from your goal: " + "; ".join(f"“{p[:120]}”" for p in untested_parts)
     state.save(goal_untested=goal_untested, goal_untested_parts=untested_parts)
     state.stage("plan", "done", plan_detail)
 

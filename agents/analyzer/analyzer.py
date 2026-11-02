@@ -510,6 +510,8 @@ class FailureAnalyzerAgent:
     ) -> tuple[FailureType, ConfidenceLevel, list[FailureEvidence], str] | None:
         """Check if the element exists but is not interactable."""
         error_lower = failure.error_message.lower()
+        if _ENGINE_CHECK_FAILED.search(error_lower):
+            return None  # a check that did not hold ("assert_hidden failed: ... still visible"), not an action
         not_interactable = (
             "not interactable" in error_lower
             or "not clickable" in error_lower
@@ -588,15 +590,21 @@ class FailureAnalyzerAgent:
                 )
             )
             confidence = ConfidenceLevel.HIGH if has_state_mismatch else ConfidenceLevel.MEDIUM
+            if failure.expected_result is None and failure.actual_result is None:
+                # Nothing to compare (a visibility check): the engine's own words say what did not hold
+                first_line = failure.error_message.strip().splitlines()[0][:300]
+                root_cause = f"The check did not hold: {first_line}"
+            else:
+                root_cause = (
+                    f"The expected application state does not match the "
+                    f"observed state. Expected: '{failure.expected_result}', "
+                    f"Actual: '{failure.actual_result}'"
+                )
             return (
                 FailureType.ASSERTION_FAILURE,
                 confidence,
                 evidence,
-                (
-                    f"The expected application state does not match the "
-                    f"observed state. Expected: '{failure.expected_result}', "
-                    f"Actual: '{failure.actual_result}'"
-                ),
+                root_cause,
             )
 
         return None

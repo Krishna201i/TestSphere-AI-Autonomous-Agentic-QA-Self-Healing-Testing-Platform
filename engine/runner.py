@@ -113,6 +113,7 @@ async def run_test(
         captured inside ``StepResult.error``.
     """
     config = options.merged(EngineConfig()) if options else EngineConfig()
+    plan = with_unique_values(plan)
     started_at = datetime.now(UTC)
     wall_start = time.monotonic()
 
@@ -596,6 +597,23 @@ async def _perform_action_with_locator(
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
+
+
+UNIQUE_PLACEHOLDER = "{{unique}}"
+
+
+def with_unique_values(plan: TestPlan) -> TestPlan:
+    """*plan* with ``{{unique}}`` in its values replaced by a token new on every
+    run (one per run, so the email and user name it builds stay consistent):
+    a sign-up test registers a new account each time instead of failing on the
+    one it created last time."""
+    if not any(UNIQUE_PLACEHOLDER in (s.value or "") + (s.expected or "") for s in plan.steps):
+        return plan
+    token = uuid.uuid4().hex[:10]
+    steps = [s.model_copy(update={k: getattr(s, k).replace(UNIQUE_PLACEHOLDER, token)
+                                  for k in ("value", "expected") if getattr(s, k)})
+             for s in plan.steps]
+    return plan.model_copy(update={"steps": steps})
 
 
 _QUOTE_MAX = 300

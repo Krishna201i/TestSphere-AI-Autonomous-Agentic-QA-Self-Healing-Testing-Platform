@@ -16,8 +16,9 @@ the way the orchestrator does (``parse_stored_steps``,
    scheduled run sees: the account the first run created now exists);
 2. with each bug of that page's flow switched on, one at a time, on a fresh
    site.  A bug is **caught** when a test that passed on the healthy site fails;
-3. with a CAPTCHA on the form, which is not a bug: a test that fails there
-   blames the site for something automation cannot do.
+3. planned and run on the page with a CAPTCHA on its form, which is not a
+   bug: a test that fails there blames the site for something automation
+   cannot do.
 
 It also counts tests that check nothing about the feature (no assertion other
 than "the body is visible" or the page title).
@@ -64,6 +65,7 @@ class Scenario:
     goal: str | None
     flow: str  # "login" | "signup": which bugs apply
     note: str
+    allow_test_accounts: bool = False  # the project setting: may the sign-up create accounts
 
 
 SCENARIOS = [
@@ -75,6 +77,10 @@ SCENARIOS = [
              "Working credentials; the page also has a header search form."),
     Scenario("signup-no-goal", "/signup", None, "signup", "A user gives only the URL."),
     Scenario("signup-goal", "/signup", "sign up as a new user", "signup", "The goal asks for a sign-up."),
+    Scenario("signup-no-goal-accounts-on", "/signup", None, "signup",
+             "A user gives only the URL; the project allows test accounts.", allow_test_accounts=True),
+    Scenario("signup-goal-accounts-on", "/signup", "sign up as a new user", "signup",
+             "The goal asks for a sign-up; the project allows test accounts.", allow_test_accounts=True),
 ]
 
 
@@ -91,6 +97,10 @@ class ScenarioResult:
     scenario: Scenario
     tests: list[CaseOutcome]
     seconds: float
+    blocked: dict[str, list[CaseOutcome]] = field(default_factory=dict)  # blocker → tests planned and run on it
+
+    def blocked_failures(self, name: str) -> int:
+        return sum(1 for t in self.blocked.get(name, []) if not t.runs[name][0])
 
     def passed(self, condition: str) -> list[bool]:
         return [t.runs[condition][0] for t in self.tests]
@@ -125,10 +135,15 @@ async def _run(test: dict, base_url: str, options: RunOptions) -> tuple[bool, st
 async def run_scenario(app: AuthApp, base: str, scenario: Scenario, options: RunOptions) -> ScenarioResult:
     started = time.monotonic()
     url = f"{base}{scenario.path}"
+
+    async def plan() -> list[dict]:
+        analysis = await URLAnalyzerService.analyze_live_website(
+            url=url, prompt=scenario.goal, allow_test_accounts=scenario.allow_test_accounts)
+        return suite.page_tests(analysis, scenario.goal)
+
     app.reset()
     app.set_mutant(None)
-    analysis = await URLAnalyzerService.analyze_live_website(url=url, prompt=scenario.goal)
-    planned = suite.page_tests(analysis, scenario.goal)
+    planned = await plan()
     tests = [CaseOutcome(t["slug"], t["name"], feature_checks(t["steps"])) for t in planned]
 
     async def every_test(condition: str) -> None:
@@ -137,12 +152,20 @@ async def run_scenario(app: AuthApp, base: str, scenario: Scenario, options: Run
 
     await every_test("healthy-1")
     await every_test("healthy-2")  # same site: what the next scheduled run sees
-    for name in [*(m for m, info in MUTANTS.items() if info["page"] == scenario.flow), *BLOCKERS]:
+    for name in (m for m, info in MUTANTS.items() if info["page"] == scenario.flow):
         app.reset()
         app.set_mutant(name)
         await every_test(name)
+    # A CAPTCHA is there when the page is analyzed too: plan on it, then run
+    blocked: dict[str, list[CaseOutcome]] = {}
+    for name in BLOCKERS:
+        app.reset()
+        app.set_mutant(name)
+        on_page = await plan()
+        blocked[name] = [CaseOutcome(t["slug"], t["name"], feature_checks(t["steps"]),
+                                     {name: await _run(t, url, options)}) for t in on_page]
     app.set_mutant(None)
-    return ScenarioResult(scenario, tests, time.monotonic() - started)
+    return ScenarioResult(scenario, tests, time.monotonic() - started, blocked)
 
 
 # ── report ────────────────────────────────────────────────────────────────
@@ -163,8 +186,8 @@ def write_report(results: list[ScenarioResult], md_path: Path, csv_path: Path) -
         "* **Healthy fails**: tests failing on the working site, on the first run and on the next one",
         "  (the account the first run created now exists). Every one blames the site wrongly.",
         "* **Bugs caught**: bugs of that flow where a test that passed on the healthy site fails.",
-        "* **CAPTCHA**: tests failing when a CAPTCHA guards the form, which is not a bug; they should",
-        "  report that automation is blocked instead.",
+        "* **CAPTCHA fails**: tests planned on the page with a CAPTCHA on its form, failing there. A",
+        "  CAPTCHA is not a bug: the tests should leave out what it blocks and say so, not fail.",
         "",
         "## Summary",
         "",
@@ -175,7 +198,7 @@ def write_report(results: list[ScenarioResult], md_path: Path, csv_path: Path) -
     for r in results:
         caught = sum(r.caught(m) for m in r.mutants)
         checked = sum(1 for t in r.tests if t.feature_checks)
-        captcha_fails = sum(1 for t in r.tests if not t.runs["captcha"][0])
+        captcha_fails = r.blocked_failures("captcha")
         h1, h2 = r.healthy_failures("healthy-1"), r.healthy_failures("healthy-2")
         total_caught += caught
         total_mutants += len(r.mutants)
@@ -207,13 +230,17 @@ def write_report(results: list[ScenarioResult], md_path: Path, csv_path: Path) -
     for r in results:
         lines += [f"### `{r.scenario.key}`", "", f"{r.scenario.note} Goal: "
                   + (f"\"{r.scenario.goal}\"." if r.scenario.goal else "none."), "",
-                  "| Test | Feature checks | Healthy run 1 | Healthy run 2 | CAPTCHA |", "| --- | --- | --- | --- | --- |"]
+                  "| Test | Feature checks | Healthy run 1 | Healthy run 2 |", "| --- | --- | --- | --- |"]
         for t in r.tests:
             cells = []
-            for cond in ("healthy-1", "healthy-2", "captcha"):
+            for cond in ("healthy-1", "healthy-2"):
                 ok, err = t.runs[cond]
                 cells.append("pass" if ok else f"**fail**: {err.replace('|', '/')[:90]}")
             lines.append(f"| {t.name} | {t.feature_checks} | " + " | ".join(cells) + " |")
+        for name, outcomes in r.blocked.items():
+            runs = "; ".join(f"{t.name}: " + ("pass" if t.runs[name][0] else f"**fail** ({t.runs[name][1][:80]})")
+                             for t in outcomes)
+            lines += ["", f"With a {name} on the form: {runs or 'no tests'}."]
         lines.append("")
     md_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -224,6 +251,10 @@ def write_report(results: list[ScenarioResult], md_path: Path, csv_path: Path) -
             for t in r.tests:
                 for cond, (ok, err) in t.runs.items():
                     w.writerow([r.scenario.key, t.slug, t.feature_checks, cond, ok, err])
+            for outcomes in r.blocked.values():
+                for t in outcomes:
+                    for cond, (ok, err) in t.runs.items():
+                        w.writerow([r.scenario.key, t.slug, t.feature_checks, cond, ok, err])
 
 
 async def main(argv: list[str] | None = None) -> list[ScenarioResult]:

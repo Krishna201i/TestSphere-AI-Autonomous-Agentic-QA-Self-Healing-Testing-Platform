@@ -48,7 +48,8 @@ MUTANTS: dict[str, dict[str, str]] = {
     "logout-broken": {"page": "login", "bug": "Log out keeps you signed in."},
     "signup-broken": {"page": "signup", "bug": "Creating an account ends in a server error."},
     "signup-mismatch-accepted": {"page": "signup", "bug": "Different password and confirmation are accepted."},
-    "signup-invalid-email-accepted": {"page": "signup", "bug": "An email without @ is accepted."},
+    "signup-invalid-email-accepted": {"page": "signup", "bug": "An email without @ is accepted (no check in the page "
+                                                               "or on the server)."},
     "signup-duplicate-crash": {"page": "signup", "bug": "An email already registered ends in a server error."},
     "signup-no-confirmation": {"page": "signup", "bug": "Success shows the empty form again, no account made."},
 }
@@ -180,6 +181,7 @@ class AuthApp:
         return _page("Sign in · Acme", body)
 
     def _signup_page(self, error: str | None = None) -> str:
+        etype = "text" if self.mutant == "signup-invalid-email-accepted" else "email"
         body = f"""<main class="auth">
   <h1>Create your account</h1>
   {_error(error)}
@@ -187,7 +189,7 @@ class AuthApp:
     <label for="name">Full name</label>
     <input id="name" name="name" type="text" autocomplete="name" required>
     <label for="email">Email</label>
-    <input id="email" name="email" type="email" autocomplete="email" required>
+    <input id="email" name="email" type="{etype}" autocomplete="email" required>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
     <label for="confirm">Confirm password</label>

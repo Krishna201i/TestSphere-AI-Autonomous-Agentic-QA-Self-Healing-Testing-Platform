@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 import httpx
 
 from backend.netguard import guard_request
-from backend.services import goal_plan
+from backend.services import auth_plan, goal_plan
 
 logger = logging.getLogger("testsphere.analyzer")
 
@@ -90,8 +90,16 @@ class URLAnalyzerService:
         url: str,
         prompt: str | None = None,
         test_case_name: str | None = None,
+        *,
+        allow_test_accounts: bool = False,
+        email_domain: str | None = None,
     ) -> dict[str, Any]:
-        """Fetch real website HTML, inspect DOM elements, and synthesize live test plan."""
+        """Fetch real website HTML, inspect DOM elements, and synthesize live test plan.
+
+        *allow_test_accounts* lets a sign-up form's test create a real account
+        (a new one every run, at *email_domain*); off, the sign-up is reported
+        as not tested.
+        """
         normalized_url = cls.normalize_url(url)
         parsed = urlparse(normalized_url)
         domain = parsed.netloc or normalized_url
@@ -167,13 +175,18 @@ class URLAnalyzerService:
         )
 
         # Synthesize real, customized test steps for this specific site
+        blocked = auth_plan.blocker(html)
         synthesized_steps, goal_coverage = cls._plan_scenario(
             url=normalized_url,
             page_title=page_title,
             inputs=inputs,
             buttons=buttons,
             prompt=prompt,
+            allow_test_accounts=allow_test_accounts,
+            email_domain=email_domain,
+            blocked=blocked,
         )
+        auth_tests = cls._auth_tests(normalized_url, inputs, buttons, prompt, blocked)
 
         # Generate real telemetry event logs
         events = cls._generate_telemetry_events(
@@ -226,6 +239,9 @@ class URLAnalyzerService:
                 "steps": synthesized_steps,
                 "goal": goal_coverage,
             },
+            # A login or sign-up form's own tests: wrong password, empty form, ...
+            "auth_tests": auth_tests,
+            "blocked": blocked,
             "events": events,
             "error": error_encountered,
         }
@@ -266,9 +282,20 @@ class URLAnalyzerService:
             logger.warning("Could not render %s in a browser: %s", url, exc)
             return None
 
+    @staticmethod
+    def _form_spans(html: str) -> list[tuple[int, int]]:
+        """Where each <form> starts and ends in *html* (forms do not nest)."""
+        return [(m.start(), m.end()) for m in re.finditer(r"<form\b.*?(?:</form>|$)", html, re.IGNORECASE | re.DOTALL)]
+
+    @staticmethod
+    def _form_at(spans: list[tuple[int, int]], pos: int) -> int | None:
+        """The index of the form holding the element at *pos*, or None outside any form."""
+        return next((i for i, (start, end) in enumerate(spans) if start <= pos < end), None)
+
     @classmethod
     def _extract_inputs(cls, html: str) -> list[dict[str, Any]]:
         found: list[tuple[int, dict[str, Any]]] = []  # (position in the page, field)
+        spans = cls._form_spans(html)
         raw_inputs = [(m.start(), m.group(1)) for m in re.finditer(r"<input\s+([^>]+)>", html, re.IGNORECASE)]
         for idx, (pos, tag) in enumerate(raw_inputs, start=1):
             attr_dict = cls._parse_tag_attrs(tag)
@@ -299,6 +326,8 @@ class URLAnalyzerService:
                 "aria_label": aria_label,
                 "selector": selector,
                 "required": bool(_REQUIRED.search(tag)),
+                "autocomplete": attr_dict.get("autocomplete"),
+                "form": cls._form_at(spans, pos),
             }))
         for m in re.finditer(r"<textarea\b([^>]*)>", html, re.IGNORECASE):
             attr_dict = cls._parse_tag_attrs(m.group(1))
@@ -308,7 +337,8 @@ class URLAnalyzerService:
                 found.append((m.start(), {"type": "textarea", "name": name, "id": elem_id,
                                           "placeholder": attr_dict.get("placeholder"),
                                           "aria_label": attr_dict.get("aria-label"),
-                                          "selector": selector, "required": bool(_REQUIRED.search(m.group(1)))}))
+                                          "selector": selector, "required": bool(_REQUIRED.search(m.group(1))),
+                                          "form": cls._form_at(spans, m.start())}))
         for m in re.finditer(r"<select\b([^>]*)>(.*?)</select>", html, re.IGNORECASE | re.DOTALL):
             attr_dict = cls._parse_tag_attrs(m.group(1))
             name, elem_id = attr_dict.get("name"), attr_dict.get("id")
@@ -322,12 +352,14 @@ class URLAnalyzerService:
             if selector:
                 found.append((m.start(), {"type": "select", "name": name, "id": elem_id, "placeholder": None,
                                           "aria_label": attr_dict.get("aria-label"), "selector": selector,
-                                          "required": bool(_REQUIRED.search(m.group(1))), "option": option}))
+                                          "required": bool(_REQUIRED.search(m.group(1))), "option": option,
+                                          "form": cls._form_at(spans, m.start())}))
         return [field for _, field in sorted(found, key=lambda f: f[0])]  # in page order
 
     @classmethod
     def _extract_buttons(cls, html: str) -> list[dict[str, Any]]:
         results = []
+        spans = cls._form_spans(html)
         # <button> tags
         for match in re.finditer(r"<button\s*([^>]*)>(.*?)</button>", html, re.IGNORECASE | re.DOTALL):
             attrs_str = match.group(1)
@@ -352,6 +384,7 @@ class URLAnalyzerService:
                 "class": elem_class,
                 "type": btype,
                 "selector": selector,
+                "form": cls._form_at(spans, match.start()),
             })
 
         # <input type="submit"> tags
@@ -366,6 +399,7 @@ class URLAnalyzerService:
                 "class": attrs.get("class"),
                 "type": "submit",
                 "selector": selector,
+                "form": cls._form_at(spans, match.start()),
             })
 
         return results
@@ -550,8 +584,118 @@ class URLAnalyzerService:
 
     @classmethod
     def _synthesize_test_steps(cls, url: str, page_title: str, inputs: list[dict[str, Any]],
-                               buttons: list[dict[str, Any]], prompt: str | None = None) -> list[dict[str, Any]]:
-        return cls._plan_scenario(url, page_title, inputs, buttons, prompt)[0]
+                               buttons: list[dict[str, Any]], prompt: str | None = None,
+                               **options: Any) -> list[dict[str, Any]]:
+        return cls._plan_scenario(url, page_title, inputs, buttons, prompt, **options)[0]
+
+    _FIELD_TYPES_SKIPPED = ("checkbox", "radio", "select", "submit", "button", "file", "range", "color", "reset")
+
+    @classmethod
+    def _form_of_goal(cls, inputs: list[dict[str, Any]], buttons: list[dict[str, Any]],
+                      prompt: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """The fields and buttons of the one form the goal is about.
+
+        A page often has more than one form (a header search next to the
+        sign-in): filling all of them and pressing the first "Search" button
+        leaves the page, and a check that the sign-in form is gone then passes
+        for the wrong reason.  The form holding the password field wins, then
+        the search form for a search goal, then the form with the most fields.
+        """
+        if not inputs:
+            return inputs, buttons
+        password = next((i for i in inputs if auth_plan.is_password(i)), None)
+        search = next((i for i in inputs if i.get("type") == "search" or i.get("name") == "q"
+                       or "search" in str(i.get("name") or "").lower()), None)
+        if password is not None:
+            key = password.get("form")
+        elif search is not None and re.search(r"\bsearch|\bfind\b|\blook for\b", prompt or "", re.IGNORECASE):
+            key = search.get("form")
+        else:
+            counts: dict[int | None, int] = {}
+            for i in inputs:
+                if i.get("type") not in cls._FIELD_TYPES_SKIPPED:
+                    counts[i.get("form")] = counts.get(i.get("form"), 0) + 1
+            key = max(counts, key=lambda k: counts[k]) if counts else inputs[0].get("form")  # first form on a tie
+        form_inputs = [i for i in inputs if i.get("form") == key]
+        form_buttons = [b for b in buttons if b.get("form") == key] if key is not None else buttons
+        # A form whose button sits outside it (or is a link) keeps the page's buttons
+        return form_inputs, form_buttons or buttons
+
+    @classmethod
+    def _fill_steps(cls, inputs: list[dict[str, Any]], values: dict[str, str],
+                    prompt: str | None = None) -> list[dict[str, Any]]:
+        """FILL / CHECK / SELECT steps for *inputs* (numbered 0; callers renumber).
+
+        *values* may hold ``username``, ``email``, ``password``, ``confirm``,
+        ``name`` and ``text``; fields they do not cover get a valid stand-in.
+        """
+        p_lower = (prompt or "").lower()
+        steps: list[dict[str, Any]] = []
+        chosen: set[str] = set()  # radio groups already answered
+        password_filled = False
+        for inp in inputs:
+            if sum(1 for st in steps if st["action"] == "FILL") >= 8:
+                break  # enough for a sign-up form
+            itype = inp.get("type", "text")
+            iname = (inp.get("name") or "").lower()
+            target_sel = inp["selector"]
+
+            hint = f"{iname} {(inp.get('id') or '').lower()} {(inp.get('placeholder') or '').lower()}"
+            if itype == "select" and inp.get("required") and inp.get("option"):
+                steps.append({"step_number": 0, "action": "SELECT", "target": target_sel,
+                              "value": inp["option"], "description": f"'{inp['option'][:40]}' in the {iname or 'list'}"})
+                continue
+            if itype == "radio" and inp.get("required") and iname and iname not in chosen:
+                chosen.add(iname)  # one choice per required group
+                steps.append({"step_number": 0, "action": "CHECK", "target": target_sel, "value": None,
+                              "description": f"a {iname} option"})
+                continue
+            if itype == "checkbox" and inp.get("required"):
+                # A box the form will not submit without ("I accept the terms")
+                steps.append({"step_number": 0, "action": "CHECK", "target": target_sel, "value": None,
+                              "description": f"the {(inp.get('aria_label') or inp.get('name') or 'required')[:40]} checkbox"})
+                continue
+            if itype in cls._FIELD_TYPES_SKIPPED:
+                continue
+            if itype in _TYPED_VALUES:
+                val = _TYPED_VALUES[itype]
+                desc = f"the {(inp.get('placeholder') or inp.get('aria_label') or inp.get('name') or itype)[:40]} field"
+            elif "pass" in hint or itype == "password":
+                # The second password field is the confirmation ("Repeat password")
+                if "confirm" in values and (auth_plan.is_confirm(inp) or password_filled):
+                    val, desc = values["confirm"], "the confirm password field"
+                else:
+                    val, desc = values.get("password", "AutoQAPassword!99"), "the password field"
+                password_filled = True
+            elif itype == "email" or "mail" in hint:
+                val = values.get("email") or values.get("username") or "qa_user@testsphere.ai"
+                desc = "the email field"
+            elif any(k in hint for k in ("user", "login")):
+                val = values.get("username", "qa_user@testsphere.ai")
+                desc = "the user name field"
+            elif "name" in hint and values.get("name"):
+                val = values["name"]
+                desc = f"the {(inp.get('placeholder') or inp.get('aria_label') or inp.get('name') or 'name')[:40]} field"
+            elif "search" in hint or itype == "search" or "search" in p_lower:
+                val = values.get("text", "TestSphere QA Automation")
+                desc = "the search field"
+            else:
+                val = values.get("text", "Verified Test Input")
+                desc = f"the {(inp.get('placeholder') or inp.get('aria_label') or inp.get('name') or 'text')[:40]} field"
+            steps.append({"step_number": 0, "action": "FILL", "target": target_sel, "value": val, "description": desc})
+        return steps
+
+    @classmethod
+    def _auth_tests(cls, url: str, inputs: list[dict[str, Any]], buttons: list[dict[str, Any]],
+                    prompt: str | None, blocked: str | None = None) -> list[dict[str, Any]]:
+        """The login or sign-up form's own tests (wrong password, empty form, ...)."""
+        form_inputs, form_buttons = cls._form_of_goal(inputs, buttons, prompt)
+        form_kind = auth_plan.kind(form_inputs, prompt, form_buttons)
+        if form_kind is None:
+            return []
+        return auth_plan.negative_tests(
+            form_kind, url, form_inputs, cls._primary_button(form_buttons, True), cls.prompt_values(prompt),
+            lambda fields, values: cls._fill_steps(fields, values, prompt), blocked=bool(blocked))
 
     @classmethod
     def _plan_scenario(
@@ -561,8 +705,17 @@ class URLAnalyzerService:
         inputs: list[dict[str, Any]],
         buttons: list[dict[str, Any]],
         prompt: str | None = None,
+        *,
+        allow_test_accounts: bool = False,
+        email_domain: str | None = None,
+        blocked: str | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
-        """Steps for the page's form and the written goal, and which parts of the goal they test."""
+        """Steps for the page's form and the written goal, and which parts of the goal they test.
+
+        A sign-in without credentials in the goal, a sign-up when the project
+        does not allow test accounts, and either behind a CAPTCHA (*blocked*)
+        get no steps: their goal parts are reported as not tested, with why.
+        """
         steps = []
         step_num = 1
 
@@ -580,71 +733,38 @@ class URLAnalyzerService:
         # successful login or submit has already moved to another page (the
         # smoke test checks the title of the page as loaded).
 
-        # Step 3: Interactive Inputs (if discovered)
-        # Check if user prompt mentions login or credentials
-        p_lower = (prompt or "").lower()
         given = cls.prompt_values(prompt)
         parts = goal_plan.split_goal(prompt)
         use_form = not parts or goal_plan.is_form_part(parts[0], given) \
             or not goal_plan.later_part_steps(0, parts[0], given)
+        inputs, buttons = cls._form_of_goal(inputs, buttons, prompt)
+        form_kind = auth_plan.kind(inputs, prompt, buttons) if use_form else None
+        not_run = None
+        if form_kind == "login" and not (given.get("username") and given.get("password")):
+            not_run = "needs credentials in the goal"
+        elif form_kind == "signup" and not allow_test_accounts:
+            not_run = "test accounts are off for this project"
+        if form_kind and blocked:
+            not_run = blocked
+        if not_run:
+            # Never submit made-up credentials or create an account nobody allowed:
+            # the form's own tests (auth_plan) still run, and the goal says why it was not
+            return steps, {"tested": [], "untested": [f"{p} ({not_run})" if i == 0 else p for i, p in enumerate(parts)]}
+        if form_kind == "signup":
+            given = {**auth_plan.signup_values(email_domain), **{k: v for k, v in given.items() if k == "text"}}
+
+        # Step 3: Interactive Inputs (if discovered)
         if inputs and use_form:
-            chosen: set[str] = set()  # radio groups already answered
-            for inp in inputs:
-                if sum(1 for st in steps if st["action"] == "FILL") >= 8:
-                    break  # enough for a sign-up form
-                itype = inp.get("type", "text")
-                iname = (inp.get("name") or "").lower()
-                target_sel = inp["selector"]
-
-                hint = f"{iname} {(inp.get('id') or '').lower()} {(inp.get('placeholder') or '').lower()}"
-                if itype == "select" and inp.get("required") and inp.get("option"):
-                    steps.append({"step_number": step_num, "action": "SELECT", "target": target_sel,
-                                  "value": inp["option"], "description": f"'{inp['option'][:40]}' in the {iname or 'list'}"})
-                    step_num += 1
-                    continue
-                if itype == "radio" and inp.get("required") and iname and iname not in chosen:
-                    chosen.add(iname)  # one choice per required group
-                    steps.append({"step_number": step_num, "action": "CHECK", "target": target_sel, "value": None,
-                                  "description": f"a {iname} option"})
-                    step_num += 1
-                    continue
-                if itype == "checkbox" and inp.get("required"):
-                    # A box the form will not submit without ("I accept the terms")
-                    steps.append({"step_number": step_num, "action": "CHECK", "target": target_sel, "value": None,
-                                  "description": f"the {(inp.get('aria_label') or inp.get('name') or 'required')[:40]} checkbox"})
-                    step_num += 1
-                    continue
-                if itype in ("checkbox", "radio", "select", "submit", "button", "file", "range", "color", "reset"):
-                    continue
-                if itype in _TYPED_VALUES:
-                    val = _TYPED_VALUES[itype]
-                    desc = f"the {(inp.get('placeholder') or inp.get('aria_label') or inp.get('name') or itype)[:40]} field"
-                elif "pass" in hint or itype == "password":
-                    val = given.get("password", "AutoQAPassword!99")
-                    desc = "the password field"
-                elif any(k in hint for k in ("user", "email", "login")) or itype == "email":
-                    val = given.get("username", "qa_user@testsphere.ai")
-                    desc = "the user name field"
-                elif "search" in hint or itype == "search" or "search" in p_lower:
-                    val = given.get("text", "TestSphere QA Automation")
-                    desc = "the search field"
-                else:
-                    val = given.get("text", "Verified Test Input")
-                    desc = f"the {(inp.get('placeholder') or inp.get('aria_label') or inp.get('name') or 'text')[:40]} field"
-
-                steps.append({
-                    "step_number": step_num,
-                    "action": "FILL",
-                    "target": target_sel,
-                    "value": val,
-                    "description": desc,
-                })
+            for st in cls._fill_steps(inputs, given, prompt):
+                steps.append({**st, "step_number": step_num})
                 step_num += 1
 
         # Step 4: Buttons Click / Assertion (if discovered)
         primary_btn = cls._primary_button(buttons, bool(inputs)) if use_form else None
         goal_steps, coverage = goal_plan.plan_goal(
             prompt, inputs, given, form_used=use_form and bool(inputs or primary_btn), first_step=0)
+        if form_kind == "signup" and not goal_steps:  # no goal: the sign-up itself is the scenario
+            goal_steps = auth_plan.success_steps(next(i for i in inputs if auth_plan.is_password(i)))
         if primary_btn:
             steps.append({
                 "step_number": step_num,
