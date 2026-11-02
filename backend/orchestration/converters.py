@@ -329,6 +329,8 @@ def map_action_to_engine(action: TestAction) -> ActionType:
         TestAction.UPLOAD: ActionType.UPLOAD,
         TestAction.DRAG: ActionType.DRAG,
         TestAction.WAIT: ActionType.WAIT_FOR,
+        TestAction.RELOAD: ActionType.RELOAD,
+        TestAction.GO_BACK: ActionType.GO_BACK,
     }
     if action not in mapping:
         # Never guess (a click instead of a check toggles the box the wrong way)

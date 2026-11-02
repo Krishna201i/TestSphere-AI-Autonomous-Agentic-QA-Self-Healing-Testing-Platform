@@ -115,6 +115,8 @@ class TestAction(str, Enum):
     DRAG          Yes             Yes (target selector)
     PRESS         No              Yes (key name)
     WAIT          No              No
+    RELOAD        No              No
+    GO_BACK       No              No
     ============  ==============  ==============
     """
 
@@ -129,6 +131,8 @@ class TestAction(str, Enum):
     DRAG = "drag"
     PRESS = "press"
     WAIT = "wait"
+    RELOAD = "reload"    # load the current page again (does the session survive?)
+    GO_BACK = "go_back"  # the browser's Back button
 
 
 class AssertionType(str, Enum):
