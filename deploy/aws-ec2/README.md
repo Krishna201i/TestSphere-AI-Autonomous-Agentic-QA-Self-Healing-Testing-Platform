@@ -29,6 +29,20 @@ To add a secret, add its name to `KEYS` in `store-secrets.py`, run it, then reru
 - `deploy/aws-ec2/.env` on the instance holds `DOMAIN=<elastic-ip-with-dashes>.sslip.io`, or your own domain once DNS points at the Elastic IP.
   It may also hold `SECURITY_ACTIVE_SCAN_USERS=<firebase-uid>,…`: the only accounts that may run active (DAST) scans. Without it nobody can.
 
+## Disk and logs
+
+Container logs are capped at 3 × 10 MB each (`logging:` in the compose file), and artifacts expire after
+`ARTIFACT_RETENTION_DAYS`. A daily timer removes the Docker images and build cache every rebuild leaves behind,
+and any leftover repository checkouts ([`housekeeping.sh`](housekeeping.sh)). Install it once:
+
+```sh
+sudo cp /opt/testsphere/app/deploy/aws-ec2/testsphere-housekeeping.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now testsphere-housekeeping.timer
+systemctl list-timers testsphere-housekeeping.timer   # next run
+```
+
+Run it by hand with `sudo systemctl start testsphere-housekeeping` (output: `journalctl -u testsphere-housekeeping`).
+
 ## Updating
 
 Run on the instance (Session Manager, or `AWS-RunShellScript` through Run Command):

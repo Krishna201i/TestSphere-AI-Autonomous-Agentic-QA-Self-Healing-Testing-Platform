@@ -67,7 +67,7 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `AGENT_MEMORY_MAX_RECORDS` | `2000` | Newest healing records loaded at start-up; more remembers older heals but costs that many database reads per restart |
 | `INGEST_WORKSPACE` | `./data/repos` | Where ingested repositories are cloned |
 | `INGEST_GIT_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts public repositories may be cloned from (https only) |
-| `INGEST_MAX_FILES` / `INGEST_MAX_FILE_BYTES` / `INGEST_CLONE_TIMEOUT` | `20000` / `1000000` / `120` | Safety caps per repository: files analyzed, bytes read per file, seconds a clone may take |
+| `INGEST_MAX_FILES` / `INGEST_MAX_FILE_BYTES` / `INGEST_CLONE_TIMEOUT` / `INGEST_MAX_REPO_MB` | `20000` / `1000000` / `120` / `500` | Safety caps per repository: files analyzed, bytes read per file, seconds a clone may take, size of the checkout (a larger one is deleted and refused). A checkout is deleted once it has been analyzed |
 | `INGEST_ALLOW_LOCAL_PATHS` | `true` locally in development; `false` on Render/Heroku/Railway/Fly/Cloud Run unless set | Accept local folder paths for ingestion (reads the server's disk); never enable on a public server |
 | `SECURITY_SCAN_ALLOWED_HOSTS` | `""` | Extra hosts the scanner may contact (loopback always allowed); the active scanner is held to the same list |
 | `SECURITY_ACTIVE_SCAN` | `false` | Allow active (DAST) scanning — reflected XSS, SQL injection and open-redirect probes that send crafted inputs. Off by default; turn it on only where you are authorized to attack the targets in `SECURITY_SCAN_ALLOWED_HOSTS`. A scan or project still has to ask for it |

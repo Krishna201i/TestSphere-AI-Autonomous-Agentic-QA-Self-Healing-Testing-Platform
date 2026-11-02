@@ -8,6 +8,10 @@ x-testsphere: &testsphere
     context: ../..
   image: testsphere:latest
   restart: unless-stopped
+  logging: &logging
+    # Docker keeps container logs forever by default; cap them at 3 × 10 MB
+    driver: json-file
+    options: {max-size: 10m, max-file: "3"}
   env_file: /opt/testsphere/secrets.env
   environment: &env
     APP_ENV: production
@@ -50,6 +54,7 @@ services:
   caddy:
     image: caddy:2.10.2-alpine
     restart: unless-stopped
+    logging: *logging
     ports: ["80:80", "443:443"]
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN, e.g. 54-153-148-247.sslip.io}

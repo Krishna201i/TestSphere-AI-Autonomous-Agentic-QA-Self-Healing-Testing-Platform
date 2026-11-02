@@ -7,8 +7,8 @@ Safety:
 - Git URLs must be ``https://`` on an allowed host (GitHub, GitLab, Bitbucket by
   default) — no ``file://``, ``ssh``, ``ext::`` or internal hosts, so a request
   cannot make the server read local repositories or reach internal services.
-- Clones are shallow, time-limited, run with hooks and credential prompts
-  disabled, and land in a dedicated workspace directory.
+- Clones are shallow, time- and size-limited, run with hooks and credential
+  prompts disabled, and land in a dedicated workspace directory.
 - Local paths are only accepted when explicitly enabled (development).
 - Private repositories: a ``GitAuth`` (user name + token) is sent as an
   ``Authorization`` header scoped to that one host (``http.<url>.extraHeader``,
@@ -20,6 +20,7 @@ Safety:
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import os
 import re
@@ -33,6 +34,8 @@ from urllib.parse import urlsplit
 
 DEFAULT_GIT_HOSTS = frozenset({"github.com", "gitlab.com", "bitbucket.org"})
 CLONE_TIMEOUT_S = max(10, int(os.getenv("INGEST_CLONE_TIMEOUT", "120")))
+# A checkout larger than this is deleted and refused, so one repository cannot fill the disk
+MAX_REPO_MB = max(1, int(os.getenv("INGEST_MAX_REPO_MB", "500")))
 
 
 class SourceError(ValueError):
@@ -119,6 +122,16 @@ def _remove_tree(path: Path) -> bool:
     return not path.exists()
 
 
+def discard_checkout(path: Path) -> None:
+    """Delete a clone once it has been analyzed (best effort: a leftover is not an error)."""
+    with contextlib.suppress(OSError):
+        _remove_tree(path)
+
+
+def _size_mb(path: Path) -> float:
+    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file() and not f.is_symlink()) / 1_048_576
+
+
 def clone(url: str, workspace: Path, allowed_hosts: frozenset[str] = DEFAULT_GIT_HOSTS,
           auth: GitAuth | None = None) -> Path:
     """Shallow-clone *url* into *workspace* and return the checkout directory."""
@@ -150,6 +163,10 @@ def clone(url: str, workspace: Path, allowed_hosts: frozenset[str] = DEFAULT_GIT
         if auth:
             detail = detail.replace(auth.token, "…")
         raise SourceError(_clone_error(detail, auth, urlsplit(url).hostname or "the host"))
+    if (size := _size_mb(target)) > MAX_REPO_MB:
+        _remove_tree(target)
+        raise SourceError(f"The repository is {size:.0f} MB, more than this server's {MAX_REPO_MB} MB limit "
+                          "(INGEST_MAX_REPO_MB).")
     return target
 
 

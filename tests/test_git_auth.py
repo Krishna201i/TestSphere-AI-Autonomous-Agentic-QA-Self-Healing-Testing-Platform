@@ -4,6 +4,7 @@ import base64
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -112,3 +113,34 @@ def test_ingest_uses_the_callers_credentials(monkeypatch):
         SourceError("stop here")))
     TestClient(app).post("/api/ingest", json={"source": "https://gitlab.com/acme/private"})
     assert used == [GitAuth("oauth2", "token-of-local-dev")]
+
+
+def test_a_checkout_over_the_size_limit_is_deleted_and_refused(tmp_path, monkeypatch):
+    def fake_run(cmd, **kwargs):
+        target = Path(cmd[-1])
+        target.mkdir(parents=True)
+        (target / "big.bin").write_bytes(b"x" * 2 * 1_048_576)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(source.subprocess, "run", fake_run)
+    monkeypatch.setattr(source, "MAX_REPO_MB", 1)
+    with pytest.raises(source.SourceError, match="2 MB, more than this server's 1 MB limit"):
+        source.clone("https://github.com/a/b", tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ingest_deletes_the_clone_once_it_is_analyzed(tmp_path, monkeypatch):
+    from backend.api import ingest
+
+    checkout = tmp_path / "b-1234"
+
+    def fake_clone(url, ws, hosts, auth=None):
+        (checkout / "app").mkdir(parents=True)
+        (checkout / "app" / "main.py").write_text("print('hi')\n")
+        return checkout
+
+    monkeypatch.setattr(ingest, "clone", fake_clone)
+    monkeypatch.setattr(ingest.settings, "DEPENDENCY_SCAN", False)
+    blueprint = ingest.ingest_source("https://github.com/a/b")
+    assert blueprint["files_total"] >= 1
+    assert not checkout.exists()
