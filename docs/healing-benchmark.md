@@ -7,8 +7,8 @@ A heal is **correct** only if the healed locator resolves to the very element th
 | Strategy | Heals where it should | False heals (of all heals) | Correct refusals | Mean time per case |
 | :--- | ---: | ---: | ---: | ---: |
 | No healing | 0.0% | 0.0% (0) | 100.0% | 0.0 s |
-| Fallback chain (first unique fallback) | 96.1% | 17.4% (42) | 40.0% | 2.0 s |
-| **TestSphere healer** | 95.2% | 0.0% (0) | 100.0% | 2.0 s |
+| Fallback chain (first unique fallback) | 96.1% | 17.4% (42) | 40.0% | 2.7 s |
+| **TestSphere healer** | 95.7% | 0.0% (0) | 100.0% | 3.1 s |
 
 ## By mutation
 
@@ -24,7 +24,7 @@ A heal is **correct** only if the healed locator resolves to the very element th
 | wrapped | yes | 21 | 21/21 healed | 21/21 healed |
 | moved | yes | 21 | 21/21 healed | 21/21 healed |
 | look-alike-added | yes | 21 | 21/21 healed | 21/21 healed |
-| everything-renamed | yes | 21 | 14/21 healed | 11/21 healed |
+| everything-renamed | yes | 21 | 14/21 healed | 12/21 healed |
 | removed | no | 21 | 19/21 refused, 2 false | 21/21 refused |
 | replaced-by-look-alike | no | 21 | 1/21 refused, 20 false | 21/21 refused |
 | tag-changed | no | 17 | 0/17 refused, 17 false | 17/17 refused |

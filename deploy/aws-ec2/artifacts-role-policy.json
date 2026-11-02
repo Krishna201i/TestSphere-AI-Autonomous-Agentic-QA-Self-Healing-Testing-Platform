@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ArtifactObjects",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::BUCKET/testsphere-artifacts/*"
+    },
+    {
+      "Sid": "ArtifactListingAndRetention",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:GetLifecycleConfiguration", "s3:PutLifecycleConfiguration"],
+      "Resource": "arn:aws:s3:::BUCKET"
+    }
+  ]
+}

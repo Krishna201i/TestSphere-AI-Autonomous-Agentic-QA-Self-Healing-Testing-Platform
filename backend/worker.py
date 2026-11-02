@@ -16,6 +16,9 @@ queued runs survive API restarts or sleep.  It also runs the scheduler
   workers on separate machines.  The auto-deploy after a passing run also
   executes here, and the worker waits for it before taking the next run or
   stopping.
+- Liveness: every loop pass and heartbeat touches ``WORKER_ALIVE_FILE``
+  (``backend.worker_alive``, the container's health check), without a
+  database write.
 - Polling backs off while the queue stays empty (POLL_SECONDS doubling up to
   IDLE_POLL_SECONDS) and stale runs are looked for every REAP_SECONDS: an
   idle worker costs a few thousand database reads a day, not tens of
@@ -32,6 +35,7 @@ import signal
 import socket
 from datetime import UTC, datetime, timedelta
 
+from backend import worker_alive
 from backend.config import pipeline_problem, settings
 from backend.database.session import get_store, init_db
 from backend.database.store import Record, Store, StoreUnavailableError, now_iso
@@ -39,6 +43,7 @@ from backend.models import PIPELINE_RUNS
 from backend.observability import (
     configure_logging,
     default_log_format,
+    git_commit,
     init_error_reporting,
 )
 from backend.pipeline import runner
@@ -49,7 +54,7 @@ POLL_SECONDS = float(os.getenv("WORKER_POLL_SECONDS", "5"))
 IDLE_POLL_SECONDS = float(os.getenv("WORKER_IDLE_POLL_SECONDS", "60"))
 REAP_SECONDS = float(os.getenv("WORKER_REAP_SECONDS", "300"))
 HEARTBEAT_SECONDS = float(os.getenv("WORKER_HEARTBEAT_SECONDS", "30"))
-STALE_SECONDS = float(os.getenv("WORKER_STALE_SECONDS", "600"))
+STALE_SECONDS = worker_alive.STALE_SECONDS
 
 
 def worker_id() -> str:
@@ -98,6 +103,7 @@ def next_poll(idle_seconds: float) -> float:
 async def _heartbeat(db: Store, run_id: int) -> None:
     while True:
         await asyncio.sleep(HEARTBEAT_SECONDS)
+        worker_alive.touch()
         try:
             db.update(PIPELINE_RUNS, run_id, heartbeat_at=now_iso())
         except StoreUnavailableError as exc:
@@ -126,6 +132,7 @@ async def work(stop: asyncio.Event, db: Store | None = None) -> None:
     wait, last_reap = POLL_SECONDS, float("-inf")
     loop = asyncio.get_running_loop()
     while not stop.is_set():
+        worker_alive.touch()
         db_now = db or get_store()
         try:
             if loop.time() - last_reap >= REAP_SECONDS:
@@ -147,7 +154,7 @@ async def work(stop: asyncio.Event, db: Store | None = None) -> None:
 
 async def main() -> None:
     configure_logging(settings.LOG_LEVEL, default_log_format())
-    init_error_reporting(settings.SENTRY_DSN, settings.APP_ENV, os.getenv("RENDER_GIT_COMMIT"))
+    init_error_reporting(settings.SENTRY_DSN, settings.APP_ENV, git_commit())
     if problem := pipeline_problem():
         raise SystemExit(problem)
     if settings.PIPELINE_EXECUTION != "worker":

@@ -1,0 +1,139 @@
+# Deploys main to the EC2 instance after CI passes: builds the image here,
+# pushes it to ECR, and has the instance pull it over SSM Run Command, so the
+# 2 GB instance never builds. Rollback: run this workflow by hand with an
+# earlier commit; its image is already in ECR.
+#
+# Off until the repository variable DEPLOY_ENABLED is "true". One-time AWS
+# setup (OIDC role, ECR repository, instance permissions):
+# deploy/aws-ec2/README.md, "Continuous deployment".
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Commit to deploy (default: the latest on main); for a rollback, an earlier one"
+        required: false
+
+permissions:
+  contents: read
+  id-token: write # GitHub OIDC -> the deploy role; no AWS keys stored here
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false # never cut a deploy off halfway
+
+jobs:
+  deploy:
+    name: Build, push and roll out
+    if: >
+      vars.DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      DOMAIN: ${{ vars.DOMAIN }}
+    steps:
+      - name: Commit to deploy
+        id: commit
+        env:
+          INPUT: ${{ inputs.commit }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -eu
+          sha="${INPUT:-${RUN_SHA:-$GITHUB_SHA}}"
+          echo "$sha" | grep -Eq '^[0-9a-f]{7,40}$' || { echo "not a commit: $sha"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ steps.commit.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Full and short commit
+        id: rev
+        run: |
+          echo "full=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Build and push the image (skipped when this commit's image exists)
+        id: image
+        env:
+          SHA: ${{ steps.rev.outputs.full }}
+          SHORT: ${{ steps.rev.outputs.short }}
+        run: |
+          set -eu
+          registry="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$AWS_REGION.amazonaws.com"
+          image="$registry/$ECR_REPOSITORY:$SHA"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$SHA" >/dev/null 2>&1; then
+            echo "Image for $SHA already in ECR (rollback or rerun): not rebuilding"
+            exit 0
+          fi
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          docker build --build-arg GIT_COMMIT="$SHORT" -t "$image" .
+          docker push "$image"
+
+      - name: Roll out on the instance (SSM Run Command)
+        env:
+          SHA: ${{ steps.rev.outputs.full }}
+          SHORT: ${{ steps.rev.outputs.short }}
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          set -eu
+          registry="${IMAGE%%/*}"
+          # The checkout brings the compose file and Caddyfile of the same commit;
+          # TESTSPHERE_IMAGE in the folder's .env keeps manual compose commands on this image
+          script=$(cat <<SCRIPT
+          set -eu
+          cd /opt/testsphere/app
+          git fetch -q origin
+          git checkout -q --detach $SHA
+          cd deploy/aws-ec2
+          touch .env
+          sed -i '/^TESTSPHERE_IMAGE=/d;/^GIT_COMMIT=/d' .env
+          printf 'TESTSPHERE_IMAGE=%s\nGIT_COMMIT=%s\n' '$IMAGE' '$SHORT' >> .env
+          ./fetch-env.sh
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $registry
+          docker compose pull api worker
+          docker compose up -d --no-build --remove-orphans
+          docker compose ps
+          SCRIPT
+          )
+          params=$(jq -n --arg s "$script" '{commands: ($s | split("\n")), executionTimeout: ["1200"]}')
+          id=$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name AWS-RunShellScript \
+                 --comment "deploy ${SHA:0:12}" --parameters "$params" --query Command.CommandId --output text)
+          echo "SSM command $id"
+          for i in $(seq 1 120); do
+            status=$(aws ssm get-command-invocation --command-id "$id" --instance-id "$INSTANCE_ID" \
+                       --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in Pending|InProgress|Delayed) sleep 10 ;; *) break ;; esac
+          done
+          aws ssm get-command-invocation --command-id "$id" --instance-id "$INSTANCE_ID" \
+            --query '[StandardOutputContent, StandardErrorContent]' --output text | tail -40
+          test "$status" = Success || { echo "rollout $status"; exit 1; }
+
+      - name: The new version is healthy
+        run: |
+          set -eu
+          for i in $(seq 1 30); do
+            if curl -sf "https://$DOMAIN/api/health" | grep -q '"status":"ok"'; then echo "healthy"; exit 0; fi
+            sleep 10
+          done
+          echo "https://$DOMAIN/api/health is not ok after 5 minutes."
+          echo "Roll back: run this workflow with the previous commit (its image is in ECR)."
+          exit 1

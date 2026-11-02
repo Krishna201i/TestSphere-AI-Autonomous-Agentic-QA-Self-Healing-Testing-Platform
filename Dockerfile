@@ -23,6 +23,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# The commit being deployed (no .git in the image): /api/system and Sentry's release
+ARG GIT_COMMIT=""
+ENV GIT_COMMIT=$GIT_COMMIT
+
 # Exact, hash-checked dependency versions (the same lock CI installs)
 COPY requirements.txt ./
 RUN pip install --require-hashes -r requirements.txt
