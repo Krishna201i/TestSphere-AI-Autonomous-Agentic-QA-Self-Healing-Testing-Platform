@@ -581,12 +581,12 @@ def test_a_run_records_what_its_llm_calls_used(fresh_store, stub_network, monkey
     from agents.llm.config import LLMConfig
     from agents.llm.schemas import LLMRequest, LLMResponse, LLMUsage
 
-    class Claude(LLMClient):
+    class Groq(LLMClient):
         async def generate(self, request):
-            return LLMResponse(content="ok", model="claude-opus-5-5", provider="anthropic",
+            return LLMResponse(content="ok", model="llama-3.3-70b-versatile", provider="api",
                                usage=LLMUsage(prompt_tokens=1000, completion_tokens=500))
 
-    session = LLMClientSession(Claude(LLMConfig(provider="anthropic", api_key="k", model="claude-opus-5-5")))
+    session = LLMClientSession(Groq(LLMConfig(provider="api", api_key="k", model="llama-3.3-70b-versatile")))
     real_execute = runner._execute
 
     async def execute_with_ai(state, project, orchestrator, scanner):
@@ -599,7 +599,7 @@ def test_a_run_records_what_its_llm_calls_used(fresh_store, stub_network, monkey
     run = run_once(fresh_store, make_project(fresh_store), FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
     usage = run["llm_usage"]
     assert (usage["calls"], usage["input_tokens"], usage["output_tokens"]) == (2, 2000, 1000)
-    assert usage["limit"] == 2000 and usage["budget_exhausted"] and usage["estimated_cost_usd"] == 0.028
+    assert usage["limit"] == 2000 and usage["budget_exhausted"]
 
     second = run_once(fresh_store, make_project(fresh_store), FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
     assert second["llm_usage"]["calls"] == 2  # each run has its own budget, not a running total

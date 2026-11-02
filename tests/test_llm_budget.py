@@ -14,7 +14,7 @@ from agents.llm.schemas import LLMRequest, LLMResponse, LLMUsage
 class Counting(LLMClient):
     """A real-looking provider: every answer costs 600 + 400 tokens."""
 
-    def __init__(self, provider="anthropic", model="claude-opus-5-5"):
+    def __init__(self, provider="api", model="llama-3.3-70b-versatile"):
         super().__init__(LLMConfig(provider=provider, api_key="k", model=model, max_retries=0))
         self.calls = 0
 
@@ -38,16 +38,16 @@ def test_calls_are_charged_and_refused_once_the_budget_is_used_up():
             ask(session)
     assert provider.calls == 2 and not exc.value.is_retryable
     assert budget.summary() == {"calls": 2, "input_tokens": 1200, "output_tokens": 800, "limit": 2000,
-                                "estimated_cost_usd": round((1200 * 4 + 800 * 20) / 1e6, 4), "budget_exhausted": True}
+                                "budget_exhausted": True}
     assert current_budget() is None  # the block is over
     ask(session)  # no budget outside it
 
 
-def test_no_limit_still_counts_and_an_unpriced_model_has_no_estimate():
+def test_no_limit_still_counts():
     with token_budget(0) as budget:
         for _ in range(5):
             ask(LLMClientSession(Counting(model="some-local-model")))
-    assert budget.used == 5000 and not budget.exhausted and budget.summary()["estimated_cost_usd"] is None
+    assert budget.used == 5000 and not budget.exhausted
 
 
 def test_the_mock_provider_is_never_charged_or_refused():

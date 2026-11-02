@@ -26,16 +26,6 @@ from contextvars import ContextVar
 
 from agents.llm.schemas import LLMUsage
 
-# List prices in USD per million (input, output) tokens, for the cost estimate
-# only (no prompt caching or batch discounts); unknown models get no estimate.
-PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
-    "claude-fable-5-1": (10.0, 50.0),
-    "claude-opus-5-5": (4.0, 20.0),
-    "claude-opus-5": (5.0, 25.0),
-    "claude-sonnet-5-5": (2.0, 10.0),
-    "claude-haiku-5-5": (0.10, 0.50),
-}
-
 
 class TokenBudget:
     """Tokens used so far against a limit (0 = no limit, usage still counted)."""
@@ -45,7 +35,6 @@ class TokenBudget:
         self.calls = 0
         self.input_tokens = 0
         self.output_tokens = 0
-        self.cost_usd: float | None = 0.0
         self._lock = threading.Lock()
 
     @property
@@ -56,24 +45,18 @@ class TokenBudget:
     def exhausted(self) -> bool:
         return bool(self.limit) and self.used >= self.limit
 
-    def charge(self, usage: LLMUsage, model: str) -> None:
+    def charge(self, usage: LLMUsage) -> None:
         with self._lock:
             self.calls += 1
             self.input_tokens += usage.prompt_tokens
             self.output_tokens += usage.completion_tokens
-            price = PRICES_PER_MTOK.get(model)
-            if price is None or self.cost_usd is None:
-                self.cost_usd = None  # one call on an unpriced model: no honest total
-            else:
-                self.cost_usd += (usage.prompt_tokens * price[0] + usage.completion_tokens * price[1]) / 1_000_000
 
-    def summary(self) -> dict[str, int | float | None]:
+    def summary(self) -> dict[str, int | bool | None]:
         return {
             "calls": self.calls,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "limit": self.limit or None,
-            "estimated_cost_usd": round(self.cost_usd, 4) if self.cost_usd is not None else None,
             "budget_exhausted": self.exhausted,
         }
 

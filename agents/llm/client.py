@@ -372,7 +372,7 @@ class LLMClientSession:
                 # 3. Normalize
                 response = self._normalize_response(raw_response)
                 if budget is not None and self._config.provider != "mock":
-                    budget.charge(response.usage, response.model)
+                    budget.charge(response.usage)
 
                 logger.info(
                     "LLMClientSession.generate() — success on attempt "
