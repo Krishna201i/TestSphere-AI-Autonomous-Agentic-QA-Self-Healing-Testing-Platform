@@ -553,6 +553,15 @@ def test_active_scan_runs_in_the_pipeline_only_when_project_and_server_both_allo
     run_once(fresh_store, plain, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
     assert calls["n"] == 0
 
+    # Sign-in on: the project's owner must be listed in SECURITY_ACTIVE_SCAN_USERS
+    monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "someone-else")
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert calls["n"] == 0
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "local-dev")
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert calls["n"] == 1
+
 
 def test_every_result_says_what_it_checked_and_how_long_it_took(fresh_store, stub_network):
     class Timed(FakeOrchestrator):

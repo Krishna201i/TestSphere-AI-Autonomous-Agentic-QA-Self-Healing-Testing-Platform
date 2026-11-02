@@ -185,6 +185,11 @@ class Settings(BaseSettings):
     # here, and even then only ever touches SECURITY_SCAN_ALLOWED_HOSTS.
     SECURITY_ACTIVE_SCAN: bool = Field(
         default_factory=lambda: os.getenv("SECURITY_ACTIVE_SCAN", "false").lower() in ("true", "1"))
+    # With sign-in on, only these Firebase uids (comma-separated) may run active
+    # scans; empty means nobody, so a hosted server never lets any signed-in
+    # (or guest) user send attack payloads. Ignored when sign-in is off.
+    SECURITY_ACTIVE_SCAN_USERS: str = Field(
+        default_factory=lambda: os.getenv("SECURITY_ACTIVE_SCAN_USERS", ""))
     SECURITY_ACTIVE_MAX_REQUESTS: int = Field(
         default_factory=lambda: max(1, int(os.getenv("SECURITY_ACTIVE_MAX_REQUESTS", "300"))))
     # AI triage of scan findings (prioritize, explain, draft fixes). Like the

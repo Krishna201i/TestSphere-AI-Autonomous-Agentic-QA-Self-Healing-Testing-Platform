@@ -69,6 +69,18 @@ def get_active_scanner() -> ActiveScanner:
     return ActiveScanner(_configured_scope(), max_requests=settings.SECURITY_ACTIVE_MAX_REQUESTS)
 
 
+def active_scan_refusal(uid: str | None) -> str | None:
+    """Why *uid* may not run the active scanner, or None when it may."""
+    if not settings.SECURITY_ACTIVE_SCAN:
+        return "Active scanning is turned off on this server"
+    if not settings.AUTH_REQUIRED:
+        return None
+    allowed = {u.strip() for u in settings.SECURITY_ACTIVE_SCAN_USERS.split(",") if u.strip()}
+    if uid not in allowed:
+        return "Active scanning is not enabled for this account (SECURITY_ACTIVE_SCAN_USERS)"
+    return None
+
+
 def _translate(exc: Exception) -> HTTPException:
     if isinstance(exc, OutOfScopeError):
         return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
@@ -105,6 +117,8 @@ async def scan(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Active scanning is turned off on this server. Set SECURITY_ACTIVE_SCAN=true to "
                                    "enable it, and only for hosts you are authorized to test.")
+    if req.active and (refusal := active_scan_refusal(user.uid)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"{refusal}.")
     try:
         snap = await scanner.fetch(req.url)
         active_findings: list[Finding] = []
@@ -209,6 +223,9 @@ async def _retest(row, scanner: PassiveScanner, db: Store, actor: str, owner_uid
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Active scanning is turned off on this server, so this finding cannot be retested. "
                                    "Set SECURITY_ACTIVE_SCAN=true to enable it.")
+    if row.check_id in ACTIVE_CHECK_IDS and (refusal := active_scan_refusal(owner_uid)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail=f"{refusal}, so this finding cannot be retested.")
     retester = active_scanner if row.check_id in ACTIVE_CHECK_IDS else scanner
     finding = Finding.model_validate(json.loads(row.data))
     store.record_audit(db, actor=actor, kind="retest", ref=row.key, message=f"Retest started for {row.check_id} on {row.target_url}",
