@@ -11,3 +11,4 @@ rapidfuzz>=3.0.0
 sentry-sdk>=2.0,<3.0
 psycopg[binary]>=3.2,<4
 boto3>=1.35,<2
+anthropic>=2.3,<3

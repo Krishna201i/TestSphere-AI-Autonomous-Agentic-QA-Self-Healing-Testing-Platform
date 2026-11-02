@@ -19,6 +19,7 @@ Provider selection is driven by ``LLM_PROVIDER`` env var::
     LLM_PROVIDER=mock   →  MockLLMProvider  (default, no deps)
     LLM_PROVIDER=local  →  APIProvider      (local OpenAI-compatible server, e.g. Ollama)
     LLM_PROVIDER=api    →  APIProvider      (OpenAI-compatible chat API)
+    LLM_PROVIDER=anthropic → ClaudeProvider (Claude, Anthropic Messages API)
 """
 
 from __future__ import annotations
@@ -70,9 +71,15 @@ def get_llm_provider(config: LLMConfig | None = None) -> LLMClient:
         logger.info("Creating APIProvider (provider=%s, model=%s)", provider, config.model)
         return APIProvider(config)
 
+    if provider == "anthropic":
+        from agents.llm.providers.claude import ClaudeProvider
+
+        logger.info("Creating ClaudeProvider (model=%s)", config.model)
+        return ClaudeProvider(config)
+
     raise LLMConfigurationError(
         f"Unknown LLM_PROVIDER '{provider}'. "
-        f"Valid providers: mock, local, api.",
+        f"Valid providers: mock, local, api, anthropic.",
         provider="config",
     )
 
