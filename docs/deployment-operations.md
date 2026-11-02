@@ -55,16 +55,14 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 ### 2.2 AI Agent Settings
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `LLM_PROVIDER` | `mock` | `mock` (offline, deterministic), `anthropic` (Claude through the Anthropic Messages API), `api` (any OpenAI-compatible chat API), or `local` (an OpenAI-compatible server on this machine such as Ollama; no key needed, `LLM_BASE_URL` defaults to `http://localhost:11434/v1`). With `mock`, test generation and healing use only the built-in rules: the AI planner, AI healer and failure analyzer stay off |
-| `LLM_API_KEY` | `""` | API key for the configured endpoint (required if `LLM_PROVIDER=api`; with `anthropic`, `ANTHROPIC_API_KEY` also works) |
+| `LLM_PROVIDER` | `mock` | `mock` (offline, deterministic) or `api` (any OpenAI-compatible chat API), or `local` (an OpenAI-compatible server on this machine such as Ollama; no key needed, `LLM_BASE_URL` defaults to `http://localhost:11434/v1`). With `mock`, test generation and healing use only the built-in rules: the AI planner, AI healer and failure analyzer stay off |
+| `LLM_API_KEY` | `""` | API key for the configured endpoint (required if `LLM_PROVIDER=api`) |
 | `LLM_BASE_URL` | OpenAI | Base URL of the OpenAI-compatible endpoint (OpenAI, Anthropic, Gemini, Groq, OpenRouter) |
-| `LLM_MODEL` | `mock-model` (`claude-opus-5-5` with `anthropic`) | Model identifier sent to the endpoint |
-| `LLM_TEMPERATURE` | `0.2` | Sampling temperature for test synthesis and healing decisions (not sent to Claude: current models take none) |
-| `LLM_MAX_TOKENS` | `4096` (`16000` with `anthropic`) | Max output tokens per request; for Claude, thinking counts toward it |
-| `LLM_EFFORT` | `medium` with `anthropic` | Claude only: `low`, `medium`, `high`, `xhigh` or `max`. More effort means deeper thinking and more tokens per call |
-| `LLM_MAX_TOKENS_PER_RUN` | `300000` | Tokens all LLM calls of one pipeline run may use together (planner, explorer, failure analysis, healing, triage). Once used up, the run continues on the rule-based path. Each run records `llm_usage` (calls, tokens, estimated cost for known Claude models). `0` = no limit |
-| `LLM_FALLBACKS` | `on` | Claude only: a request the model declines runs on a fallback model inside the same call (models that support it) |
-| `LLM_TIMEOUT` | `60` (`300` with `anthropic`) | Request timeout in seconds |
+| `LLM_MODEL` | `mock-model` | Model identifier sent to the endpoint |
+| `LLM_TEMPERATURE` | `0.2` | Sampling temperature for test synthesis and healing decisions |
+| `LLM_MAX_TOKENS` | `4096` | Max output tokens per request |
+| `LLM_MAX_TOKENS_PER_RUN` | `300000` | Tokens all LLM calls of one pipeline run may use together (planner, explorer, failure analysis, healing, triage). Once used up, the run continues on the rule-based path. Each run records `llm_usage` (calls and tokens). `0` = no limit |
+| `LLM_TIMEOUT` | `60` | Request timeout in seconds |
 | `LLM_MAX_RETRIES` | `2` | Retries for transient errors (timeouts, 429, 5xx, network) |
 | `AGENT_MEMORY_BACKEND` | `database` | `database` persists healing memory in the configured store (survives restarts); `memory` keeps it in-process |
 | `AGENT_MEMORY_MAX_RECORDS` | `2000` | Newest healing records loaded at start-up; more remembers older heals but costs that many database reads per restart |

@@ -159,7 +159,7 @@ Production runs on one AWS EC2 instance (API with the dashboard, a pipeline work
 | Setting | Purpose |
 | --- | --- |
 | `FIREBASE_CREDENTIALS`, `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN` | Database and sign-in |
-| `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_EFFORT` | AI model (`mock`, Claude through `anthropic`, `local` such as Ollama, or any OpenAI-compatible `api`) |
+| `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_BASE_URL` | AI model (`mock`, `local` such as Ollama, or any OpenAI-compatible `api`) |
 | `SECURITY_SCAN_ALLOWED_HOSTS` | Hosts the scanner may contact (only hosts you own or may test) |
 | `SECURITY_ACTIVE_SCAN` | Allow active (DAST) scanning — XSS, SQLi and open-redirect probes; off by default, authorized hosts only |
 | `ARTIFACT_STORE=s3` (or `gcs`), `ARTIFACT_BUCKET` | Keep screenshots and traces in an S3 (or Cloud Storage) bucket |
