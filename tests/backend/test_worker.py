@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -164,3 +165,38 @@ def test_the_worker_waits_for_the_runs_deployment(fresh_store, monkeypatch):
     queue_run(fresh_store)
     asyncio.run(worker.run_one(fresh_store, worker.claim_next(fresh_store, "w")))
     assert finished == ["deploy"]
+
+
+def test_the_alive_file_tells_the_health_check_whether_the_loop_runs(tmp_path, monkeypatch):
+    from backend import worker_alive
+
+    monkeypatch.setattr(worker_alive, "ALIVE_FILE", str(tmp_path / "alive"))
+    assert not worker_alive.is_alive()  # never started
+    worker_alive.touch()
+    assert worker_alive.is_alive()
+    assert not worker_alive.is_alive(now=time.time() + worker_alive.STALE_SECONDS + 1)  # loop stopped
+
+
+def test_health_reports_a_stalled_worker(fresh_store, worker_mode, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from backend.api import health
+    from backend.main import app
+
+    def body():
+        health._queue_state["checked_at"] = 0.0
+        return TestClient(app).get("/api/health").json()
+
+    first = body()
+    assert first["worker"] == "ok" and first["queued"] == 0 and first["status"] == "ok"
+    run = queue_run(fresh_store)
+    assert body()["worker"] == "ok" and body()["queued"] == 1  # just queued: a worker has time to take it
+
+    old = (datetime.now(UTC) - timedelta(seconds=2 * worker.IDLE_POLL_SECONDS + 5)).isoformat()
+    fresh_store.update(PIPELINE_RUNS, run["id"], created_at=old)
+    stalled = body()
+    assert stalled["worker"] == "stalled" and stalled["status"] == "degraded"
+
+    fresh_store.insert(PIPELINE_RUNS, status="running", project_id=run["project_id"])  # busy, not stalled
+    assert body()["worker"] == "ok"
+    health._queue_state["checked_at"] = 0.0

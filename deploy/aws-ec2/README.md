@@ -58,9 +58,9 @@ Rollback: `git checkout <previous-sha>` in `/opt/testsphere/app`, then `docker c
 ## Checking
 
 ```sh
-docker compose ps                       # all three Up; api (healthy)
+docker compose ps                       # all three Up; api and worker (healthy)
 docker compose logs --tail 50 api worker
-curl -s https://$DOMAIN/api/health      # {"status":"ok",...,"database":"ok"}
+curl -s https://$DOMAIN/api/health      # {"status":"ok",...,"database":"ok","queued":0,"worker":"ok"}
 ```
 
 After the first deploy, add the domain to Firebase → Authentication → Settings → Authorised domains. The API serves

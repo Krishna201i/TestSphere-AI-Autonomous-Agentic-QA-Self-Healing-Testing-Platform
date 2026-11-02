@@ -48,7 +48,12 @@ services:
     <<: *testsphere
     command: ["python", "-m", "backend.worker"]
     healthcheck:
-      disable: true   # the image's check probes the API's HTTP port, which the worker has none of
+      # The image's check probes the API's HTTP port, which the worker has none
+      # of; this one fails when the worker loop stops (no database read)
+      test: ["CMD", "python", "-m", "backend.worker_alive"]
+      interval: 60s
+      timeout: 15s
+      start_period: 60s
     depends_on: [api]
 
   caddy:

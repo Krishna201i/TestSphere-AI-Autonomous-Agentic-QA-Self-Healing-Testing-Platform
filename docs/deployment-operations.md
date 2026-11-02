@@ -249,4 +249,4 @@ nothing reaches `main`, and from there the server, without passing them.
 - **Structured JSON Logging**: one JSON object per line by default when hosted (`LOG_FORMAT=json|text` overrides), with a `request_id` on every line written while handling a request; works with Render's log search, Datadog, CloudWatch or Grafana Loki.
 - **Request ids**: every response carries `X-Request-ID`; send one in to correlate with your own logs.
 - **Error tracking**: set `SENTRY_DSN` to report unhandled errors to Sentry.
-- **Health Checks**: `GET /api/health` (public) reports database connectivity; signed-in users see browser availability in `GET /api/system`.
+- **Health Checks**: `GET /api/health` (public) reports database connectivity and, in worker mode, the number of queued runs and `worker: stalled` (and `status: degraded`) when runs wait with none running for longer than an idle worker takes to poll. The worker container's health check is `python -m backend.worker_alive`, which fails once the worker loop has not run for `WORKER_STALE_SECONDS`; signed-in users see browser availability in `GET /api/system`.
