@@ -62,17 +62,51 @@ systemctl list-timers testsphere-housekeeping.timer   # next run
 
 Run it by hand with `sudo systemctl start testsphere-housekeeping` (output: `journalctl -u testsphere-housekeeping`).
 
-## Updating
+## Continuous deployment
 
-Run on the instance (Session Manager, or `AWS-RunShellScript` through Run Command):
+[`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) deploys `main` after CI passes: it builds the
+image on GitHub's runner, pushes it to ECR tagged with the commit, and has the instance pull and start it over SSM
+Run Command, then waits for `/api/health`. Nothing builds on the instance. It stays off until the repository
+variable `DEPLOY_ENABLED` is `true`. One-time setup (replace `ACCOUNT_ID`, `REGION` and `INSTANCE_ID` in the
+files under [`cd/`](cd/) first):
 
 ```sh
-cd /opt/testsphere/app && git pull --ff-only
+# Image registry: immutable tags (one per commit), scanned on push, the 20 newest kept
+aws ecr create-repository --repository-name testsphere --image-tag-mutability IMMUTABLE     --image-scanning-configuration scanOnPush=true
+aws ecr put-lifecycle-policy --repository-name testsphere --lifecycle-policy-text file://cd/ecr-lifecycle.json
+
+# GitHub's OIDC provider (once per account) and a deploy role only this repository's
+# "production" environment can assume
+aws iam create-open-id-connect-provider --url https://token.actions.githubusercontent.com     --client-id-list sts.amazonaws.com
+aws iam create-role --role-name testsphere-github-deploy     --assume-role-policy-document file://cd/github-deploy-trust.json
+aws iam put-role-policy --role-name testsphere-github-deploy --policy-name deploy     --policy-document file://cd/github-deploy-policy.json
+
+# The instance role may pull that one repository (ROLE = the instance role's name)
+aws iam put-role-policy --role-name ROLE --policy-name testsphere-ecr-pull     --policy-document file://cd/instance-ecr-pull-policy.json
+```
+
+In GitHub, Settings → Environments, create `production` and limit its deployment branches to `main` (the trust
+policy only accepts that environment). Then add these repository variables (Settings → Secrets and variables →
+Actions → Variables; none is secret): `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, `ECR_REPOSITORY=testsphere`,
+`EC2_INSTANCE_ID`, `DOMAIN`, and last `DEPLOY_ENABLED=true`. Run Command acts as root: if git on the instance
+reports "dubious ownership", run `sudo git config --global --add safe.directory /opt/testsphere/app` once.
+
+**Rollback:** Actions → Deploy → Run workflow with the earlier commit. Its image is still in ECR, so it is only
+pulled, not rebuilt.
+
+## Updating by hand
+
+Without CD, run on the instance (Session Manager, or `AWS-RunShellScript` through Run Command):
+
+```sh
+cd /opt/testsphere/app && git fetch && git checkout --detach origin/main
 cd deploy/aws-ec2 && ./fetch-env.sh && GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
 docker compose ps
 ```
 
-Rollback: `git checkout <previous-sha>` in `/opt/testsphere/app`, then `docker compose up -d --build` again.
+Rollback: `git checkout --detach <previous-sha>` in `/opt/testsphere/app`, then the same `docker compose` command.
+Once CD has run, `TESTSPHERE_IMAGE` in this folder's `.env` points at the ECR image; delete that line to build on
+the instance again.
 
 ## Checking
 

@@ -8,7 +8,9 @@ x-testsphere: &testsphere
     context: ../..
     args:
       GIT_COMMIT: ${GIT_COMMIT:-}   # GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
-  image: testsphere:latest
+  # Built here by default; CD (.github/workflows/deploy.yml) sets an ECR image
+  # in this folder's .env and pulls it instead, so nothing builds on the instance
+  image: ${TESTSPHERE_IMAGE:-testsphere:latest}
   restart: unless-stopped
   logging: &logging
     # Docker keeps container logs forever by default; cap them at 3 × 10 MB

@@ -232,6 +232,8 @@ Interactive runs from the Pipeline page (`/api/workflow/*`) still execute in the
 
 ## 4. Continuous Integration
 
+Deployment is a separate workflow, [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml): after CI passes on `main` it builds the image, pushes it to ECR and rolls it out on the EC2 instance over SSM (off until `DEPLOY_ENABLED` is set; see [`deploy/aws-ec2`](../deploy/aws-ec2/README.md#continuous-deployment)).
+
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every pull request and on pushes to `main`:
 
 | Job | Steps |
