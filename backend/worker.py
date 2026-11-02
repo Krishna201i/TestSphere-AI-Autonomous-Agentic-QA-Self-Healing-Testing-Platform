@@ -43,6 +43,7 @@ from backend.models import PIPELINE_RUNS
 from backend.observability import (
     configure_logging,
     default_log_format,
+    git_commit,
     init_error_reporting,
 )
 from backend.pipeline import runner
@@ -153,7 +154,7 @@ async def work(stop: asyncio.Event, db: Store | None = None) -> None:
 
 async def main() -> None:
     configure_logging(settings.LOG_LEVEL, default_log_format())
-    init_error_reporting(settings.SENTRY_DSN, settings.APP_ENV, os.getenv("RENDER_GIT_COMMIT"))
+    init_error_reporting(settings.SENTRY_DSN, settings.APP_ENV, git_commit())
     if problem := pipeline_problem():
         raise SystemExit(problem)
     if settings.PIPELINE_EXECUTION != "worker":

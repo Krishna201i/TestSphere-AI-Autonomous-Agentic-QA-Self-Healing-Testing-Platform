@@ -6,6 +6,8 @@
 x-testsphere: &testsphere
   build:
     context: ../..
+    args:
+      GIT_COMMIT: ${GIT_COMMIT:-}   # GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
   image: testsphere:latest
   restart: unless-stopped
   logging: &logging

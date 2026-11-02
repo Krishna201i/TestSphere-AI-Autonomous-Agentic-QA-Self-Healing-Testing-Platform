@@ -7,7 +7,6 @@ Exposes REST API endpoints and coordinates the TestSphere-AI platform services.
 import asyncio
 import contextlib
 import logging
-import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -45,13 +44,14 @@ from backend.observability import (
     RequestContextMiddleware,
     configure_logging,
     default_log_format,
+    git_commit,
     init_error_reporting,
 )
 from engine.browser import set_request_guard
 
 configure_logging(settings.LOG_LEVEL, default_log_format())
 logger = logging.getLogger("testsphere.backend")
-if init_error_reporting(settings.SENTRY_DSN, settings.APP_ENV, os.getenv("RENDER_GIT_COMMIT")):
+if init_error_reporting(settings.SENTRY_DSN, settings.APP_ENV, git_commit()):
     logger.info("Error reporting to Sentry enabled")
 
 # Browser runs fetch whatever a test step (or an LLM-planned step) points at:

@@ -86,7 +86,7 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `PIPELINE_AI_EXPLORER` / `PIPELINE_AI_EXPLORER_TIMEOUT` | `auto` / `240` | `auto`: with a real model, an AI agent reaches the project's written goal in a browser once (up to 15 steps, typing only values from the goal, refusing delete/pay/sign-out elements, ending with an outcome check it must pass) and saves the steps as the quarantined test "AI explored: …"; later runs replay it without the model, and the goal is explored again only after a failed replay or a changed goal. Seconds allowed for one exploration |
 | `PIPELINE_EXECUTION` | `inline` | `inline`: pipeline runs execute in the API process. `worker`: the API only queues them and a separate `python -m backend.worker` service executes them (and runs the scheduler). Requires Firestore. See §3.1 |
 | `WORKER_POLL_SECONDS` / `WORKER_HEARTBEAT_SECONDS` / `WORKER_STALE_SECONDS` | `5` / `30` / `600` | Worker queue polling; heartbeat while a run executes; a running run silent for longer than the stale limit is marked interrupted |
-| `DASHBOARD_URL` | Render's `RENDER_EXTERNAL_URL`, else `""` | Public address of the dashboard, used for "Open run" links in Slack alerts |
+| `DASHBOARD_URL` | `""` | Public address of the dashboard, used for "Open run" links in Slack alerts |
 | `PRIVACY_CONTACT` | `""` | E-mail or URL users contact about their data, shown on the dashboard's privacy notice (`#/privacy`, readable before sign-in). Without it the notice says "the operator of this server" |
 | `LOG_LEVEL` | `INFO` | Level for the app's own loggers |
 | `LOG_FORMAT` | `json` when hosted, `text` locally | `json` = one JSON object per line (ts, level, logger, message, request_id, extras), searchable in Render's log viewer |

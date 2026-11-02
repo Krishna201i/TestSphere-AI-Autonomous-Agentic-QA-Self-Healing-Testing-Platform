@@ -272,7 +272,7 @@ class Settings(BaseSettings):
 
     # The dashboard's public address, for links in notifications (Slack).
     # On Render it defaults to the service's own URL.
-    DASHBOARD_URL: str = Field(default_factory=lambda: os.getenv("DASHBOARD_URL") or os.getenv("RENDER_EXTERNAL_URL", ""))
+    DASHBOARD_URL: str = Field(default_factory=lambda: os.getenv("DASHBOARD_URL", ""))
 
     # Shown on the dashboard's privacy notice: who users contact about their
     # data (e-mail or URL of the operator / grievance officer).

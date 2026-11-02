@@ -68,7 +68,7 @@ Run on the instance (Session Manager, or `AWS-RunShellScript` through Run Comman
 
 ```sh
 cd /opt/testsphere/app && git pull --ff-only
-cd deploy/aws-ec2 && ./fetch-env.sh && docker compose up -d --build
+cd deploy/aws-ec2 && ./fetch-env.sh && GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
 docker compose ps
 ```
 
