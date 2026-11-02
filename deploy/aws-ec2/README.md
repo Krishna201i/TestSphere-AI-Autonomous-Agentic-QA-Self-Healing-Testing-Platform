@@ -62,6 +62,36 @@ systemctl list-timers testsphere-housekeeping.timer   # next run
 
 Run it by hand with `sudo systemctl start testsphere-housekeeping` (output: `journalctl -u testsphere-housekeeping`).
 
+## Backups and alarms
+
+[`monitoring/setup.sh`](monitoring/setup.sh), run once from your machine with the AWS CLI
+(`deploy/aws-ec2/monitoring/setup.sh <instance-id> <alert-email>`), sets up:
+
+- **Snapshots:** daily snapshots of the instance's disks (Data Lifecycle Manager), the 7 newest kept. They hold the
+  artifacts volume, Caddy's certificates and the `.env` files; secrets are in SSM anyway. To restore, create a volume
+  from a snapshot (EC2 → Snapshots) and swap it in, or launch a new instance from it.
+- **Alarms to your email (SNS):** a failed system check recovers the instance, a failed instance check reboots it,
+  and disk over 80 %, memory over 90 % or a CPU credit balance under 20 (a *standard* t3 slows down when it runs
+  out) send an alert.
+
+Disk and memory come from the CloudWatch agent. Give the instance role the managed policy
+`CloudWatchAgentServerPolicy`, then install and configure the agent over SSM:
+
+```sh
+aws ssm put-parameter --name AmazonCloudWatch-testsphere --type String --overwrite     --value file://deploy/aws-ec2/monitoring/cloudwatch-agent.json
+aws ssm send-command --instance-ids INSTANCE_ID --document-name AWS-ConfigureAWSPackage     --parameters action=Install,name=AmazonCloudWatchAgent
+aws ssm send-command --instance-ids INSTANCE_ID --document-name AmazonCloudWatch-ManageAgent     --parameters action=configure,mode=ec2,optionalConfigurationSource=ssm,optionalConfigurationLocation=AmazonCloudWatch-testsphere,optionalRestart=yes
+```
+
+**Firestore** is backed up on Google's side: `gcloud firestore backups schedules create --database='(default)'
+--recurrence=daily --retention=7d` (needs the Blaze plan).
+
+**From outside:** [`.github/workflows/uptime.yml`](../../.github/workflows/uptime.yml) checks `/api/health` every
+15 minutes once the repository variable `UPTIME_URL` is set; GitHub emails a failed run.
+
+Costs: about $1–2 a month (2 agent metrics, 5 alarms, incremental snapshots); `aws freetier
+get-account-plan-state` shows whether the project is on the free or paid plan.
+
 ## Continuous deployment
 
 [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) deploys `main` after CI passes: it builds the
