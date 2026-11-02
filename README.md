@@ -179,6 +179,7 @@ Every setting, the Dockerfile, the worker, Firestore rules and indexes, and CI a
 - [Self-healing & orchestration](docs/self-healing-orchestration.md)
 - [AI agent architecture](docs/member1-architecture.md)
 - [Integration guide](docs/integration-guide.md)
+- [MCP server for coding agents](docs/mcp-server.md)
 - [Deployment & operations](docs/deployment-operations.md)
 - [Healing benchmark](docs/healing-benchmark.md) · [Load test](docs/load-test.md)
 - [Contributing](CONTRIBUTING.md)

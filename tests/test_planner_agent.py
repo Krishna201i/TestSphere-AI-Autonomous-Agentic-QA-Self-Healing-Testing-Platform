@@ -1,11 +1,11 @@
 """
-TestSphere-AI — Day 4: Test Planner Agent Tests
+TestSphere-AI — Test Planner Agent Tests
 
-Tests for the LLMTestPlanner skeleton:
+Tests for the LLMTestPlanner:
   - Initialization with LLMClientSession
   - Input validation delegation
   - Output validation delegation
-  - generate_tests raises NotImplementedError (Day 5)
+  - generate_tests: results, input validated first
   - Prompt building
   - Mock scenario registration
 """
