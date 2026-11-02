@@ -197,6 +197,11 @@ class Settings(BaseSettings):
     # It only reasons over findings the scanners already produced in scope; it
     # never contacts the target itself.
     SECURITY_AI: str = Field(default_factory=lambda: os.getenv("SECURITY_AI", "auto").lower())
+    # Tokens every LLM call of one pipeline run may use together (AI planner,
+    # explorer, failure analysis, healing, security triage); once used up the
+    # run continues on the rule-based path.  0 = no limit (usage still recorded).
+    LLM_MAX_TOKENS_PER_RUN: int = Field(
+        default_factory=lambda: max(0, int(os.getenv("LLM_MAX_TOKENS_PER_RUN", "300000"))))
     SECURITY_AI_TIMEOUT: float = Field(
         default_factory=lambda: float(os.getenv("SECURITY_AI_TIMEOUT", "60")))
 

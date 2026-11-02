@@ -62,6 +62,7 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `LLM_TEMPERATURE` | `0.2` | Sampling temperature for test synthesis and healing decisions (not sent to Claude: current models take none) |
 | `LLM_MAX_TOKENS` | `4096` (`16000` with `anthropic`) | Max output tokens per request; for Claude, thinking counts toward it |
 | `LLM_EFFORT` | `medium` with `anthropic` | Claude only: `low`, `medium`, `high`, `xhigh` or `max`. More effort means deeper thinking and more tokens per call |
+| `LLM_MAX_TOKENS_PER_RUN` | `300000` | Tokens all LLM calls of one pipeline run may use together (planner, explorer, failure analysis, healing, triage). Once used up, the run continues on the rule-based path. Each run records `llm_usage` (calls, tokens, estimated cost for known Claude models). `0` = no limit |
 | `LLM_FALLBACKS` | `on` | Claude only: a request the model declines runs on a fallback model inside the same call (models that support it) |
 | `LLM_TIMEOUT` | `60` (`300` with `anthropic`) | Request timeout in seconds |
 | `LLM_MAX_RETRIES` | `2` | Retries for transient errors (timeouts, 429, 5xx, network) |

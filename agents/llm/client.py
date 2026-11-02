@@ -27,8 +27,10 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 
+from agents.llm.budget import current_budget
 from agents.llm.config import LLMConfig
 from agents.llm.exceptions import (
+    LLMBudgetExceededError,
     LLMError,
     LLMProviderError,
     LLMRateLimitError,
@@ -344,6 +346,12 @@ class LLMClientSession:
         """
         # 1. Validate
         self._validate_request(request)
+        budget = current_budget()
+        if budget is not None and budget.exhausted and self._config.provider != "mock":
+            raise LLMBudgetExceededError(
+                f"This run's LLM token budget ({budget.limit}) is used up; continuing without the model.",
+                provider=self._config.provider,
+            )
 
         max_attempts = 1 + self._config.max_retries
         last_error: LLMError | None = None
@@ -363,6 +371,8 @@ class LLMClientSession:
 
                 # 3. Normalize
                 response = self._normalize_response(raw_response)
+                if budget is not None and self._config.provider != "mock":
+                    budget.charge(response.usage, response.model)
 
                 logger.info(
                     "LLMClientSession.generate() — success on attempt "
