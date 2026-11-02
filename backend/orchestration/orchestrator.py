@@ -267,6 +267,46 @@ def _assertion_type(name: str) -> AssertionType:
     return AssertionType.ELEMENT_VISIBLE
 
 
+def parse_stored_steps(raw_steps: list[dict[str, Any]], base_url: str) -> tuple[list[Member1TestStep], list[Assertion]]:
+    """A test case's stored steps (pipeline or planner shape) as planner steps
+    and the checks written before any step.
+
+    Raises ``TypeError``/``ValueError``/``AttributeError`` for steps it cannot
+    read (an unknown action included: guessing would test something else).
+    """
+    m1_steps: list[Member1TestStep] = []
+    m1_assertions: list[Assertion] = []
+    for idx, s in enumerate(raw_steps, start=1):
+        act_raw = str(s.get("action", "navigate")).strip().lower()
+        if "assert" in act_raw or act_raw in _ASSERTION_NAMES:
+            as_type = _assertion_type(act_raw)
+            # A check belongs where it was written: right after the step
+            # before it (an outcome check mid-scenario), not at the end
+            (m1_steps[-1].assertions if m1_steps else m1_assertions).append(
+                Assertion(
+                    type=as_type,
+                    target=s.get("target") or s.get("target_selector") or "",
+                    expected=s.get("expected") or s.get("value") or "",
+                    description=s.get("description", f"Assert {idx}"),
+                )
+            )
+            continue
+        act_enum = TestAction.NAVIGATE if act_raw in ("goto", "open") else TestAction(act_raw)
+        val = s.get("value")
+        if act_enum == TestAction.NAVIGATE and not val:
+            val = base_url
+        m1_steps.append(
+            Member1TestStep(
+                step_number=s.get("step_number", len(m1_steps) + 1),
+                action=act_enum,
+                target=s.get("target") or s.get("target_selector"),
+                value=val,
+                description=s.get("description", f"Step {idx}"),
+            )
+        )
+    return m1_steps, m1_assertions
+
+
 # Hard cap on re-runs of a transient failure (the recovery policy sets the real limit)
 MAX_RETRY_RUNS = 3
 
@@ -378,41 +418,7 @@ class PlatformWorkflowOrchestrator:
                 else:
                     raw_steps = desc_obj
                 if isinstance(raw_steps, list):
-                    for idx, s in enumerate(raw_steps, start=1):
-                        act_raw = str(s.get("action", "navigate")).strip().lower()
-                        if "assert" in act_raw or act_raw in _ASSERTION_NAMES:
-                            as_type = _assertion_type(act_raw)
-                            # A check belongs where it was written: right after the step
-                            # before it (an outcome check mid-scenario), not at the end
-                            (m1_steps[-1].assertions if m1_steps else m1_assertions).append(
-                                Assertion(
-                                    type=as_type,
-                                    target=s.get("target") or s.get("target_selector") or "",
-                                    expected=s.get("expected") or s.get("value") or "",
-                                    description=s.get("description", f"Assert {idx}"),
-                                )
-                            )
-                        else:
-                            if act_raw in ("goto", "open"):
-                                act_enum = TestAction.NAVIGATE
-                            else:
-                                # An unknown action fails the run as unreadable: guessing
-                                # (e.g. a click for "check") would test something else
-                                act_enum = TestAction(act_raw)
-
-                            val = s.get("value")
-                            if act_enum == TestAction.NAVIGATE and not val:
-                                val = app.base_url
-
-                            m1_steps.append(
-                                Member1TestStep(
-                                    step_number=s.get("step_number", len(m1_steps) + 1),
-                                    action=act_enum,
-                                    target=s.get("target") or s.get("target_selector"),
-                                    value=val,
-                                    description=s.get("description", f"Step {idx}"),
-                                )
-                            )
+                    m1_steps, m1_assertions = parse_stored_steps(raw_steps, app.base_url)
             except (TypeError, ValueError, AttributeError) as exc:
                 # Never fall back to a trivial "open the page" run here: it
                 # would pass a test whose stored steps never ran.
