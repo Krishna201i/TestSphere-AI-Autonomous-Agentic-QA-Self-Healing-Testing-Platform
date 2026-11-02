@@ -105,8 +105,8 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 ### 2.3a Run evidence and integrations
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `ARTIFACT_STORE` | `local` | `local` keeps run artifacts on this server's disk (lost on redeploy on most hosts; not shared with a separate worker). `gcs` stores them in a Cloud Storage bucket: use it in production |
-| `ARTIFACT_BUCKET` | `""` | With `gcs`: the bucket, e.g. the Firebase project's default `<project-id>.appspot.com` (Firebase console → Storage). The service account in `FIREBASE_CREDENTIALS` needs *Storage Object Admin* on it. Artifacts live under `testsphere-artifacts/` |
+| `ARTIFACT_STORE` | `local` | `local` keeps run artifacts on this server's disk (lost with the disk; on EC2 the API and worker share them through a Docker volume). `s3` stores them in an S3 bucket and `gcs` in a Cloud Storage bucket: either survives losing the server |
+| `ARTIFACT_BUCKET` | `""` | With `s3`: a private bucket in the server's Region, reached with the default AWS credentials (the instance role on EC2, which needs `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` and `s3:ListBucket` on it, plus `s3:GetLifecycleConfiguration`/`s3:PutLifecycleConfiguration` to apply the retention; see `deploy/aws-ec2/README.md`). With `gcs`: the bucket, e.g. the Firebase project's default `<project-id>.appspot.com` (Firebase console → Storage). The service account in `FIREBASE_CREDENTIALS` needs *Storage Object Admin* on it. Artifacts live under `testsphere-artifacts/` |
 | `ARTIFACT_TRACES` | `true` | Record a Playwright trace (`.zip`, typically 1–5 MB) for every test run, downloadable from the run page |
 | `ARTIFACT_RETENTION_DAYS` | `30` | Delete artifacts after this many days (`0` keeps them until the execution or account is deleted). On GCS this is a bucket lifecycle rule set on first use (needs `storage.buckets.update`; otherwise add the rule in the console) |
 

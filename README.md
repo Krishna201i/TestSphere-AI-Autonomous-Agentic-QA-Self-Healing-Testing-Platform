@@ -65,7 +65,7 @@ frontend/  React dashboard ──────────────▶ backend
                                              │  pipeline/       pipeline runner, scheduler, verified deploy
                                              │  orchestration/  ties the agents to the engine
                                              │  database/       Store interface: Firestore, local JSON, memory
-                                             │  artifacts.py    screenshots, DOM snapshots, traces (disk or GCS)
+                                             │  artifacts.py    screenshots, DOM snapshots, traces (disk, S3 or GCS)
                                              │  github.py, notify.py, netguard.py, http_hardening.py
                                              ▼
         agents/   planner, failure analyzer, healing decisions, memory, LLM client
@@ -162,7 +162,7 @@ Production runs on one AWS EC2 instance (API with the dashboard, a pipeline work
 | `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_BASE_URL` | AI model (`mock`, `local` such as Ollama, or any OpenAI-compatible `api`) |
 | `SECURITY_SCAN_ALLOWED_HOSTS` | Hosts the scanner may contact (only hosts you own or may test) |
 | `SECURITY_ACTIVE_SCAN` | Allow active (DAST) scanning — XSS, SQLi and open-redirect probes; off by default, authorized hosts only |
-| `ARTIFACT_STORE=gcs`, `ARTIFACT_BUCKET` | Keep screenshots and traces in Cloud Storage |
+| `ARTIFACT_STORE=s3` (or `gcs`), `ARTIFACT_BUCKET` | Keep screenshots and traces in an S3 (or Cloud Storage) bucket |
 | `TOKEN_ENCRYPTION_KEY` | Encrypts connected GitHub tokens (required when hosted) |
 | `PIPELINE_EXECUTION=worker` | Run pipelines in a separate worker service |
 | `DASHBOARD_URL` | Links in Slack alerts and GitHub commit statuses |

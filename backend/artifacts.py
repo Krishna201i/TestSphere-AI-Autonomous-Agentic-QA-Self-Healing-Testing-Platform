@@ -10,6 +10,8 @@ Backends (``ARTIFACT_STORE``):
   * ``gcs``   — a Cloud Storage bucket (``ARTIFACT_BUCKET``), via the same
     firebase-admin credentials as Firestore.  Survives redeploys and is shared
     by the API and a separate worker.
+  * ``s3``    — an S3 bucket (``ARTIFACT_BUCKET``), with the default AWS
+    credential chain (the instance role on EC2).  Same guarantees as ``gcs``.
 
 Keys are ``{owner_uid}/executions/{execution_id}/{name}``; the API only
 serves keys recorded on an execution the caller owns, so a key is never
@@ -154,6 +156,61 @@ class GCSArtifactStore:
         return 0
 
 
+class S3ArtifactStore:
+    """S3 bucket; everything lives under ROOT so the lifecycle rule that
+    applies the retention never touches anything else in the bucket."""
+
+    ROOT = "testsphere-artifacts/"
+    RULE_ID = "testsphere-artifacts-retention"
+
+    def __init__(self, bucket: str, client: Any = None) -> None:
+        if client is None:
+            import boto3
+            from botocore.config import Config
+
+            client = boto3.client("s3", config=Config(retries={"mode": "standard"}, connect_timeout=5,
+                                                      read_timeout=30))
+        self.client = client
+        self.bucket = bucket
+
+    def put(self, key: str, data: bytes, content_type: str) -> None:
+        self.client.put_object(Bucket=self.bucket, Key=self.ROOT + key, Body=data, ContentType=content_type)
+
+    def get(self, key: str) -> tuple[bytes, str] | None:
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=self.ROOT + key)
+        except self.client.exceptions.NoSuchKey:
+            return None
+        with response["Body"] as body:
+            return body.read(), response.get("ContentType") or "application/octet-stream"
+
+    def delete_prefix(self, prefix: str) -> int:
+        pages = self.client.get_paginator("list_objects_v2").paginate(Bucket=self.bucket, Prefix=self.ROOT + prefix)
+        keys = list(pages.search("Contents[].Key"))
+        for start in range(0, len(keys), 1000):  # the most one request may delete
+            self.client.delete_objects(Bucket=self.bucket, Delete={
+                "Objects": [{"Key": k} for k in keys[start:start + 1000]], "Quiet": True})
+        return len(keys)
+
+    def expire_after(self, days: int) -> int:
+        """Have S3 delete artifacts after *days* (a lifecycle rule), keeping the bucket's other rules."""
+        from botocore.exceptions import ClientError
+
+        try:
+            rules = self.client.get_bucket_lifecycle_configuration(Bucket=self.bucket)["Rules"]
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] != "NoSuchLifecycleConfiguration":
+                raise
+            rules = []
+        ours = {"ID": self.RULE_ID, "Filter": {"Prefix": self.ROOT}, "Status": "Enabled",
+                "Expiration": {"Days": days}}
+        if ours in rules:
+            return 0  # already in place: no write every few hours
+        rules = [r for r in rules if r.get("ID") != self.RULE_ID] + [ours]
+        self.client.put_bucket_lifecycle_configuration(Bucket=self.bucket, LifecycleConfiguration={"Rules": rules})
+        return 0
+
+
 _store: ArtifactStore | None = None
 
 
@@ -165,6 +222,10 @@ def get_artifact_store() -> ArtifactStore:
             if not settings.ARTIFACT_BUCKET:
                 raise RuntimeError("ARTIFACT_STORE=gcs needs ARTIFACT_BUCKET (e.g. your-project.appspot.com).")
             _store = GCSArtifactStore(settings.ARTIFACT_BUCKET)
+        elif settings.ARTIFACT_STORE == "s3":
+            if not settings.ARTIFACT_BUCKET:
+                raise RuntimeError("ARTIFACT_STORE=s3 needs ARTIFACT_BUCKET (an S3 bucket in this server's Region).")
+            _store = S3ArtifactStore(settings.ARTIFACT_BUCKET)
         else:
             _store = LocalArtifactStore(settings.ARTIFACTS_DIR)
     return _store
@@ -347,7 +408,8 @@ def expire_old_artifacts(force: bool = False) -> int | None:
         removed = get_artifact_store().expire_after(days)
     except Exception as exc:  # noqa: BLE001 - retried on the next window
         logger.warning("Could not apply the %s-day artifact retention: %s. On Cloud Storage the service "
-                       "account needs storage.buckets.update, or add the lifecycle rule in the console.", days, exc)
+                       "account needs storage.buckets.update; on S3 the role needs s3:GetLifecycleConfiguration "
+                       "and s3:PutLifecycleConfiguration. Or add the lifecycle rule in the console.", days, exc)
         return None
     if removed:
         logger.info("Removed %s artifact(s) older than %s days", removed, days)

@@ -29,6 +29,25 @@ To add a secret, add its name to `KEYS` in `store-secrets.py`, run it, then reru
 - `deploy/aws-ec2/.env` on the instance holds `DOMAIN=<elastic-ip-with-dashes>.sslip.io`, or your own domain once DNS points at the Elastic IP.
   It may also hold `SECURITY_ACTIVE_SCAN_USERS=<firebase-uid>,…`: the only accounts that may run active (DAST) scans. Without it nobody can.
 
+## Artifacts in S3 (optional)
+
+By default screenshots, DOM snapshots and traces stay in the `testsphere-data` volume, so they go if the disk
+does. To keep them in S3 instead, once (in the project's selected Region, ap-southeast-2 here; check it in
+AWS Settings > View all projects > Overview > Additional Info > Region):
+
+```sh
+BUCKET=testsphere-artifacts-$(aws sts get-caller-identity --query Account --output text)
+aws s3api create-bucket --bucket "$BUCKET" --region ap-southeast-2     --create-bucket-configuration LocationConstraint=ap-southeast-2
+aws s3api put-public-access-block --bucket "$BUCKET" --public-access-block-configuration     BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+# Let the instance role use only that bucket (ROLE = the instance role's name)
+sed "s/BUCKET/$BUCKET/" deploy/aws-ec2/artifacts-role-policy.json > /tmp/artifacts-policy.json
+aws iam put-role-policy --role-name ROLE --policy-name testsphere-artifacts     --policy-document file:///tmp/artifacts-policy.json
+```
+
+Then add `ARTIFACT_STORE=s3` and `ARTIFACT_BUCKET=<bucket>` to this folder's `.env` on the instance and run
+`docker compose up -d`. The app applies `ARTIFACT_RETENTION_DAYS` as a lifecycle rule on `testsphere-artifacts/`.
+New buckets are encrypted (SSE-S3) by default. Artifacts already in the volume stay there until they expire.
+
 ## Disk and logs
 
 Container logs are capped at 3 × 10 MB each (`logging:` in the compose file), and artifacts expire after

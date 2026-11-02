@@ -240,9 +240,10 @@ class Settings(BaseSettings):
     ALLOW_PRIVATE_TARGETS: bool = Field(default_factory=lambda: _default_allow_private_targets())
 
     # Test artifacts (screenshots, DOM snapshots, Playwright traces) kept per
-    # execution: "local" (ARTIFACTS_DIR on this server) or "gcs" (a Cloud
-    # Storage bucket, e.g. the Firebase project's <project>.appspot.com), which
-    # survives redeploys and is shared with a separate worker.  Kept for
+    # execution: "local" (ARTIFACTS_DIR on this server), "gcs" (a Cloud
+    # Storage bucket, e.g. the Firebase project's <project>.appspot.com) or
+    # "s3" (an S3 bucket, AWS credentials from the instance role), which
+    # survive redeploys and are shared with a separate worker.  Kept for
     # ARTIFACT_RETENTION_DAYS (0 = until the execution or account is deleted).
     ARTIFACT_STORE: str = Field(default_factory=lambda: os.getenv("ARTIFACT_STORE", "local").strip().lower())
     ARTIFACT_BUCKET: str = Field(default_factory=lambda: os.getenv("ARTIFACT_BUCKET", ""))

@@ -34,6 +34,11 @@ x-testsphere: &testsphere
     # ...and only for these Firebase uids (comma-separated; set in this folder's
     # .env next to DOMAIN). Empty = nobody, so no guest or other user can.
     SECURITY_ACTIVE_SCAN_USERS: ${SECURITY_ACTIVE_SCAN_USERS:-}
+    # Run artifacts: the data volume by default, or an S3 bucket (README:
+    # "Artifacts in S3"), set in this folder's .env
+    ARTIFACT_STORE: ${ARTIFACT_STORE:-local}
+    ARTIFACT_BUCKET: ${ARTIFACT_BUCKET:-}
+    AWS_REGION: ap-southeast-2
   volumes:
     - testsphere-data:/app/data   # artifacts (screenshots, traces) the API serves and the worker writes
 
