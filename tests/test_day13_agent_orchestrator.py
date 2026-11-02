@@ -783,8 +783,8 @@ class TestHealingFeedback:
         )
         state = await orchestrator.submit_execution_result(state, exec_result)
 
-        if state.current_step != WorkflowStep.HEALING_PENDING_VALIDATION:
-            pytest.skip("No healing recommendation was generated")
+        # A healing recommendation must be generated for this failure
+        assert state.current_step == WorkflowStep.HEALING_PENDING_VALIDATION
 
         # Get the recommended selector
         recommended_selector = state.healing_recommendation.selected_candidate.selector
@@ -839,8 +839,8 @@ class TestHealingFeedback:
         )
         state = await orchestrator.submit_execution_result(state, exec_result)
 
-        if state.current_step != WorkflowStep.HEALING_PENDING_VALIDATION:
-            pytest.skip("No healing recommendation was generated")
+        # A healing recommendation must be generated for this failure
+        assert state.current_step == WorkflowStep.HEALING_PENDING_VALIDATION
 
         recommended_selector = state.healing_recommendation.selected_candidate.selector
 

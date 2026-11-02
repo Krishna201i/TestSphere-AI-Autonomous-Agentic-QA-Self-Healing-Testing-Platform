@@ -197,6 +197,11 @@ class Settings(BaseSettings):
     # It only reasons over findings the scanners already produced in scope; it
     # never contacts the target itself.
     SECURITY_AI: str = Field(default_factory=lambda: os.getenv("SECURITY_AI", "auto").lower())
+    # Tokens every LLM call of one pipeline run may use together (AI planner,
+    # explorer, failure analysis, healing, security triage); once used up the
+    # run continues on the rule-based path.  0 = no limit (usage still recorded).
+    LLM_MAX_TOKENS_PER_RUN: int = Field(
+        default_factory=lambda: max(0, int(os.getenv("LLM_MAX_TOKENS_PER_RUN", "300000"))))
     SECURITY_AI_TIMEOUT: float = Field(
         default_factory=lambda: float(os.getenv("SECURITY_AI_TIMEOUT", "60")))
 
@@ -253,7 +258,7 @@ class Settings(BaseSettings):
     ARTIFACT_RETENTION_DAYS: int = Field(default_factory=lambda: int(os.getenv("ARTIFACT_RETENTION_DAYS", "30")))
 
     # Verified deploy (loop stage 6): deploy hooks may only go to these hosts
-    # (Render, Vercel and Netlify are always allowed), and a deployment must be
+    # (Render, Vercel, Netlify and GitHub workflow dispatches are always allowed), and a deployment must be
     # healthy DEPLOY_HEALTHY_CHECKS times in a row within DEPLOY_TIMEOUT_SECONDS.
     # Without a visible change on the health URL, the new version is assumed
     # live after DEPLOY_SETTLE_SECONDS.

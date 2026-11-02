@@ -1,19 +1,22 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { WorkspaceProvider, useWorkspace } from './state/Workspace';
 import { AuthProvider, useAuth } from './state/Auth';
 import { healthStats } from './lib/derive';
 import TopNav, { PAGES } from './components/TopNav';
 import CommandCenter from './pages/CommandCenter';
-import Autopilot from './pages/Autopilot';
-import Reports from './pages/Reports';
-import Security from './pages/Security';
-import Profile from './pages/Profile';
 import Privacy, { PrivacyStandalone } from './pages/Privacy';
 import { AuthGate } from './pages/Login';
-import PipelineVisualizer from './pages/PipelineVisualizer';
-import AuditLogs from './pages/AuditLogs';
-import RunDetail from './pages/RunDetail';
+
+// The home page and Privacy (also shown signed out) come with the app; the
+// other pages load when first opened, so the first visit downloads less
+const Autopilot = lazy(() => import('./pages/Autopilot'));
+const Reports = lazy(() => import('./pages/Reports'));
+const Security = lazy(() => import('./pages/Security'));
+const Profile = lazy(() => import('./pages/Profile'));
+const PipelineVisualizer = lazy(() => import('./pages/PipelineVisualizer'));
+const AuditLogs = lazy(() => import('./pages/AuditLogs'));
+const RunDetail = lazy(() => import('./pages/RunDetail'));
 
 /** Shown while the API is up but its database is not — explains why actions fail. */
 function DatabaseBanner() {
@@ -171,7 +174,9 @@ function Dashboard({ uid }) {
       <AccountBanner />
       <main>
         <PageErrorBoundary key={page}>
-          <View onNavigate={navigate} params={params} />
+          <Suspense fallback={<div className="empty" role="status">Loading…</div>}>
+            <View onNavigate={navigate} params={params} />
+          </Suspense>
         </PageErrorBoundary>
       </main>
     </WorkspaceProvider>

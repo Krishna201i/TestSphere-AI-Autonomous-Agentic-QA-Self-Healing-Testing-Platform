@@ -6,7 +6,9 @@ The healer takes a failure analysis and DOM context, then proposes
 candidate selectors for healing. It NEVER declares healing
 successful — that is Member 2's responsibility.
 
-Implementation will be added on Day 2+.
+This interface is not implemented: healing decisions are made by
+``HealingDecisionEngine`` (``agents/healer/healing_decision.py``), and the browser-side heal by
+``engine/healer.py``.
 """
 
 from __future__ import annotations

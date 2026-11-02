@@ -35,7 +35,7 @@ rollback, and the whole loop runs again on a schedule or on every push.
 | **3. Unified report** | Test results, regressions since the previous run, flaky tests and security findings in one report, with screenshots, DOM snapshots and Playwright traces for every test. Every failure says why it happened and what to do next (from the failure analyzer), every run opens with a plain-language summary, and each run downloads as a PDF report (summary, failures with screenshots, all tests) or is shared through a read-only link that expires. |
 | **4. AI remediation** | Fix proposals a human approves, and fix patches against the app's own code (FastAPI, Flask, Django, Express, Next.js, nginx), syntax-checked and opened as a pull request on GitHub or Bitbucket, or a merge request on GitLab, in one click. |
 | **5. Validation engine** | Re-runs the original check after a fix; findings resolve or reopen as regressions. |
-| **6. Verified deploy** | Calls the deploy hook (Render, Vercel, Netlify), waits for the new version to be healthy, runs smoke tests, and rolls back automatically if either fails. |
+| **6. Verified deploy** | Calls the deploy hook (Render, Vercel, Netlify, or a GitHub Actions workflow for any other host), waits for the new version to be healthy, runs smoke tests, and rolls back automatically if either fails. |
 
 Around the loop: scheduled runs and GitHub push webhooks, commit statuses on GitHub, Slack alerts, JUnit XML
 export, quarantine for known-bad tests, an audit trail of every action, sign-in with per-user data isolation,
@@ -47,7 +47,7 @@ and a dashboard that shows the loop live.
 
 | Measurement | Result |
 | --- | --- |
-| **Self-healing benchmark** — 277 broken-locator cases (4 pages × every target × 15 mutations), [details](docs/healing-benchmark.md) | Heals **95.2%** of the cases where healing is right with **0 false heals**, and refuses **100%** of the cases where it is wrong. A static fallback chain heals 96.1% but **17.4%** of its heals hit the wrong element. |
+| **Self-healing benchmark** — 277 broken-locator cases (4 pages × every target × 15 mutations), [details](docs/healing-benchmark.md) | Heals **95.7%** of the cases where healing is right with **0 false heals**, and refuses **100%** of the cases where it is wrong. A static fallback chain heals 96.1% but **17.4%** of its heals hit the wrong element. |
 | **Live sites** — the-internet.herokuapp.com, saucedemo.com, practicetestautomation.com, TodoMVC | 4 of 4 run the written goal (log in, add an item) and pass |
 | **Real repositories** — FastAPI, Express and Django RealWorld apps, microblog, Flask | 5 of 5 get a fix patch that applies to a fresh clone and compiles |
 | **Security and robustness** — SSRF, access control, input limits, webhook signatures, rate limits | 52 of 52 checks pass |
@@ -179,6 +179,7 @@ Every setting, the Dockerfile, the worker, Firestore rules and indexes, and CI a
 - [Self-healing & orchestration](docs/self-healing-orchestration.md)
 - [AI agent architecture](docs/member1-architecture.md)
 - [Integration guide](docs/integration-guide.md)
+- [MCP server for coding agents](docs/mcp-server.md)
 - [Deployment & operations](docs/deployment-operations.md)
 - [Healing benchmark](docs/healing-benchmark.md) · [Load test](docs/load-test.md)
 - [Contributing](CONTRIBUTING.md)

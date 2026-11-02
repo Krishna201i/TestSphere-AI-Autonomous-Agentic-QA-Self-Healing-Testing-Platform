@@ -395,12 +395,12 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                   </label>
                   <h4 className="section-title mt-3">Verified deploy</h4>
                   <label className="field">
-                    Deploy hook (Render, Vercel or Netlify)
+                    Deploy hook (Render, Vercel, Netlify, or a GitHub workflow's dispatch URL)
                     <input className="input" value={form.deploy_hook_url} onChange={(e) => setForm({ ...form, deploy_hook_url: e.target.value })}
                       placeholder="https://api.render.com/deploy/srv-…?key=…" />
                   </label>
                   <label className="field">
-                    Rollback hook (optional; on Render the last verified commit is redeployed)
+                    Rollback hook (optional; on Render or a GitHub workflow the last verified commit is redeployed)
                     <input className="input" value={form.rollback_hook_url} onChange={(e) => setForm({ ...form, rollback_hook_url: e.target.value })}
                       placeholder="A deploy hook for your stable version" />
                   </label>
