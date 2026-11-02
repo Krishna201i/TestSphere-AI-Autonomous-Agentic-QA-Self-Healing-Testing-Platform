@@ -75,8 +75,9 @@ POSITION_FALLOFF_PX = 300.0
 _STABLE_ATTRS = ("data-testid", "data-test-id", "type", "autocomplete", "href", "for")
 
 # Identity rules (see score_fingerprint):
-# - an unchanged id on the same kind of element is strong evidence even when the
-#   element was moved or wrapped: its score is raised to ID_ANCHOR_SCORE;
+# - an unchanged id, or an unchanged accessible name (aria-label), on the same
+#   kind of element is strong evidence even when the element was moved, wrapped
+#   or had everything else renamed: its score is raised to ID_ANCHOR_SCORE;
 # - when the stored element had identifying features (id, name, placeholder,
 #   aria-label, text, href) and the candidate shares none of them, it is a
 #   look-alike, not the same element: its score is capped at NO_IDENTITY_CAP.
@@ -216,7 +217,7 @@ def score_fingerprint(
     identity = _identity_matches(stored, live, ignore)
     if identity is False:
         score = min(score, NO_IDENTITY_CAP)
-    elif "id" not in ignore and stored.id and live.id == stored.id:
+    elif _anchored(stored, live, ignore):
         score = max(score, ID_ANCHOR_SCORE)
     return round(min(max(score, 0.0), 1.0), 4), signals
 
@@ -297,6 +298,15 @@ def _identity_matches(stored: ElementFingerprint, live: ElementFingerprint,
     if stored.attributes.get("href") and "href" not in ignore:
         checks.append(live.attributes.get("href") == stored.attributes["href"])
     return any(checks) if checks else None
+
+
+def _anchored(stored: ElementFingerprint, live: ElementFingerprint, ignore: frozenset[str]) -> bool:
+    """An identifier that names this very element survived: its id, or the
+    accessible name users and assistive technology know it by."""
+    return any(
+        attr not in ignore and getattr(stored, field) and getattr(live, field) == getattr(stored, field)
+        for attr, field in (("id", "id"), ("aria-label", "aria_label"))
+    )
 
 
 def _attribute_signal(stored: ElementFingerprint, live: ElementFingerprint,
