@@ -126,9 +126,17 @@ project row): TestSphere calls the project's deploy hook, records the commit (`g
 repository), waits until the health URL (default: app URL) answers healthily `DEPLOY_HEALTHY_CHECKS` times in
 a row — after the page changes, or after `DEPLOY_SETTLE_SECONDS` if it never does — within
 `DEPLOY_TIMEOUT_SECONDS`, then runs the project's smoke tests. If health or smoke tests fail it calls the
-rollback hook, or with a Render deploy hook redeploys the last verified commit (`&ref=<sha>`), and checks
-health again. Hooks may only go to Render, Vercel, Netlify or hosts in `DEPLOY_HOOK_HOSTS` (https, no
-redirects). *Deploy and verify automatically after a run passes* closes the loop. Deployments run in the
+rollback hook, or with a Render deploy hook or a GitHub workflow redeploys the last verified commit, and checks
+health again. Hooks may only go to Render, Vercel, Netlify, GitHub or hosts in `DEPLOY_HOOK_HOSTS` (https, no
+redirects).
+
+**Any host through GitHub Actions** (AWS, a VPS, anything a workflow can deploy): use the workflow's dispatch URL
+as the deploy hook, `https://api.github.com/repos/<owner>/<repo>/actions/workflows/<file>/dispatches`, with
+`?ref=<branch>` if it is not `main`. TestSphere starts the workflow with the project owner's connected GitHub
+token (Profile → GitHub) and passes the commit as the `commit` input, so the workflow must declare one
+(`on: workflow_dispatch: inputs: commit:`), as [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)
+does. A rollback starts the same workflow with the last verified commit. On `api.github.com` only that endpoint
+is accepted, so a hook cannot use the token for anything else. *Deploy and verify automatically after a run passes* closes the loop. Deployments run in the
 API process, also with `PIPELINE_EXECUTION=worker`.
 
 | Variable | Default | Description |

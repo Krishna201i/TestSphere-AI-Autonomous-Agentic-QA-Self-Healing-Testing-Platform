@@ -35,7 +35,7 @@ rollback, and the whole loop runs again on a schedule or on every push.
 | **3. Unified report** | Test results, regressions since the previous run, flaky tests and security findings in one report, with screenshots, DOM snapshots and Playwright traces for every test. Every failure says why it happened and what to do next (from the failure analyzer), every run opens with a plain-language summary, and each run downloads as a PDF report (summary, failures with screenshots, all tests) or is shared through a read-only link that expires. |
 | **4. AI remediation** | Fix proposals a human approves, and fix patches against the app's own code (FastAPI, Flask, Django, Express, Next.js, nginx), syntax-checked and opened as a pull request on GitHub or Bitbucket, or a merge request on GitLab, in one click. |
 | **5. Validation engine** | Re-runs the original check after a fix; findings resolve or reopen as regressions. |
-| **6. Verified deploy** | Calls the deploy hook (Render, Vercel, Netlify), waits for the new version to be healthy, runs smoke tests, and rolls back automatically if either fails. |
+| **6. Verified deploy** | Calls the deploy hook (Render, Vercel, Netlify, or a GitHub Actions workflow for any other host), waits for the new version to be healthy, runs smoke tests, and rolls back automatically if either fails. |
 
 Around the loop: scheduled runs and GitHub push webhooks, commit statuses on GitHub, Slack alerts, JUnit XML
 export, quarantine for known-bad tests, an audit trail of every action, sign-in with per-user data isolation,

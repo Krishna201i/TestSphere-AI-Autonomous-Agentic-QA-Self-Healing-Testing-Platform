@@ -258,7 +258,7 @@ class Settings(BaseSettings):
     ARTIFACT_RETENTION_DAYS: int = Field(default_factory=lambda: int(os.getenv("ARTIFACT_RETENTION_DAYS", "30")))
 
     # Verified deploy (loop stage 6): deploy hooks may only go to these hosts
-    # (Render, Vercel and Netlify are always allowed), and a deployment must be
+    # (Render, Vercel, Netlify and GitHub workflow dispatches are always allowed), and a deployment must be
     # healthy DEPLOY_HEALTHY_CHECKS times in a row within DEPLOY_TIMEOUT_SECONDS.
     # Without a visible change on the health URL, the new version is assumed
     # live after DEPLOY_SETTLE_SECONDS.
