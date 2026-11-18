@@ -83,8 +83,11 @@ def get_scanner() -> PassiveScanner:
 
 def get_active_scanner() -> ActiveScanner:
     """Build an active scanner limited to the configured scope (overridable in tests)."""
+    from backend.services.xss_confirm import confirm_in_browser
+
+    # Reflected XSS is confirmed by running the payload in the guarded browser
     return ActiveScanner(_configured_scope(), max_requests=settings.SECURITY_ACTIVE_MAX_REQUESTS,
-                         transport=_ScannerTransport())
+                         transport=_ScannerTransport(), xss_confirmer=confirm_in_browser)
 
 
 def active_scan_refusal(uid: str | None) -> str | None:

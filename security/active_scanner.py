@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 import re
 import secrets
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
@@ -75,6 +75,13 @@ _SQL_ERRORS = [
 
 class ActiveScanError(RuntimeError):
     """A scan could not complete (not a finding about the target)."""
+
+
+# Loads one request in a real browser and says whether the payload's script ran:
+# (method, url, params, flag) -> True ran (window[flag] was set), False did not,
+# None could not tell.  Supplied by the backend (a guarded browser); this
+# package stays free of browsers.
+XssConfirmer = Callable[[str, str, dict[str, str], str], Awaitable["bool | None"]]
 
 
 @dataclass
@@ -149,11 +156,13 @@ class ActiveScanner:
         timeout: float = 10.0,
         max_requests: int = 300,
         transport: httpx.AsyncBaseTransport | None = None,
+        xss_confirmer: XssConfirmer | None = None,
     ) -> None:
         self.scope = scope or ScopePolicy()
         self._timeout = timeout
         self._max_requests = max_requests
         self._transport = transport
+        self._confirm = xss_confirmer
         self._sent = 0
 
     async def scan(self, url: str) -> list[Finding]:
@@ -209,6 +218,22 @@ class ActiveScanner:
         except httpx.RequestError:
             return None
 
+    async def _confirm_xss(self, point: _Point, token: str) -> bool | None:
+        """Whether a script injected through *point* runs in a real browser
+        (None when there is no confirmer, no budget left, or it could not tell).
+        The payload only sets a flag on ``window``: it reads and sends nothing."""
+        if self._confirm is None or self._sent >= self._max_requests:
+            return None
+        flag = f"__testsphere_{token}"
+        params = dict(point.params)
+        params[point.field] = f'ts{token}<img src=x onerror="window.{flag}=1">'
+        self._sent += 1
+        try:
+            return await self._confirm(point.method, point.url, params, flag)
+        except Exception as exc:  # noqa: BLE001 - confirmation is best effort; the finding stands
+            log.warning("Could not confirm XSS on %s in a browser: %s", point.url, exc)
+            return None
+
     async def _probe(self, http: httpx.AsyncClient, point: _Point) -> list[Finding]:
         findings: list[Finding] = []
         where = "body" if point.is_body else "query"
@@ -223,12 +248,23 @@ class ActiveScanner:
             # The verbatim marker (with its '<img') is an unescaped reflection: an
             # escaped copy can never contain it.  Pages often echo a value twice
             # (escaped in the search box, raw in a heading); the raw one is the hole.
+            confidence, proof = 0.9, []
+            ran = await self._confirm_xss(point, token)
+            if ran is True:
+                confidence = 1.0
+                proof = ["Confirmed in a real browser: a script in the payload ran on the page."]
+            elif ran is False:
+                # Reflected but inert: inside a <textarea>, <title>, a comment or a
+                # script string the marker never becomes markup.  Kept, but unproven.
+                confidence = 0.5
+                proof = ["Not confirmed: the payload did not run in a real browser (the value may land "
+                         "inside a <textarea>, <title> or comment). Check this one by hand."]
             findings.append(Finding(
                 check_id="SEC-XSS-REFLECTED", source=FindingSource.SECURITY,
-                title="Reflected cross-site scripting (XSS)", severity=Severity.HIGH, confidence=0.9,
+                title="Reflected cross-site scripting (XSS)", severity=Severity.HIGH, confidence=confidence,
                 component=component, target_url=point.source_url,
                 evidence=[f"The {where} parameter {point.field!r} was reflected into the HTML response "
-                          f"without escaping (sent {marker!r}, found it verbatim in the page)."],
+                          f"without escaping (sent {marker!r}, found it verbatim in the page).", *proof],
                 root_cause="User input is written into the HTML page without output encoding.",
                 recommendation="HTML-escape all user input before rendering it, or use a templating engine that "
                                "auto-escapes. Add a Content-Security-Policy as defence in depth.",
