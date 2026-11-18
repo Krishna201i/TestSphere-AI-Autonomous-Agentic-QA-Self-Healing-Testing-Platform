@@ -13,7 +13,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from engine.runner import run_test
-from engine.schemas import ActionType, RunOptions, Step, StepStatus, Target, TestPlan, TestStatus
+from engine.schemas import (
+    ActionType,
+    RunOptions,
+    Step,
+    StepStatus,
+    Target,
+    TestPlan,
+    TestStatus,
+)
 
 PAGE = """<!doctype html><title>t</title>
 <div id="banner" style="display:none">Saved!</div>
