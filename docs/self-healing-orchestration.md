@@ -56,8 +56,10 @@ The core innovation of TestSphere-AI is its closed-loop self-healing automation 
                                                       v
                                        +------------------------------+
                                        |  8. Re-execution & Verify    |
-                                       | Playwright re-runs with new  |
-                                       | healed selector              |
+                                       | The candidate is OFFERED to  |
+                                       | the engine as a fallback;    |
+                                       | the engine's own checks      |
+                                       | decide (see 1.1)             |
                                        +--------------+---------------+
                                                       |
                                        +--------------+--------------+
@@ -70,6 +72,28 @@ The core innovation of TestSphere-AI is its closed-loop self-healing automation 
                         | Update TestCase Model |     | Report Error to User  |
                         +-----------------------+     +-----------------------+
 ```
+
+
+### 1.1 Who decides a heal
+
+The AI layer (steps 6–7) only **proposes** a replacement. The re-run in step 8 keeps the
+broken locator and offers the candidate as the step's first fallback, so the engine judges it
+in the live page exactly as it judges its own fallbacks: same tag and kind of control, a shared
+identifying feature (id, accessible name, text, href), and a score of at least 0.75 against the
+stored fingerprint. A heal counts only when the engine accepted that candidate **and** the whole
+test then passed. A candidate the engine refuses (a look-alike after the real element was
+removed) leaves the run FAILED; it is never recorded as a validated heal.
+
+Two more rules keep a failure from turning into a pass:
+
+- A check is not a locator to heal: `assert_visible` on an element that is on the page but
+  hidden fails as a check; only a locator that matches nothing goes to healing.
+- Healing memory is partitioned by owner: one account's history is never the baseline for
+  another account's heal.
+
+CI runs the quick healing benchmark with `--gate 0.90`: any false heal or missed refusal fails
+the build. `tests/backend/test_no_false_heals.py` covers the AI layer end to end in a real
+browser.
 
 ---
 
