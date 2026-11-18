@@ -49,7 +49,12 @@ from backend.config import git_hosts, settings
 from backend.database.session import get_store
 from backend.database.store import Record, Store, StoreUnavailableError, now_iso
 from backend.models import APPLICATIONS, DEPLOYMENTS, PROJECTS, TEST_CASES
-from backend.netguard import BlockedTargetError, check_target, guard_request
+from backend.netguard import (
+    BlockedTargetError,
+    PinnedTransport,
+    check_target,
+    guard_request,
+)
 from backend.pipeline.deploy_config import (
     DeployConfigError,
     check_hook_url,
@@ -364,7 +369,8 @@ async def _deploy(state: _State, project: Record, transport, orchestrator, sleep
         return
 
     hooks = httpx.AsyncClient(timeout=15, follow_redirects=False, transport=transport)
-    site = httpx.AsyncClient(timeout=15, follow_redirects=True, transport=transport,
+    # The health URL is the user's: every hop is checked, and connects only to checked addresses
+    site = httpx.AsyncClient(timeout=15, follow_redirects=True, transport=transport or PinnedTransport(),
                              event_hooks={"request": [guard_request]})
     async with hooks, site:
         state.save(status="deploying", started_at=now_iso())

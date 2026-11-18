@@ -101,3 +101,105 @@ def test_ipv6_forms_are_judged_by_the_address_they_reach(address, blocked):
     from backend.netguard import _blocked
 
     assert _blocked(ipaddress.ip_address(address)) is blocked
+
+
+# ── PinnedTransport: DNS rebinding ─────────────────────────────
+
+
+@pytest.fixture
+def fake_dns(monkeypatch):
+    """Resolve names from a table; each name's answers are used in order (rebinding)."""
+    import socket
+
+    answers: dict[str, list[list[str]]] = {}
+    calls: list[str] = []
+
+    def getaddrinfo(host, port, *args, **kwargs):
+        calls.append(host)
+        queue = answers[host]
+        ips = queue.pop(0) if len(queue) > 1 else queue[0]
+        return [(socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))
+                for ip in ips]
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    return answers, calls
+
+
+def _pinned_with_recorder(responses=None):
+    """A PinnedTransport whose real connection is replaced by a recorder."""
+    from backend.netguard import PinnedTransport
+
+    sent: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return (responses or {}).get(request.extensions["sni_hostname"], httpx.Response(200, text="ok"))
+
+    transport = PinnedTransport()
+    transport._inner = httpx.MockTransport(handler)
+    return transport, sent
+
+
+async def test_pinned_transport_connects_to_the_address_it_checked(hosted, fake_dns):
+    answers, calls = fake_dns
+    # First answer is public, every later one internal: a rebinding attack
+    answers["rebind.test"] = [["93.184.215.14"], ["169.254.169.254"]]
+    transport, sent = _pinned_with_recorder()
+    async with httpx.AsyncClient(transport=transport) as client:
+        response = await client.get("https://rebind.test/page?x=1")
+    assert response.status_code == 200
+    assert calls == ["rebind.test"]  # resolved once, never again to connect
+    assert sent[0].url.host == "93.184.215.14" and sent[0].url.path == "/page"
+    assert sent[0].headers["host"] == "rebind.test"  # the site still sees its own name
+    assert sent[0].extensions["sni_hostname"] == "rebind.test"  # and TLS verifies it
+
+
+async def test_pinned_transport_refuses_a_name_with_any_internal_address(hosted, fake_dns):
+    answers, _ = fake_dns
+    answers["mixed.test"] = [["93.184.215.14", "10.0.0.7"]]
+    transport, sent = _pinned_with_recorder()
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(BlockedTargetError, match="10.0.0.7"):
+            await client.get("http://mixed.test/")
+    assert sent == []
+
+
+async def test_pinned_transport_checks_every_redirect_hop(hosted, fake_dns):
+    answers, _ = fake_dns
+    answers["public.test"] = [["93.184.215.14"]]
+    answers["metadata.test"] = [["169.254.169.254"]]
+    redirect = httpx.Response(302, headers={"Location": "http://metadata.test/latest/meta-data/"})
+    transport, sent = _pinned_with_recorder({"public.test": redirect})
+    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
+        with pytest.raises(BlockedTargetError, match="169.254.169.254"):
+            await client.get("http://public.test/")
+    assert [r.extensions["sni_hostname"] for r in sent] == ["public.test"]
+
+
+async def test_pinned_transport_refuses_internal_ip_literals(hosted):
+    transport, sent = _pinned_with_recorder()
+    async with httpx.AsyncClient(transport=transport) as client:
+        for url in ("http://169.254.169.254/latest/", "http://[::1]:8000/", "http://10.1.2.3/"):
+            with pytest.raises(BlockedTargetError):
+                await client.get(url)
+    assert sent == []
+
+
+async def test_pinned_transport_tries_the_next_checked_address_when_one_is_unreachable(hosted, fake_dns):
+    answers, _ = fake_dns
+    answers["dual.test"] = [["93.184.215.14", "2606:4700::1111"]]  # dead IPv4 route, working IPv6
+    from backend.netguard import PinnedTransport
+
+    tried: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        tried.append(request.url.host)
+        if request.url.host == "93.184.215.14":
+            raise httpx.ConnectTimeout("no route", request=request)
+        return httpx.Response(200)
+
+    transport = PinnedTransport()
+    transport._inner = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        assert (await client.get("https://dual.test/")).status_code == 200
+    assert tried == ["93.184.215.14", "2606:4700::1111"]

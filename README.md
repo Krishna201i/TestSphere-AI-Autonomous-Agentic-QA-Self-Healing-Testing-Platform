@@ -187,7 +187,8 @@ Every setting, the Dockerfile, the worker, Firestore rules and indexes, and CI a
 ## Security and privacy
 
 - Scanning is scope-limited to an allowlist; testing a site needs its owner's permission. The scanner is passive by default, with opt-in active (DAST) probes behind a server switch.
-- Every outbound request, including everything the test browser loads, goes through an SSRF guard.
+- Every outbound request, including everything the test browser loads, goes through an SSRF guard that resolves
+  each host once, refuses internal addresses and connects only to the address it checked (no DNS rebinding).
 - Each user sees only their own data. The privacy notice in the dashboard explains what is stored, and
   *Delete account* erases it together with the sign-in account.
 

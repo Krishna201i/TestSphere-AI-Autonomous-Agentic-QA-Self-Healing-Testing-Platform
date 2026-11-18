@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from backend.netguard import guard_request
+from backend.netguard import PinnedTransport
 from backend.services import auth_plan, goal_plan
 
 logger = logging.getLogger("testsphere.analyzer")
@@ -41,14 +41,15 @@ async def get_verifying_first(url: str, *, timeout: float, headers: dict[str, st
     is still fetched, without verification, so it can be tested; the caller
     reports the invalid certificate instead of silently trusting it.
     """
-    options = dict(timeout=timeout, follow_redirects=True, event_hooks={"request": [guard_request]})
+    # PinnedTransport checks every hop's addresses and connects only to them (SSRF, DNS rebinding)
+    options = dict(timeout=timeout, follow_redirects=True)
     try:
-        async with httpx.AsyncClient(**options) as client:
+        async with httpx.AsyncClient(transport=PinnedTransport(), **options) as client:
             return await client.get(url, headers=headers), True
     except httpx.ConnectError as exc:
         if not is_certificate_error(exc):
             raise
-    async with httpx.AsyncClient(verify=False, **options) as client:  # noqa: S501  # nosec B501 - reported as a finding
+    async with httpx.AsyncClient(transport=PinnedTransport(verify=False), **options) as client:  # noqa: S501  # nosec B501 - reported as a finding
         return await client.get(url, headers=headers), False
 
 
