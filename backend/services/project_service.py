@@ -18,7 +18,8 @@ from backend.services.exceptions import ProjectNotFoundError
 
 # Fields a client may set on a project besides name/description
 PIPELINE_FIELDS = ("app_url", "repo_url", "prompt", "schedule_minutes", "slack_webhook_url", "notify_on",
-                   "deploy_hook_url", "rollback_hook_url", "health_url", "deploy_on_pass", "sign_in_first", "active_scan")
+                   "deploy_hook_url", "rollback_hook_url", "health_url", "deploy_on_pass", "sign_in_first", "active_scan",
+                   "allow_test_accounts", "test_email_domain")
 
 
 def new_webhook_secret() -> str:

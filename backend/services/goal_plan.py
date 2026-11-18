@@ -22,6 +22,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from backend.services.auth_plan import SERVER_ERROR
+
 # Parts of a goal: split on "and"/"then"/commas, but "username X and password Y" stays one part
 _SPLIT = re.compile(r"\s*(?:,\s*(?:and\s+|then\s+)?|;\s*|\s+and then\s+|\s+then\s+|\s+and\s+)", re.IGNORECASE)
 _FORM_VERB = re.compile(r"^(?:log ?in|sign ?in|search|type|enter|fill|submit)\b", re.IGNORECASE)
@@ -76,8 +78,10 @@ def form_outcome(n: int, part: str, inputs: list[dict[str, Any]], values: dict[s
     password = next((i for i in inputs if i.get("type") == "password"
                      or "pass" in f"{i.get('name', '')} {i.get('id', '')}".lower()), None)
     if password:
-        return [_step(n, "ASSERT_HIDDEN", "the sign-in form (it should be gone after signing in)",
-                      target=password["selector"])]
+        return [
+            _step(n, "ASSERT_HIDDEN", "the sign-in form (it should be gone after signing in)", target=password["selector"]),
+            _step(n + 1, "ASSERT_HIDDEN", "no server error is shown", target=SERVER_ERROR),
+        ]
     text = values.get("text")
     if text and re.match(r"^(?:add|create|post|write)\b", part, re.IGNORECASE):
         return [_step(n, "ASSERT_CONTAINS_TEXT", f"the new item '{text[:40]}' shows on the page",

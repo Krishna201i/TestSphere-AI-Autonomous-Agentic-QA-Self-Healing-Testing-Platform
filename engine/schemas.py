@@ -58,6 +58,8 @@ class ActionType(str, Enum):
     ASSERT_URL = "assert_url"
     ASSERT_VALUE = "assert_value"
     WAIT_FOR = "wait_for"
+    RELOAD = "reload"
+    GO_BACK = "go_back"
 
 
 class StepStatus(str, Enum):

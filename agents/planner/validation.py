@@ -61,6 +61,8 @@ ACTION_REQUIREMENTS: dict[TestAction, tuple[bool, bool]] = {
     TestAction.DRAG: (True, True),       # target = source, value = destination selector
     TestAction.PRESS: (False, True),      # value = key name
     TestAction.WAIT: (False, False),
+    TestAction.RELOAD: (False, False),
+    TestAction.GO_BACK: (False, False),
 }
 
 # Assertions that require a target element selector
@@ -393,7 +395,7 @@ def validate_element_references(
         return errors
 
     # Actions that do NOT require a target element
-    no_target_actions = {TestAction.NAVIGATE, TestAction.PRESS, TestAction.WAIT}
+    no_target_actions = {TestAction.NAVIGATE, TestAction.PRESS, TestAction.WAIT, TestAction.RELOAD, TestAction.GO_BACK}
 
     for step in test_case.steps:
         action_enum = (

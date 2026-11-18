@@ -113,6 +113,7 @@ async def run_test(
         captured inside ``StepResult.error``.
     """
     config = options.merged(EngineConfig()) if options else EngineConfig()
+    plan = with_unique_values(plan)
     started_at = datetime.now(UTC)
     wall_start = time.monotonic()
 
@@ -476,6 +477,18 @@ async def _perform_action(page: Page, step: Step, config: EngineConfig) -> str |
                 await page.wait_for_load_state(state, timeout=wait_ms)
         return None
 
+    # ---- reload / back: what a person does to the page itself ---------
+    if action in (ActionType.RELOAD, ActionType.GO_BACK):
+        nav_timeout = max(timeout or 15000, 15000)
+        if action == ActionType.RELOAD:
+            await page.reload(timeout=nav_timeout, wait_until="domcontentloaded")
+        elif await page.go_back(timeout=nav_timeout, wait_until="domcontentloaded") is None:
+            raise AssertionError("go_back failed: there is no earlier page in this tab")
+        for state, wait_ms in (("load", 10_000), ("networkidle", 2_000)):
+            with contextlib.suppress(PlaywrightTimeoutError, PlaywrightError):
+                await page.wait_for_load_state(state, timeout=wait_ms)
+        return None
+
     # ---- element-less wait --------------------------------------------
     if action == ActionType.WAIT_FOR:
         value = (step.value or "").strip()
@@ -596,6 +609,23 @@ async def _perform_action_with_locator(
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
+
+
+UNIQUE_PLACEHOLDER = "{{unique}}"
+
+
+def with_unique_values(plan: TestPlan) -> TestPlan:
+    """*plan* with ``{{unique}}`` in its values replaced by a token new on every
+    run (one per run, so the email and user name it builds stay consistent):
+    a sign-up test registers a new account each time instead of failing on the
+    one it created last time."""
+    if not any(UNIQUE_PLACEHOLDER in (s.value or "") + (s.expected or "") for s in plan.steps):
+        return plan
+    token = uuid.uuid4().hex[:10]
+    steps = [s.model_copy(update={k: getattr(s, k).replace(UNIQUE_PLACEHOLDER, token)
+                                  for k in ("value", "expected") if getattr(s, k)})
+             for s in plan.steps]
+    return plan.model_copy(update={"steps": steps})
 
 
 _QUOTE_MAX = 300

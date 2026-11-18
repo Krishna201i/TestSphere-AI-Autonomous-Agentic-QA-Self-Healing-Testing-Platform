@@ -49,8 +49,9 @@ def test_a_sign_in_must_leave_the_login_form():
     inputs, buttons = U._extract_inputs(LOGIN), U._extract_buttons(LOGIN)
     steps, cov = U._plan_scenario("https://x.example/", "Login", inputs, buttons,
                                   prompt="log in with tomsmith / WrongPassword1 and reach the secure area")
-    assert [s["action"] for s in steps][-3:] == ["CLICK", "ASSERT_HIDDEN", "ASSERT_CONTAINS_TEXT"]
-    assert steps[-2]["target"] == "#password" and steps[-1]["value"] == "secure area"
+    assert [s["action"] for s in steps][-4:] == ["CLICK", "ASSERT_HIDDEN", "ASSERT_HIDDEN", "ASSERT_CONTAINS_TEXT"]
+    assert steps[-3]["target"] == "#password" and steps[-1]["value"] == "secure area"
+    assert "internal server error" in steps[-2]["target"]  # and no error page took the form's place
     assert cov == {"tested": ["log in with tomsmith / WrongPassword1", "reach the secure area"], "untested": []}
 
 
@@ -155,9 +156,10 @@ async def test_a_sign_up_form_with_typed_and_required_fields_really_submits():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
     try:
-        planned = U._synthesize_test_steps(f"{base}/", "Sign up", U._extract_inputs(SIGN_UP), U._extract_buttons(SIGN_UP))
+        planned = U._synthesize_test_steps(f"{base}/", "Sign up", U._extract_inputs(SIGN_UP), U._extract_buttons(SIGN_UP),
+                                           allow_test_accounts=True)
         actions = {"NAVIGATE": ActionType.GOTO, "FILL": ActionType.FILL, "CHECK": ActionType.CHECK, "CLICK": ActionType.CLICK,
-                   "SELECT": ActionType.SELECT}
+                   "SELECT": ActionType.SELECT, "ASSERT_HIDDEN": ActionType.ASSERT_HIDDEN}
         steps = [Step(step_id=f"s{i}", action=actions[s["action"]], value=s["value"],
                       target=Target(description=s["description"], primary_locator=s["target"]) if s["target"] else None)
                  for i, s in enumerate(planned)]

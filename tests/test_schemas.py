@@ -92,12 +92,13 @@ class TestActionAndAssertionEnums:
     """Validate TestAction and AssertionType enums (Day 4)."""
 
     def test_action_count(self):
-        assert len(TestAction) == 11
+        assert len(TestAction) == 13
 
     def test_action_values(self):
         expected = {
             "navigate", "click", "fill", "select",
             "check", "uncheck", "hover", "upload", "drag", "press", "wait",
+            "reload", "go_back",
         }
         actual = {a.value for a in TestAction}
         assert actual == expected
