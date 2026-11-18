@@ -405,3 +405,26 @@ async def test_heals_a_button_inside_a_web_components_shadow_root() -> None:
         assert result.status == TestStatus.HEALED
     finally:
         server.shutdown()
+
+
+def _select_fp(**overrides) -> ElementFingerprint:
+    values = dict(tag="select", id="category", name="category", aria_label="Category", text="Pens Paper Ink",
+                  classes=["field"], parent_chain=["form#filters"], sibling_index=1,
+                  bounding_box=BoundingBox(x=40, y=120, width=180, height=32))
+    values.update(overrides)
+    return ElementFingerprint(**values)
+
+
+def test_an_unchanged_accessible_name_anchors_an_element_whose_ids_and_classes_changed() -> None:
+    renamed = _select_fp(id="category-hard", name="category-hard", classes=["field-hard"])
+    score, _ = score_fingerprint(_select_fp(), renamed)
+    assert score >= 0.85
+
+
+def test_an_accessible_name_does_not_anchor_a_relabelled_look_alike_or_another_kind_of_element() -> None:
+    look_alike = _select_fp(id="category-twin", name="category-twin", classes=["field-twin"], aria_label="Confirm category")
+    assert score_fingerprint(_select_fp(), look_alike)[0] < 0.75
+    assert score_fingerprint(_select_fp(), _select_fp(tag="input"))[0] == 0.0
+    # the primary locator matched on aria-label: it changed, so it is no evidence either way
+    renamed = _select_fp(id="category-hard", name="category-hard", classes=["field-hard"])
+    assert score_fingerprint(_select_fp(), renamed, frozenset({"aria-label"}))[0] < 0.85

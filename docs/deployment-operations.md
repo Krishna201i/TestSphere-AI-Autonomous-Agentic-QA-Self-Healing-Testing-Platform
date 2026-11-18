@@ -2,7 +2,7 @@
 
 ## 1. System Requirements & Environment
 
-TestSphere-AI is designed to run in both local developer environments and containerized cloud setups (AWS ECS, GCP Cloud Run, Azure Container Apps, Kubernetes).
+TestSphere-AI runs on a developer machine or as a container. Production runs on one AWS EC2 instance with Docker Compose (API, worker, Caddy; see [`deploy/aws-ec2`](../deploy/aws-ec2/README.md)); the same image runs on any container host.
 
 ### Minimum Requirements:
 - **Operating System**: Linux (Ubuntu 22.04+ recommended), macOS, or Windows 10/11
@@ -20,18 +20,18 @@ All settings can be configured via environment variables or a `.env` file at rep
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
 | `DATABASE_BACKEND` | `firestore` if credentials set, else `local` | `firestore` (production), `local` (JSON file), `memory` (tests) |
-| `FIREBASE_CREDENTIALS` | `""` | Service-account key JSON (whole file contents) or a path to it. A bare file name also resolves to a Render Secret File in `/etc/secrets/` |
+| `FIREBASE_CREDENTIALS` | `""` | Service-account key JSON (whole file contents) or a path to it. A bare file name also resolves to a mounted secret file in `/etc/secrets/`. On EC2 the value comes from SSM (`/testsphere/*`) |
 | `FIREBASE_PROJECT_ID` | from the key | Firebase project id (optional) |
 | `LOCAL_DB_PATH` | `./data/local_db.json` | Database file for `DATABASE_BACKEND=local` |
 | `API_HOST` | `0.0.0.0` | Host binding interface for FastAPI |
 | `API_PORT` | `8000` | Port for FastAPI server |
 | `DEBUG` | `False` | Enable detailed stack traces and auto-reloading |
-| `CORS_ORIGINS` | Vite dev servers (`localhost`/`127.0.0.1` on 3000 and 5173) locally; none when hosted | Comma-separated origins of a dashboard hosted elsewhere (e.g. `https://testsphere.vercel.app`). Not needed when the API serves the dashboard itself |
+| `CORS_ORIGINS` | Vite dev servers (`localhost`/`127.0.0.1` on 3000 and 5173) locally; none when hosted | Comma-separated origins of a dashboard hosted elsewhere (e.g. `https://dashboard.example.com`). Not needed when the API serves the dashboard itself |
 
 ### 2.1a Sign-in & Automated Pipeline
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `AUTH_REQUIRED` | `true` if Firebase credentials set, else `false` | Require Firebase sign-in for every API call; each user sees only their own data. `false` = single local user. On a hosted server (Render etc., or `APP_ENV` other than `development`) the backend **refuses to start** if sign-in is off only because credentials are missing; set `AUTH_REQUIRED=false` to run open on purpose |
+| `AUTH_REQUIRED` | `true` if Firebase credentials set, else `false` | Require Firebase sign-in for every API call; each user sees only their own data. `false` = single local user. On a hosted server (`APP_ENV` other than `development`, or a known hosting platform) the backend **refuses to start** if sign-in is off only because credentials are missing; set `AUTH_REQUIRED=false` to run open on purpose |
 | `FIREBASE_WEB_API_KEY` | `""` | Public web API key (Firebase console → Project settings → General → Your apps → Web app). Needed for the login page |
 | `FIREBASE_AUTH_DOMAIN` | `<project id>.firebaseapp.com` | Auth domain for the login page (optional) |
 | `SCHEDULER_ENABLED` | `true` | Run scheduled pipeline re-runs while the server is awake |
@@ -61,13 +61,14 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `LLM_MODEL` | `mock-model` | Model identifier sent to the endpoint |
 | `LLM_TEMPERATURE` | `0.2` | Sampling temperature for test synthesis and healing decisions |
 | `LLM_MAX_TOKENS` | `4096` | Max output tokens per request |
+| `LLM_MAX_TOKENS_PER_RUN` | `300000` | Tokens all LLM calls of one pipeline run may use together (planner, explorer, failure analysis, healing, triage). Once used up, the run continues on the rule-based path. Each run records `llm_usage` (calls and tokens). `0` = no limit |
 | `LLM_TIMEOUT` | `60` | Request timeout in seconds |
 | `LLM_MAX_RETRIES` | `2` | Retries for transient errors (timeouts, 429, 5xx, network) |
 | `AGENT_MEMORY_BACKEND` | `database` | `database` persists healing memory in the configured store (survives restarts); `memory` keeps it in-process |
 | `AGENT_MEMORY_MAX_RECORDS` | `2000` | Newest healing records loaded at start-up; more remembers older heals but costs that many database reads per restart |
 | `INGEST_WORKSPACE` | `./data/repos` | Where ingested repositories are cloned |
 | `INGEST_GIT_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts public repositories may be cloned from (https only) |
-| `INGEST_MAX_FILES` / `INGEST_MAX_FILE_BYTES` / `INGEST_CLONE_TIMEOUT` | `20000` / `1000000` / `120` | Safety caps per repository: files analyzed, bytes read per file, seconds a clone may take |
+| `INGEST_MAX_FILES` / `INGEST_MAX_FILE_BYTES` / `INGEST_CLONE_TIMEOUT` / `INGEST_MAX_REPO_MB` | `20000` / `1000000` / `120` / `500` | Safety caps per repository: files analyzed, bytes read per file, seconds a clone may take, size of the checkout (a larger one is deleted and refused). A checkout is deleted once it has been analyzed |
 | `INGEST_ALLOW_LOCAL_PATHS` | `true` locally in development; `false` on Render/Heroku/Railway/Fly/Cloud Run unless set | Accept local folder paths for ingestion (reads the server's disk); never enable on a public server |
 | `SECURITY_SCAN_ALLOWED_HOSTS` | `""` | Extra hosts the scanner may contact (loopback always allowed); the active scanner is held to the same list |
 | `SECURITY_ACTIVE_SCAN` | `false` | Allow active (DAST) scanning — reflected XSS, SQL injection and open-redirect probes that send crafted inputs. Off by default; turn it on only where you are authorized to attack the targets in `SECURITY_SCAN_ALLOWED_HOSTS`. A scan or project still has to ask for it |
@@ -86,10 +87,10 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `PIPELINE_AI_EXPLORER` / `PIPELINE_AI_EXPLORER_TIMEOUT` | `auto` / `240` | `auto`: with a real model, an AI agent reaches the project's written goal in a browser once (up to 15 steps, typing only values from the goal, refusing delete/pay/sign-out elements, ending with an outcome check it must pass) and saves the steps as the quarantined test "AI explored: …"; later runs replay it without the model, and the goal is explored again only after a failed replay or a changed goal. Seconds allowed for one exploration |
 | `PIPELINE_EXECUTION` | `inline` | `inline`: pipeline runs execute in the API process. `worker`: the API only queues them and a separate `python -m backend.worker` service executes them (and runs the scheduler). Requires Firestore. See §3.1 |
 | `WORKER_POLL_SECONDS` / `WORKER_HEARTBEAT_SECONDS` / `WORKER_STALE_SECONDS` | `5` / `30` / `600` | Worker queue polling; heartbeat while a run executes; a running run silent for longer than the stale limit is marked interrupted |
-| `DASHBOARD_URL` | Render's `RENDER_EXTERNAL_URL`, else `""` | Public address of the dashboard, used for "Open run" links in Slack alerts |
+| `DASHBOARD_URL` | `""` | Public address of the dashboard, used for "Open run" links in Slack alerts |
 | `PRIVACY_CONTACT` | `""` | E-mail or URL users contact about their data, shown on the dashboard's privacy notice (`#/privacy`, readable before sign-in). Without it the notice says "the operator of this server" |
 | `LOG_LEVEL` | `INFO` | Level for the app's own loggers |
-| `LOG_FORMAT` | `json` when hosted, `text` locally | `json` = one JSON object per line (ts, level, logger, message, request_id, extras), searchable in Render's log viewer |
+| `LOG_FORMAT` | `json` when hosted, `text` locally | `json` = one JSON object per line (ts, level, logger, message, request_id, extras), searchable with `docker compose logs`, CloudWatch or any log tool |
 | `SENTRY_DSN` | `""` | Send unhandled errors to Sentry (free tier is enough); no personal data or performance tracing is sent |
 
 ### 2.3 Browser Engine Settings
@@ -105,10 +106,10 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 ### 2.3a Run evidence and integrations
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `ARTIFACT_STORE` | `local` | `local` keeps run artifacts on this server's disk (lost on redeploy on most hosts; not shared with a separate worker). `gcs` stores them in a Cloud Storage bucket: use it in production |
-| `ARTIFACT_BUCKET` | `""` | With `gcs`: the bucket, e.g. the Firebase project's default `<project-id>.appspot.com` (Firebase console → Storage). The service account in `FIREBASE_CREDENTIALS` needs *Storage Object Admin* on it. Artifacts live under `testsphere-artifacts/` |
+| `ARTIFACT_STORE` | `local` | `local` keeps run artifacts on this server's disk (lost with the disk; on EC2 the API and worker share them through a Docker volume). `s3` stores them in an S3 bucket and `gcs` in a Cloud Storage bucket: either survives losing the server |
+| `ARTIFACT_BUCKET` | `""` | With `s3`: a private bucket in the server's Region, reached with the default AWS credentials (the instance role on EC2, which needs `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` and `s3:ListBucket` on it, plus `s3:GetLifecycleConfiguration`/`s3:PutLifecycleConfiguration` to apply the retention; see `deploy/aws-ec2/README.md`). With `gcs`: the bucket, e.g. the Firebase project's default `<project-id>.appspot.com` (Firebase console → Storage). The service account in `FIREBASE_CREDENTIALS` needs *Storage Object Admin* on it. Artifacts live under `testsphere-artifacts/` |
 | `ARTIFACT_TRACES` | `true` | Record a Playwright trace (`.zip`, typically 1–5 MB) for every test run, downloadable from the run page |
-| `ARTIFACT_RETENTION_DAYS` | `30` | Delete artifacts after this many days (`0` keeps them until the execution or account is deleted). On GCS this is a bucket lifecycle rule set on first use (needs `storage.buckets.update`; otherwise add the rule in the console) |
+| `ARTIFACT_RETENTION_DAYS` | `30` | Delete artifacts after this many days (`0` keeps them until the execution or account is deleted). On S3 this is a lifecycle rule on `testsphere-artifacts/`; on GCS a bucket lifecycle rule set on first use (needs `storage.buckets.update`; otherwise add the rule in the console) |
 
 **Fix patches** (Security → Remediation → *Fix patch for your code*): the open findings of a site become a
 `git apply`-able diff against its repository (the project's *Git repository*, or one pasted in the form).
@@ -123,9 +124,17 @@ project row): TestSphere calls the project's deploy hook, records the commit (`g
 repository), waits until the health URL (default: app URL) answers healthily `DEPLOY_HEALTHY_CHECKS` times in
 a row — after the page changes, or after `DEPLOY_SETTLE_SECONDS` if it never does — within
 `DEPLOY_TIMEOUT_SECONDS`, then runs the project's smoke tests. If health or smoke tests fail it calls the
-rollback hook, or with a Render deploy hook redeploys the last verified commit (`&ref=<sha>`), and checks
-health again. Hooks may only go to Render, Vercel, Netlify or hosts in `DEPLOY_HOOK_HOSTS` (https, no
-redirects). *Deploy and verify automatically after a run passes* closes the loop. Deployments run in the
+rollback hook, or with a Render deploy hook or a GitHub workflow redeploys the last verified commit, and checks
+health again. Hooks may only go to Render, Vercel, Netlify, GitHub or hosts in `DEPLOY_HOOK_HOSTS` (https, no
+redirects).
+
+**Any host through GitHub Actions** (AWS, a VPS, anything a workflow can deploy): use the workflow's dispatch URL
+as the deploy hook, `https://api.github.com/repos/<owner>/<repo>/actions/workflows/<file>/dispatches`, with
+`?ref=<branch>` if it is not `main`. TestSphere starts the workflow with the project owner's connected GitHub
+token (Profile → GitHub) and passes the commit as the `commit` input, so the workflow must declare one
+(`on: workflow_dispatch: inputs: commit:`), as [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)
+does. A rollback starts the same workflow with the last verified commit. On `api.github.com` only that endpoint
+is accepted, so a hook cannot use the token for anything else. *Deploy and verify automatically after a run passes* closes the loop. Deployments run in the
 API process, also with `PIPELINE_EXECUTION=worker`.
 
 | Variable | Default | Description |
@@ -232,6 +241,8 @@ Interactive runs from the Pipeline page (`/api/workflow/*`) still execute in the
 
 ## 4. Continuous Integration
 
+Deployment is a separate workflow, [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml): after CI passes on `main` it builds the image, pushes it to ECR and rolls it out on the EC2 instance over SSM (off until `DEPLOY_ENABLED` is set; see [`deploy/aws-ec2`](../deploy/aws-ec2/README.md#continuous-deployment)).
+
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every pull request and on pushes to `main`:
 
 | Job | Steps |
@@ -246,7 +257,7 @@ nothing reaches `main`, and from there the server, without passing them.
 
 ## 5. Production Observability & Logging
 
-- **Structured JSON Logging**: one JSON object per line by default when hosted (`LOG_FORMAT=json|text` overrides), with a `request_id` on every line written while handling a request; works with Render's log search, Datadog, CloudWatch or Grafana Loki.
+- **Structured JSON Logging**: one JSON object per line by default when hosted (`LOG_FORMAT=json|text` overrides), with a `request_id` on every line written while handling a request; works with CloudWatch, Datadog or Grafana Loki.
 - **Request ids**: every response carries `X-Request-ID`; send one in to correlate with your own logs.
 - **Error tracking**: set `SENTRY_DSN` to report unhandled errors to Sentry.
-- **Health Checks**: `GET /api/health` (public) reports database connectivity; signed-in users see browser availability in `GET /api/system`.
+- **Health Checks**: `GET /api/health` (public) reports database connectivity and, in worker mode, the number of queued runs and `worker: stalled` (and `status: degraded`) when runs wait with none running for longer than an idle worker takes to poll. The worker container's health check is `python -m backend.worker_alive`, which fails once the worker loop has not run for `WORKER_STALE_SECONDS`; signed-in users see browser availability in `GET /api/system`.

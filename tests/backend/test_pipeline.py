@@ -574,3 +574,32 @@ def test_every_result_says_what_it_checked_and_how_long_it_took(fresh_store, stu
     assert smoke["status"] == "PASSED" and smoke["duration_ms"] == 1234
     assert smoke["step_count"] >= 2 and any(c.startswith("Page title contains") for c in smoke["checks"])
     assert all(len(t["checks"]) <= runner.MAX_LISTED_CHECKS for t in run["tests"])
+
+
+def test_a_run_records_what_its_llm_calls_used(fresh_store, stub_network, monkeypatch):
+    from agents.llm.client import LLMClient, LLMClientSession
+    from agents.llm.config import LLMConfig
+    from agents.llm.schemas import LLMRequest, LLMResponse, LLMUsage
+
+    class Groq(LLMClient):
+        async def generate(self, request):
+            return LLMResponse(content="ok", model="llama-3.3-70b-versatile", provider="api",
+                               usage=LLMUsage(prompt_tokens=1000, completion_tokens=500))
+
+    session = LLMClientSession(Groq(LLMConfig(provider="api", api_key="k", model="llama-3.3-70b-versatile")))
+    real_execute = runner._execute
+
+    async def execute_with_ai(state, project, orchestrator, scanner):
+        await session.generate(LLMRequest(prompt="plan"))
+        await asyncio.to_thread(lambda: asyncio.run(session.generate(LLMRequest(prompt="triage"))))
+        await real_execute(state, project, orchestrator, scanner)
+
+    monkeypatch.setattr(runner, "_execute", execute_with_ai)
+    monkeypatch.setattr(settings, "LLM_MAX_TOKENS_PER_RUN", 2000)
+    run = run_once(fresh_store, make_project(fresh_store), FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    usage = run["llm_usage"]
+    assert (usage["calls"], usage["input_tokens"], usage["output_tokens"]) == (2, 2000, 1000)
+    assert usage["limit"] == 2000 and usage["budget_exhausted"]
+
+    second = run_once(fresh_store, make_project(fresh_store), FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert second["llm_usage"]["calls"] == 2  # each run has its own budget, not a running total

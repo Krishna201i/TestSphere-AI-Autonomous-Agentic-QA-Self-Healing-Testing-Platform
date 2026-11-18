@@ -11,7 +11,7 @@ export default function CommandCenter({ onNavigate }) {
       <div className="cards-row">
         <ValidationCard onNavigate={onNavigate} />
         <AttackerCard onOpen={() => onNavigate('attacker')} />
-        <RemediationCard onOpen={() => onNavigate('attacker')} />
+        <RemediationCard onOpen={() => onNavigate('remediation')} />
       </div>
     </div>
   );

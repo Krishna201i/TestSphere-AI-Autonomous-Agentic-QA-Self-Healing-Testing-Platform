@@ -19,10 +19,12 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 import time
 import uuid
 from datetime import UTC, datetime
+from functools import lru_cache
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -110,6 +112,18 @@ class RequestContextMiddleware:
                                 extra={"method": scope.get("method"), "path": path,
                                        "status": status_code, "duration_ms": duration_ms})
             request_id_var.reset(token)
+
+
+@lru_cache(maxsize=1)
+def git_commit() -> str | None:
+    """The deployed commit: GIT_COMMIT (baked into the image at build time), else the checkout's HEAD."""
+    if commit := os.getenv("GIT_COMMIT", "").strip():
+        return commit[:12]
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=3)
+        return out.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
 
 
 def init_error_reporting(dsn: str, environment: str, release: str | None) -> bool:

@@ -24,6 +24,13 @@ const ACTIVE = ['queued', 'running'];
 const TRIGGER_LABEL = { manual: 'Manual', schedule: 'Scheduled', webhook: 'GitHub push' };
 const STEP_STATUS = { passed: 'PASSED', failed: 'FAILED', healed: 'HEALED', skipped: 'PENDING' };
 
+/** "12.3k" tokens the run's model calls used, of the budget when there is one. */
+export function aiTokens(usage) {
+  const short = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
+  const used = usage.input_tokens + usage.output_tokens;
+  return usage.limit ? `${short(used)} / ${short(usage.limit)}` : short(used);
+}
+
 export const testLabel = (t) => (t.healed && t.status === 'PASSED' ? 'HEALED' : t.status);
 
 function saveBlob(blob, name) {
@@ -393,6 +400,12 @@ export default function RunDetail({ params, onNavigate }) {
           <div className="stat-tile"><div className="v">{s.flaky ?? 0}</div><div className="l">Flaky</div></div>
           <div className="stat-tile"><div className="v">{(run.regressions || []).length}</div><div className="l">Regressions</div></div>
           <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Security findings</div></div>
+          {run.llm_usage && (
+            <div className="stat-tile" title={`${run.llm_usage.input_tokens.toLocaleString()} in, ${run.llm_usage.output_tokens.toLocaleString()} out`}>
+              <div className={`v ${run.llm_usage.budget_exhausted ? 'bad' : ''}`}>{aiTokens(run.llm_usage)}</div>
+              <div className="l">AI tokens · {run.llm_usage.calls} {run.llm_usage.calls === 1 ? 'call' : 'calls'}{run.llm_usage.budget_exhausted ? ' · budget used up' : ''}</div>
+            </div>
+          )}
           {s.visual_changes > 0 && (
             <div className="stat-tile"><div className="v">{tests.filter((t) => t.visual_changed).length}</div><div className="l">Visual changes to review</div></div>
           )}

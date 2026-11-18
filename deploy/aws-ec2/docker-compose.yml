@@ -6,8 +6,16 @@
 x-testsphere: &testsphere
   build:
     context: ../..
-  image: testsphere:latest
+    args:
+      GIT_COMMIT: ${GIT_COMMIT:-}   # GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
+  # Built here by default; CD (.github/workflows/deploy.yml) sets an ECR image
+  # in this folder's .env and pulls it instead, so nothing builds on the instance
+  image: ${TESTSPHERE_IMAGE:-testsphere:latest}
   restart: unless-stopped
+  logging: &logging
+    # Docker keeps container logs forever by default; cap them at 3 × 10 MB
+    driver: json-file
+    options: {max-size: 10m, max-file: "3"}
   env_file: /opt/testsphere/secrets.env
   environment: &env
     APP_ENV: production
@@ -30,6 +38,11 @@ x-testsphere: &testsphere
     # ...and only for these Firebase uids (comma-separated; set in this folder's
     # .env next to DOMAIN). Empty = nobody, so no guest or other user can.
     SECURITY_ACTIVE_SCAN_USERS: ${SECURITY_ACTIVE_SCAN_USERS:-}
+    # Run artifacts: the data volume by default, or an S3 bucket (README:
+    # "Artifacts in S3"), set in this folder's .env
+    ARTIFACT_STORE: ${ARTIFACT_STORE:-local}
+    ARTIFACT_BUCKET: ${ARTIFACT_BUCKET:-}
+    AWS_REGION: ap-southeast-2
   volumes:
     - testsphere-data:/app/data   # artifacts (screenshots, traces) the API serves and the worker writes
 
@@ -44,12 +57,18 @@ services:
     <<: *testsphere
     command: ["python", "-m", "backend.worker"]
     healthcheck:
-      disable: true   # the image's check probes the API's HTTP port, which the worker has none of
+      # The image's check probes the API's HTTP port, which the worker has none
+      # of; this one fails when the worker loop stops (no database read)
+      test: ["CMD", "python", "-m", "backend.worker_alive"]
+      interval: 60s
+      timeout: 15s
+      start_period: 60s
     depends_on: [api]
 
   caddy:
     image: caddy:2.10.2-alpine
     restart: unless-stopped
+    logging: *logging
     ports: ["80:80", "443:443"]
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN, e.g. 54-153-148-247.sslip.io}

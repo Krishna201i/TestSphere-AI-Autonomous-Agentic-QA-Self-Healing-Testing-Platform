@@ -234,3 +234,76 @@ def test_step_descriptions_read_like_sentences_and_hide_typed_values():
     check = Step(step_id="d", action=ActionType.ASSERT_TEXT, expected="Welcome",
                  target=Target(description="Assertion target for element_contains_text", primary_locator="h1"))
     assert describe_step(check) == 'Check the text of h1 contains "Welcome"'
+
+
+# ── S3 store (botocore Stubber: each call is checked against the S3 API) ──
+
+
+@pytest.fixture
+def s3():
+    import boto3
+    from botocore.stub import Stubber
+
+    from backend.artifacts import S3ArtifactStore
+
+    client = boto3.client("s3", region_name="ap-southeast-2", aws_access_key_id="test", aws_secret_access_key="test")
+    with Stubber(client) as stub:
+        yield S3ArtifactStore("bucket", client=client), stub
+        stub.assert_no_pending_responses()
+
+
+def test_s3_put_and_get_keep_artifacts_under_the_root(s3):
+    import io
+
+    from botocore.response import StreamingBody
+
+    store, stub = s3
+    key = "testsphere-artifacts/u1/executions/7/shot.png"
+    stub.add_response("put_object", {}, {"Bucket": "bucket", "Key": key, "Body": b"png", "ContentType": "image/png"})
+    stub.add_response("get_object", {"Body": StreamingBody(io.BytesIO(b"png"), 3), "ContentType": "image/png"},
+                      {"Bucket": "bucket", "Key": key})
+    stub.add_client_error("get_object", "NoSuchKey", http_status_code=404)
+    store.put("u1/executions/7/shot.png", b"png", "image/png")
+    assert store.get("u1/executions/7/shot.png") == (b"png", "image/png")
+    assert store.get("u1/executions/7/missing.png") is None
+
+
+def test_s3_delete_prefix_removes_every_listed_object(s3):
+    store, stub = s3
+    prefix = "testsphere-artifacts/u1/executions/7/"
+    keys = [prefix + "a.png", prefix + "b.zip"]
+    stub.add_response("list_objects_v2", {"Contents": [{"Key": k} for k in keys], "IsTruncated": False},
+                      {"Bucket": "bucket", "Prefix": prefix})
+    stub.add_response("delete_objects", {}, {"Bucket": "bucket",
+                                             "Delete": {"Objects": [{"Key": k} for k in keys], "Quiet": True}})
+    assert store.delete_prefix("u1/executions/7/") == 2
+
+
+def test_s3_retention_adds_one_rule_and_keeps_the_bucket_s_others(s3):
+    store, stub = s3
+    other = {"ID": "logs", "Filter": {"Prefix": "logs/"}, "Status": "Enabled", "Expiration": {"Days": 7}}
+    ours = {"ID": "testsphere-artifacts-retention", "Filter": {"Prefix": "testsphere-artifacts/"},
+            "Status": "Enabled", "Expiration": {"Days": 30}}
+    stub.add_response("get_bucket_lifecycle_configuration", {"Rules": [other]}, {"Bucket": "bucket"})
+    stub.add_response("put_bucket_lifecycle_configuration", {},
+                      {"Bucket": "bucket", "LifecycleConfiguration": {"Rules": [other, ours]}})
+    store.expire_after(30)
+
+    stub.add_response("get_bucket_lifecycle_configuration", {"Rules": [other, ours]}, {"Bucket": "bucket"})
+    store.expire_after(30)  # already in place: no put
+
+    stub.add_client_error("get_bucket_lifecycle_configuration", "NoSuchLifecycleConfiguration", http_status_code=404)
+    stub.add_response("put_bucket_lifecycle_configuration", {},
+                      {"Bucket": "bucket", "LifecycleConfiguration": {"Rules": [ours]}})
+    store.expire_after(30)  # a bucket without rules
+
+
+def test_s3_store_needs_a_bucket(monkeypatch):
+    from backend import artifacts
+
+    monkeypatch.setattr(artifacts.settings, "ARTIFACT_STORE", "s3")
+    monkeypatch.setattr(artifacts.settings, "ARTIFACT_BUCKET", "")
+    artifacts.set_artifact_store(None)
+    with pytest.raises(RuntimeError, match="ARTIFACT_STORE=s3 needs ARTIFACT_BUCKET"):
+        artifacts.get_artifact_store()
+    artifacts.set_artifact_store(None)

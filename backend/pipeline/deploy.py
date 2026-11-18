@@ -3,15 +3,16 @@ TestSphere-AI — Verified deploy with automatic rollback (loop stage 6).
 
 A deployment of a project:
 
-  deploy    call the project's deploy hook (Render, Vercel, Netlify, or a host
-            in DEPLOY_HOOK_HOSTS) and note the commit being shipped
-            (``git ls-remote`` of its repository)
+  deploy    call the project's deploy hook (Render, Vercel, Netlify, a GitHub
+            Actions workflow dispatch, or a host in DEPLOY_HOOK_HOSTS) and note
+            the commit being shipped (``git ls-remote`` of its repository); a
+            workflow gets that commit as its ``commit`` input
   health    wait until the site answers with the new version: its health URL
             must change or the settle time pass, then answer healthily
             DEPLOY_HEALTHY_CHECKS times in a row, within DEPLOY_TIMEOUT_SECONDS
   smoke     run the project's smoke tests in the browser
   rollback  only if health or smoke failed: call the rollback hook, or on
-            Render redeploy the last verified commit (deploy hook + ``ref``),
+            Render or a GitHub workflow redeploy the last verified commit,
             then check health again
 
 Hooks are only ever sent to allow-listed hosts, without following redirects,
@@ -43,7 +44,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from backend.api.integrations import git_auth
+from backend.api.integrations import git_auth, github_token
 from backend.config import git_hosts, settings
 from backend.database.session import get_store
 from backend.database.store import Record, Store, StoreUnavailableError, now_iso
@@ -52,7 +53,9 @@ from backend.netguard import BlockedTargetError, check_target, guard_request
 from backend.pipeline.deploy_config import (
     DeployConfigError,
     check_hook_url,
+    github_dispatch,
     provider_of,
+    redeploys_a_commit,
     with_ref,
 )
 from backend.services.security_service import record_audit
@@ -208,10 +211,20 @@ class _State:
 Sleep = Callable[[float], Awaitable[Any]]
 
 
-async def _call_hook(client: httpx.AsyncClient, url: str) -> tuple[bool, str]:
+async def _call_hook(client: httpx.AsyncClient, url: str, *, commit: str | None = None,
+                     token: str | None = None) -> tuple[bool, str]:
+    """POST the hook; a GitHub workflow dispatch is sent *commit* with the owner's *token*."""
     check_hook_url(url)
     try:
-        resp = await client.post(url)
+        if provider_of(url) == "github":
+            if not token:
+                return False, "connect GitHub (Profile) so TestSphere can start the deploy workflow"
+            endpoint, ref = github_dispatch(url)
+            resp = await client.post(endpoint, json={"ref": ref, **({"inputs": {"commit": commit}} if commit else {})},
+                                     headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+                                              "X-GitHub-Api-Version": "2022-11-28"})
+        else:
+            resp = await client.post(url)
     except httpx.HTTPError as exc:
         return False, f"could not reach {urlsplit(url).hostname}: {exc}"
     if resp.status_code >= 400:
@@ -361,8 +374,9 @@ async def _deploy(state: _State, project: Record, transport, orchestrator, sleep
         previous = last_verified(state.db, project["id"], before=state.id)
         state.save(commit=commit, rollback_to=previous.get("commit") if previous else None)
 
+        token = github_token(state.db, project.get("owner_uid")) if provider_of(hook) == "github" else None
         state.step("deploy", "running")
-        ok, detail = await _call_hook(hooks, hook)
+        ok, detail = await _call_hook(hooks, hook, commit=commit, token=token)
         state.step("deploy", "done" if ok else "failed",
                    detail + (f" · commit {commit[:7]}" if commit else ""))
         if not ok:
@@ -398,14 +412,18 @@ async def _deploy(state: _State, project: Record, transport, orchestrator, sleep
 async def _rollback(state: _State, project: Record, hooks: httpx.AsyncClient, site: httpx.AsyncClient,
                     health_url: str, problem: str, sleep: Sleep) -> None:
     rollback_hook = project.get("rollback_hook_url")
+    deploy_hook = project.get("deploy_hook_url")
     target = state.doc.get("rollback_to")
+    commit = None  # what a GitHub workflow is told to deploy
     if rollback_hook:
         url, how = rollback_hook, "rollback hook"
-    elif provider_of(project.get("deploy_hook_url")) == "render" and target:
-        url, how = with_ref(project["deploy_hook_url"], target), f"redeploy of last verified commit {target[:7]}"
+        commit = target if provider_of(rollback_hook) == "github" else None
+    elif redeploys_a_commit(deploy_hook) and target:
+        how = f"redeploy of last verified commit {target[:7]}"
+        url, commit = (deploy_hook, target) if provider_of(deploy_hook) == "github" else (with_ref(deploy_hook, target), None)
     else:
         state.step("rollback", "skipped", "No rollback configured: add a rollback hook, or use a Render deploy hook "
-                                          "so the last verified commit can be redeployed")
+                                          "or a GitHub workflow so the last verified commit can be redeployed")
         state.save(status="failed", error=problem, finished_at=now_iso())
         return
 
@@ -414,7 +432,8 @@ async def _rollback(state: _State, project: Record, hooks: httpx.AsyncClient, si
     # What the bad version serves: until that changes (or the settle time
     # passes), healthy answers come from it, not from the rolled-back one
     bad = await _probe(site, health_url)
-    ok, detail = await _call_hook(hooks, url)
+    token = github_token(state.db, project.get("owner_uid")) if provider_of(url) == "github" else None
+    ok, detail = await _call_hook(hooks, url, commit=commit, token=token)
     if not ok:
         state.step("rollback", "failed", f"{how}: {detail}")
         state.save(status="rollback_failed", error=f"{problem}. Rollback failed: {detail}", finished_at=now_iso())

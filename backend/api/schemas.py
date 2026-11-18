@@ -44,7 +44,7 @@ class _ProjectPipelineFields(BaseModel):
     schedule_minutes: int | None = Field(None, description=f"Re-run interval in minutes, one of {SCHEDULE_CHOICES}")
     slack_webhook_url: str | None = Field(None, max_length=500, description="Slack, Discord, Google Chat or Teams incoming webhook for run alerts")
     notify_on: str | None = Field(None, description="'failures' (default) or 'always'")
-    deploy_hook_url: str | None = Field(None, max_length=1000, description="Deploy hook (Render, Vercel, Netlify, ...)")
+    deploy_hook_url: str | None = Field(None, max_length=1000, description="Deploy hook (Render, Vercel, Netlify, a GitHub workflow dispatch URL, ...)")
     rollback_hook_url: str | None = Field(None, max_length=1000, description="Hook that restores the previous version")
     health_url: str | None = Field(None, max_length=1024, description="URL checked after a deploy (default: app URL)")
     deploy_on_pass: bool | None = Field(None, description="Deploy and verify automatically after a passing run")

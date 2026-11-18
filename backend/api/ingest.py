@@ -29,6 +29,7 @@ from ingestion import (
     as_findings,
     check_dependencies,
     clone,
+    discard_checkout,
     is_git_url,
     pinned_packages,
     repo_name,
@@ -68,17 +69,22 @@ def ingest_source(source: str, auth: GitAuth | None = None) -> dict[str, Any]:
 
     *auth* fetches a private repository (``backend.api.integrations.git_auth``).
     """
-    if is_git_url(source):
+    cloned = is_git_url(source)
+    if cloned:
         root = clone(source, Path(settings.INGEST_WORKSPACE), _git_hosts(), auth=auth)
     elif settings.INGEST_ALLOW_LOCAL_PATHS:
         root = resolve_local(source)
     else:
         raise SourceError("Local folder paths are disabled on this server; use a public https Git URL.")
-    blueprint = analyze_repo(root, source=source, name=repo_name(source)).model_dump(mode="json")
-    if settings.DEPENDENCY_SCAN:
-        packages = pinned_packages(root)
-        blueprint["dependency_scan"] = check_dependencies(packages) | {"packages": packages[:200]}
-    return blueprint
+    try:
+        blueprint = analyze_repo(root, source=source, name=repo_name(source)).model_dump(mode="json")
+        if settings.DEPENDENCY_SCAN:
+            packages = pinned_packages(root)
+            blueprint["dependency_scan"] = check_dependencies(packages) | {"packages": packages[:200]}
+        return blueprint
+    finally:
+        if cloned:  # only the blueprint is kept, so the checkout would just fill the disk
+            discard_checkout(root)
 
 
 def record_dependency_findings(db: Store, source: str, blueprint: dict[str, Any], owner_uid: str | None) -> int:

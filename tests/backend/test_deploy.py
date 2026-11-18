@@ -303,3 +303,66 @@ def test_a_dead_process_deployment_stops_blocking_deploys(fresh_store):
     assert deploy.recover_interrupted(fresh_store) == 1
     assert fresh_store.get(DEPLOYMENTS, stale["id"])["status"] == "error"
     assert deploy.active_deployment(fresh_store, proj["id"])["id"] == live["id"]
+
+
+# ── GitHub Actions workflow dispatch as the deploy hook ──
+
+DISPATCH = "https://api.github.com/repos/acme/shop/actions/workflows/deploy.yml/dispatches"
+
+
+class GitHubSite(Site):
+    """The workflow deploys whichever commit it is given: GOOD is the old, healthy one."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.dispatches: list[tuple[str, dict, str | None]] = []
+
+    def __call__(self, request):
+        if request.method == "POST":
+            import json
+
+            body = json.loads(request.content)
+            self.dispatches.append((str(request.url), body, request.headers.get("authorization")))
+            target = self.after_rollback if body.get("inputs", {}).get("commit") == GOOD else self.after_deploy
+            self.body, self.status = (target, 200) if target is not None else (self.body, 503)
+            return httpx.Response(204)
+        return httpx.Response(self.status, text=self.body)
+
+
+def github_project(db, hook):
+    proj = project(db)
+    db.update(PROJECTS, proj["id"], deploy_hook_url=hook)
+    return db.get(PROJECTS, proj["id"])
+
+
+def test_a_github_workflow_deploys_the_commit_and_redeploys_the_last_verified_one(fresh_store, monkeypatch):
+    monkeypatch.setattr(deploy, "github_token", lambda db, uid: "gho_owner_token")
+    proj = github_project(fresh_store, DISPATCH + "?ref=release")
+    fresh_store.insert(DEPLOYMENTS, project_id=proj["id"], owner_uid="local-dev", status="verified", commit=GOOD)
+    site = GitHubSite()
+    dep = run(fresh_store, proj, site, Smoke("FAILED"))
+
+    assert dep["status"] == "rolled_back", dep
+    (first_url, first, auth), (second_url, second, _) = site.dispatches
+    assert first_url == second_url == DISPATCH  # ?ref= is not sent on: it becomes the body's ref
+    assert first == {"ref": "release", "inputs": {"commit": "b" * 40}} and auth == "Bearer gho_owner_token"
+    assert second == {"ref": "release", "inputs": {"commit": GOOD}}
+    assert "aaaaaaa" in step(dep, "rollback")["detail"]
+
+
+def test_a_github_workflow_needs_a_connected_token(fresh_store, monkeypatch):
+    monkeypatch.setattr(deploy, "github_token", lambda db, uid: None)
+    site = GitHubSite()
+    dep = run(fresh_store, github_project(fresh_store, DISPATCH), site)
+    assert dep["status"] == "failed" and "connect GitHub" in dep["error"] and site.dispatches == []
+
+
+@pytest.mark.parametrize("url", [
+    "https://api.github.com/repos/acme/shop/pulls",                       # any other endpoint
+    "https://api.github.com/user/repos",
+    "https://api.github.com/repos/acme/shop/actions/workflows/d.yml/dispatches/../../../../pulls",
+])
+def test_on_github_only_the_workflow_dispatch_endpoint_is_a_hook(url):
+    with pytest.raises(DeployConfigError, match="workflow dispatch URL"):
+        check_hook_url(url)
+    assert check_hook_url(DISPATCH) == DISPATCH

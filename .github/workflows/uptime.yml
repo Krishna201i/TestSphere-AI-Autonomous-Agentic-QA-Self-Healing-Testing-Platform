@@ -1,0 +1,32 @@
+# Checks the live server from outside AWS every 15 minutes. A failed run is
+# the alert: GitHub emails it (to whoever last changed this schedule).
+# Off until the repository variable UPTIME_URL is set, e.g.
+# https://54-153-148-247.sslip.io/api/health
+name: Uptime
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  health:
+    name: Health check
+    if: vars.UPTIME_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: The server answers and is healthy
+        env:
+          URL: ${{ vars.UPTIME_URL }}
+        run: |
+          set -u
+          for i in 1 2 3; do  # three tries a minute apart: one slow answer is not an outage
+            body=$(curl -sS --max-time 20 "$URL") && echo "$body" | grep -q '"status":"ok"' && { echo "$body"; exit 0; }
+            echo "try $i: ${body:-no answer}"
+            sleep 60
+          done
+          echo "::error::$URL is down or degraded"
+          exit 1

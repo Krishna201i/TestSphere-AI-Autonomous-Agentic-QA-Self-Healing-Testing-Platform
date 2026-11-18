@@ -44,3 +44,14 @@ def test_json_lines_include_the_request_id_and_extras():
 
 def test_error_reporting_is_off_without_a_dsn():
     assert init_error_reporting("", "test", None) is False
+
+
+def test_the_deployed_commit_comes_from_the_image(monkeypatch):
+    from backend import observability
+
+    observability.git_commit.cache_clear()
+    monkeypatch.setenv("GIT_COMMIT", "0123456789abcdef0123")
+    try:
+        assert observability.git_commit() == "0123456789ab"
+    finally:
+        observability.git_commit.cache_clear()

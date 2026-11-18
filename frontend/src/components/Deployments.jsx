@@ -30,7 +30,7 @@ export default function Deployments({ onNavigate }) {
           <span className="empty-title">{configured ? 'No deployments yet' : 'Deploys are not set up'}</span>
           {configured
             ? 'Use Deploy on a project in Autopilot, or turn on deploying after passing runs.'
-            : "Add your host's deploy hook (Render, Vercel or Netlify) to a project. TestSphere then deploys, checks health and smoke tests, and rolls back if they fail."}
+            : "Add your host's deploy hook (Render, Vercel, Netlify, or a GitHub workflow for any other host) to a project. TestSphere then deploys, checks health and smoke tests, and rolls back if they fail."}
           <button type="button" className="btn btn-sm" onClick={() => onNavigate('autopilot')}>Open Autopilot</button>
         </div>
       ) : (

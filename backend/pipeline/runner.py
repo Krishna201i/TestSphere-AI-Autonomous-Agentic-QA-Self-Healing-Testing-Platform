@@ -23,6 +23,7 @@ as "queued".  With ``PIPELINE_EXECUTION=worker`` the API only queues runs and
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections import Counter
@@ -31,6 +32,7 @@ from typing import Any
 
 import httpx
 
+from agents.llm.budget import token_budget
 from backend import dbsource
 from backend.config import settings
 from backend.database.session import get_store
@@ -231,8 +233,10 @@ async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None
             state.save(status="error", error="The project was deleted.", finished_at=now_iso())
             return db.get(PIPELINE_RUNS, run_id)
         state.save(status="running", started_at=now_iso())
+        budget = None
         try:
-            await _execute(state, project, orchestrator, scanner)
+            with token_budget(settings.LLM_MAX_TOKENS_PER_RUN) as budget:
+                await _execute(state, project, orchestrator, scanner)
         except StoreUnavailableError as exc:
             logger.error("Pipeline #%s stopped: database unavailable: %s", run_id, exc)
             try:
@@ -242,6 +246,9 @@ async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None
         except Exception as exc:  # keep the run's record honest instead of leaving it "running"
             logger.exception("Pipeline #%s crashed", run_id)
             state.end(f"Internal error: {exc}")
+        if budget is not None and budget.calls:
+            with contextlib.suppress(StoreUnavailableError):
+                state.save(llm_usage=budget.summary())
         finished = db.get(PIPELINE_RUNS, run_id)
         try:
             current = db.get(PROJECTS, project["id"]) or project

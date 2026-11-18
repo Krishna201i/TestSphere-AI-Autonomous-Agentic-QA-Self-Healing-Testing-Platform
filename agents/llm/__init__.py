@@ -17,10 +17,12 @@ Architecture::
     ResponseParser → Structured Data
 """
 
+from agents.llm.budget import TokenBudget, token_budget
 from agents.llm.client import LLMClient, LLMClientSession
 from agents.llm.config import LLMConfig
 from agents.llm.exceptions import (
     LLMAuthenticationError,
+    LLMBudgetExceededError,
     LLMConfigurationError,
     LLMConnectionError,
     LLMError,
@@ -63,7 +65,10 @@ __all__ = [
     "LLMRateLimitError",
     "LLMConnectionError",
     "LLMProviderError",
+    "LLMBudgetExceededError",
     "LLMResponseError",
+    "TokenBudget",
+    "token_budget",
     "LLMParsingError",
     "LLMSchemaValidationError",
 ]

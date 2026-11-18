@@ -142,6 +142,14 @@ class LLMProviderError(LLMError):
         return True
 
 
+class LLMBudgetExceededError(LLMError):
+    """Raised when the token budget of the current run is used up.
+
+    Not retried: the caller should continue without the model (the
+    rule-based path), as it does for any other model failure.
+    """
+
+
 class LLMResponseError(LLMError):
     """Raised when the LLM response cannot be parsed or validated.
 
