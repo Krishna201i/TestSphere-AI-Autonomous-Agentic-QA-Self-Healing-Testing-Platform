@@ -8,6 +8,7 @@ and autonomously synthesizes tailored test execution plans with real selectors.
 
 from __future__ import annotations
 
+import html as html_lib
 import logging
 import re
 import ssl
@@ -19,6 +20,7 @@ import httpx
 
 from backend.netguard import PinnedTransport
 from backend.services import auth_plan, goal_plan
+from engine.locators import best_unique, css_string, stable_candidates
 
 logger = logging.getLogger("testsphere.analyzer")
 
@@ -298,8 +300,9 @@ class URLAnalyzerService:
     def _extract_inputs(cls, html: str) -> list[dict[str, Any]]:
         found: list[tuple[int, dict[str, Any]]] = []  # (position in the page, field)
         spans = cls._form_spans(html)
+        universe = cls._element_universe(html)
         raw_inputs = [(m.start(), m.group(1)) for m in re.finditer(r"<input\s+([^>]+)>", html, re.IGNORECASE)]
-        for idx, (pos, tag) in enumerate(raw_inputs, start=1):
+        for pos, tag in raw_inputs:
             attr_dict = cls._parse_tag_attrs(tag)
             itype = attr_dict.get("type", "text").lower()
             if itype in ("hidden", "image"):
@@ -310,15 +313,13 @@ class URLAnalyzerService:
             placeholder = attr_dict.get("placeholder")
             aria_label = attr_dict.get("aria-label")
 
-            # Determine best CSS selector
-            if elem_id:
-                selector = f"#{elem_id}"
-            elif name:
-                selector = f"input[name='{name}']"
-            elif placeholder:
-                selector = f"input[placeholder='{placeholder}']"
-            else:
-                selector = f"input:nth-of-type({idx})"
+            # A selector that matches only this field (never its position or a class):
+            # radio buttons share a name, so a lone radio's own id or value is needed
+            selector = best_unique(stable_candidates("input", attr_dict), universe)
+            if selector is None and itype in ("radio", "checkbox") and name and attr_dict.get("value"):
+                selector = (f"input[name={css_string(name)}][value={css_string(attr_dict['value'])}]")
+            if selector is None:
+                continue  # no reliable way to reach it: leave it out rather than guess
 
             found.append((pos, {
                 "type": itype,
@@ -334,7 +335,7 @@ class URLAnalyzerService:
         for m in re.finditer(r"<textarea\b([^>]*)>", html, re.IGNORECASE):
             attr_dict = cls._parse_tag_attrs(m.group(1))
             name, elem_id = attr_dict.get("name"), attr_dict.get("id")
-            selector = f"#{elem_id}" if elem_id else f"textarea[name='{name}']" if name else None
+            selector = best_unique(stable_candidates("textarea", attr_dict), universe)
             if selector:
                 found.append((m.start(), {"type": "textarea", "name": name, "id": elem_id,
                                           "placeholder": attr_dict.get("placeholder"),
@@ -344,7 +345,7 @@ class URLAnalyzerService:
         for m in re.finditer(r"<select\b([^>]*)>(.*?)</select>", html, re.IGNORECASE | re.DOTALL):
             attr_dict = cls._parse_tag_attrs(m.group(1))
             name, elem_id = attr_dict.get("name"), attr_dict.get("id")
-            selector = f"#{elem_id}" if elem_id else f"select[name='{name}']" if name else None
+            selector = best_unique(stable_candidates("select", attr_dict), universe)
             # The first real choice: not a disabled or empty "Choose..." placeholder
             option = next((v for attrs, label in re.findall(r"<option\b([^>]*)>(.*?)</option>", m.group(2),
                                                             re.IGNORECASE | re.DOTALL)
@@ -362,29 +363,30 @@ class URLAnalyzerService:
     def _extract_buttons(cls, html: str) -> list[dict[str, Any]]:
         results = []
         spans = cls._form_spans(html)
+        universe = cls._element_universe(html)
         # <button> tags
         for match in re.finditer(r"<button\s*([^>]*)>(.*?)</button>", html, re.IGNORECASE | re.DOTALL):
             attrs_str = match.group(1)
-            raw_text = re.sub(r"<[^>]+>", "", match.group(2)).strip()
-            text = re.sub(r"\s+", " ", raw_text) or "Button"
+            raw_text = html_lib.unescape(re.sub(r"<[^>]+>", " ", match.group(2)))
+            text = re.sub(r"\s+", " ", raw_text).strip() or "Button"
             attrs = cls._parse_tag_attrs(attrs_str)
             elem_id = attrs.get("id")
             elem_class = attrs.get("class")
-            btype = attrs.get("type", "button")
+            # A <button> without a type submits its form (HTML default)
+            btype = (attrs.get("type") or "submit").lower()
 
-            if elem_id:
-                selector = f"#{elem_id}"
-            elif elem_class:
-                primary_class = elem_class.split()[0]
-                selector = f"button.{primary_class}"
-            else:
-                selector = f"button:has-text('{text[:20]}')" if text != "Button" else "button"
+            # Unique on the page, never by class ("btn" matches every button);
+            # "button" means no reliable selector, and callers skip it
+            label_text = text if text != "Button" else ""
+            selector = best_unique(stable_candidates("button", {**attrs, "type": btype}, label_text), universe)
+            selector = selector or "button"
 
             results.append({
                 "text": text[:35],
                 "id": elem_id,
                 "class": elem_class,
                 "type": btype,
+                "type_explicit": attrs.get("type") is not None,
                 "selector": selector,
                 "form": cls._form_at(spans, match.start()),
             })
@@ -394,7 +396,7 @@ class URLAnalyzerService:
             attrs = cls._parse_tag_attrs(match.group(0))
             value = attrs.get("value") or "Submit"
             elem_id = attrs.get("id")
-            selector = f"#{elem_id}" if elem_id else f"input[value='{value}']"
+            selector = best_unique(stable_candidates("input", attrs), universe) or "button"
             results.append({
                 "text": value[:35],
                 "id": elem_id,
@@ -451,12 +453,30 @@ class URLAnalyzerService:
 
     @classmethod
     def _parse_tag_attrs(cls, tag_str: str) -> dict[str, str]:
+        """Attributes of a start tag: double- or single-quoted (each may hold
+        the other quote: aria-label="Don't save") or bare, entities decoded."""
         attrs = {}
-        for match in re.finditer(r"""([a-zA-Z0-9_\-]+)=(?:["']([^"']*)["']|([^\s>]+))""", tag_str):
+        for match in re.finditer(r"""([a-zA-Z0-9_:\-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""", tag_str):
             key = match.group(1).lower()
-            val = match.group(2) if match.group(2) is not None else match.group(3)
-            attrs[key] = val or ""
+            val = next((g for g in match.groups()[1:] if g is not None), "")
+            attrs.setdefault(key, html_lib.unescape(val))
         return attrs
+
+    @classmethod
+    def _element_universe(cls, page: str) -> list[tuple[str, dict[str, str], str]]:
+        """Every start tag of *page* as (tag, attributes, text), the text for
+        buttons and links: what a selector could match, to keep only selectors
+        that match exactly one element."""
+        out = []
+        for m in re.finditer(r"<([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>", page):
+            tag = m.group(1).lower()
+            text = ""
+            if tag in ("button", "a"):
+                end = re.search(rf"</{tag}\s*>", page[m.end():], re.IGNORECASE)
+                inner = page[m.end(): m.end() + end.start()] if end else ""
+                text = html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", inner)).strip())
+            out.append((tag, cls._parse_tag_attrs(m.group(2)), text))
+        return out
 
     # -------------------------------------------------------------------------
     # QA Audits
@@ -550,9 +570,13 @@ class URLAnalyzerService:
         if not named:
             return None
         if has_inputs:
-            for b in named:
-                if b.get("type") == "submit" or cls._SUBMIT_WORDS.search(b.get("text") or ""):
-                    return b
+            # A button saying it submits wins; one that only submits because it
+            # has no type (often a "show password" toggle) comes after those
+            said = [b for b in named if (b.get("type") == "submit" and b.get("type_explicit", True))
+                    or cls._SUBMIT_WORDS.search(b.get("text") or "")]
+            implicit = [b for b in named if b.get("type") == "submit"]
+            if said or implicit:
+                return (said or implicit)[0]
         return next((b for b in named if b.get("id")), named[0])
 
     @staticmethod
@@ -807,6 +831,12 @@ class URLAnalyzerService:
                 "description": "Assert target DOM body is interactive and visible",
             })
             step_num += 1
+
+        # Submitted without any goal saying what success looks like: at least
+        # the implicit check, so the test never passes on an error page
+        submitted = any(st["action"] in ("CLICK", "PRESS") for st in steps)
+        if submitted and not goal_steps:
+            goal_steps = [goal_plan.no_server_error(0)]
 
         # What the goal expects after that: outcome checks and its later parts
         for st in goal_steps:

@@ -89,6 +89,12 @@ def form_outcome(n: int, part: str, inputs: list[dict[str, Any]], values: dict[s
     return []
 
 
+def no_server_error(n: int) -> dict[str, Any]:
+    """The implicit check after a submit whose success nobody described: no
+    server error page (true of every healthy app, so it never fails one)."""
+    return _step(n, "ASSERT_HIDDEN", "no server error is shown", target=SERVER_ERROR)
+
+
 def later_part_steps(n: int, part: str, values: dict[str, str]) -> list[dict[str, Any]]:
     """Steps for one part after the form; [] when it cannot be turned into steps."""
     p = part.strip()
@@ -143,8 +149,14 @@ def plan_goal(prompt: str | None, inputs: list[dict[str, Any]], values: dict[str
     n = first_step
     for i, part in enumerate(parts):
         if i == 0 and form_used and (is_form_part(part, values) or not later_part_steps(n, part, values)):
-            tested.append(part)
             new = form_outcome(n, part, inputs, values)
+            if new:
+                tested.append(part)
+            else:
+                # Submitted, but nothing in the goal says what success looks like:
+                # check the one thing true of every healthy app, and do not claim more
+                new = [no_server_error(n)]
+                untested.append(f"{part} (submitted; only checked that no server error appeared)")
         else:
             new = later_part_steps(n, part, values)
             (tested if new else untested).append(part)

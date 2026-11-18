@@ -53,12 +53,12 @@ class TestFormChoice:
     def test_the_password_form_is_filled_and_its_own_button_pressed(self):
         steps, _ = plan(LOGIN, "log in with demo@x.io / Secret-1")
         assert [s["target"] for s in steps if s["action"] == "FILL"] == ["#email", "#password"]  # not the search box
-        assert next(s for s in steps if s["action"] == "CLICK")["target"] == "button:has-text('Sign in')"
+        assert next(s for s in steps if s["action"] == "CLICK")["target"] == 'button:has-text("Sign in")'
 
     def test_a_search_goal_uses_the_search_form(self):
         html = '<form><input name="q" type="search"><button>Go</button></form><form><input name="a"><input name="b"><button>Save</button></form>'
         steps, _ = plan(html, 'search for "shoes"')
-        assert [s["target"] for s in steps if s["action"] == "FILL"] == ["input[name='q']"]
+        assert [s["target"] for s in steps if s["action"] == "FILL"] == ['input[name="q"]']
 
 
 class TestKind:
@@ -96,7 +96,7 @@ class TestLogin:
         assert set(tests) == {"auth-password-masked", "auth-empty-submit", "login-wrong-password"}
         wrong = tests["login-wrong-password"]
         assert [s["action"] for s in wrong] == ["NAVIGATE", "FILL", "FILL", "CLICK", "ASSERT_VISIBLE", "ASSERT_VISIBLE"]
-        assert wrong[2]["value"] == auth_plan.WRONG_PASSWORD and wrong[3]["target"] == "button:has-text('Sign in')"
+        assert wrong[2]["value"] == auth_plan.WRONG_PASSWORD and wrong[3]["target"] == 'button:has-text("Sign in")'
         assert wrong[4]["target"] == "#password" and wrong[5]["target"] == auth_plan.ERROR_SHOWN
         assert tests["auth-password-masked"][-1]["target"] == "#password[type=password]"
         assert [s["action"] for s in tests["auth-empty-submit"]] == ["NAVIGATE", "CLICK", "ASSERT_VISIBLE"]
