@@ -16,6 +16,7 @@ Secret token = the same project webhook secret (GitLab sends it as-is in
 ``X-Gitlab-Token``), trigger "Push events".
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -48,11 +49,12 @@ async def github_webhook(
     x_hub_signature_256: str | None = Header(None),
     db: Store = Depends(get_db),
 ) -> dict[str, Any]:
-    project = db.get(PROJECTS, project_id)
+    project = await asyncio.to_thread(db.get, PROJECTS, project_id)
     body = await request.body()
-    # Same answer for "no such project" and "bad signature": ids are not confirmed
+    # Same answer for "no such project" and "bad signature": ids are not confirmed.
+    # Compared as bytes: a non-ASCII header must be a 401, not a TypeError.
     if project is None or not project.get("webhook_secret") or not hmac.compare_digest(
-        signature_for(project["webhook_secret"], body), x_hub_signature_256 or ""
+        signature_for(project["webhook_secret"], body).encode(), (x_hub_signature_256 or "").encode()
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature.")
 
@@ -77,23 +79,30 @@ async def github_webhook(
         return {"ignored": "the project has no app URL to test"}
     head = payload.get("head_commit") or {}
     pusher = (payload.get("pusher") or {}).get("name") or "github"
-    return _start_or_queue(db, project, f"github:{pusher}", payload.get("after"), head.get("message"))
+    return await _start_or_queue(db, project, f"github:{pusher}", payload.get("after"), head.get("message"))
 
 
-def _start_or_queue(db: Store, project: dict[str, Any], actor: str, sha: str | None,
-                    message: str | None) -> dict[str, Any]:
+def _queue_behind_active_run(db: Store, project_id: int, push: dict[str, Any]) -> dict[str, Any] | None:
+    """Queue *push* after the project's run in progress, if there is one."""
+    running = active_run(db, project_id)
+    if not running:
+        return None
+    # Test this commit once the current run ends (a newer push replaces it)
+    db.update(PROJECTS, project_id, pending_push=push)
+    return {"queued_after": running["id"],
+            "message": f"pipeline #{running['id']} is {running['status']}; this commit runs when it ends"}
+
+
+async def _start_or_queue(db: Store, project: dict[str, Any], actor: str, sha: str | None,
+                          message: str | None) -> dict[str, Any]:
     """Run the pipeline for this pushed commit, or after the run in progress."""
     project_id = project["id"]
     first_line = (message or "").splitlines()[0][:80] if message else ""
     detail = f"{(sha or '')[:7]} {first_line}".strip()
     push = {"actor": actor, "detail": detail or None, "commit_sha": sha or None}
 
-    running = active_run(db, project_id)
-    if running:
-        # Test this commit once the current run ends (a newer push replaces it)
-        db.update(PROJECTS, project_id, pending_push=push)
-        return {"queued_after": running["id"],
-                "message": f"pipeline #{running['id']} is {running['status']}; this commit runs when it ends"}
+    if queued := await asyncio.to_thread(_queue_behind_active_run, db, project_id, push):
+        return queued
 
     run = start_run(db, project, trigger="webhook", actor=push["actor"], detail=push["detail"], ingest=True,
                     commit_sha=push["commit_sha"])
@@ -108,7 +117,7 @@ async def gitlab_webhook(
     x_gitlab_token: str | None = Header(None),
     db: Store = Depends(get_db),
 ) -> dict[str, Any]:
-    project = db.get(PROJECTS, project_id)
+    project = await asyncio.to_thread(db.get, PROJECTS, project_id)
     # GitLab sends the secret itself; same answer for "no such project" and "wrong token"
     if project is None or not project.get("webhook_secret") or not hmac.compare_digest(
         project["webhook_secret"].encode(), (x_gitlab_token or "").encode()
@@ -134,4 +143,4 @@ async def gitlab_webhook(
     sha = payload.get("checkout_sha") or payload.get("after")
     commits = payload.get("commits") or []
     message = next((c.get("message") for c in commits if c.get("id") == sha), None)
-    return _start_or_queue(db, project, f"gitlab:{payload.get('user_username') or 'gitlab'}", sha, message)
+    return await _start_or_queue(db, project, f"gitlab:{payload.get('user_username') or 'gitlab'}", sha, message)

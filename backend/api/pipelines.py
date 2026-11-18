@@ -6,6 +6,7 @@ progress, and list past runs.  Runs execute in the background; poll
 ``GET /pipelines/runs/{id}`` for stage-by-stage progress.
 """
 
+import asyncio
 import hmac
 import html
 import re
@@ -43,7 +44,7 @@ class QuickRunRequest(BaseModel):
     repo_url: str | None = Field(None, max_length=1024)
 
 
-def _start(db: Store, user: User, project: Record, ingest: bool = False) -> Record:
+def _ensure_startable(db: Store, project: Record) -> None:
     if not project.get("app_url"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail="Set the project's app URL before running the pipeline.")
@@ -51,13 +52,21 @@ def _start(db: Store, user: User, project: Record, ingest: bool = False) -> Reco
     if running:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail=f"Pipeline #{running['id']} is already {running['status']} for this project.")
-    return start_run(db, project, trigger="manual", actor=actor_for(user, None), ingest=ingest)
+
+
+async def _start(db: Store, user: User, project: Record, ingest: bool = False) -> Record:
+    # Database reads run in a thread so a slow store never stalls other requests;
+    # start_run stays on the event loop, where it schedules the run (inline mode)
+    actor = await asyncio.to_thread(actor_for, user, None)
+    await asyncio.to_thread(_ensure_startable, db, project)
+    return start_run(db, project, trigger="manual", actor=actor, ingest=ingest)
 
 
 @router.post("/run", status_code=status.HTTP_202_ACCEPTED)
 async def run_project(req: RunRequest, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> dict[str, Any]:
     """Run the whole pipeline for one of the caller's projects."""
-    return _start(db, user, owned_project(db, user, req.project_id), req.ingest)
+    project = await asyncio.to_thread(owned_project, db, user, req.project_id)
+    return await _start(db, user, project, req.ingest)
 
 
 @router.post("/quick", status_code=status.HTTP_202_ACCEPTED)
@@ -68,16 +77,22 @@ async def quick_run(req: QuickRunRequest, db: Store = Depends(get_db), user: Use
         repo = _check_http_url(req.repo_url, "Repository URL") or None
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    project = await asyncio.to_thread(_quick_project, db, user, url, repo, req.prompt)
+    return await _start(db, user, project)
+
+
+def _quick_project(db: Store, user: User, url: str, repo: str | None, prompt: str | None) -> Record:
+    """The caller's project for *url*, created or updated with this run's goal and repository."""
     project = db.find_one(PROJECTS, app_url=url, **scope(user))
     if project is None:
-        project = ProjectService.create_project(
+        return ProjectService.create_project(
             db, name=urlparse(url).netloc or url, description="Created from a one-click pipeline run",
-            owner_uid=user.uid, app_url=url, repo_url=repo, prompt=req.prompt,
+            owner_uid=user.uid, app_url=url, repo_url=repo, prompt=prompt,
         )
-    elif (req.prompt and req.prompt != project.get("prompt")) or (repo and repo != project.get("repo_url")):
-        changes = {k: v for k, v in {"prompt": req.prompt, "repo_url": repo}.items() if v}
-        project = ProjectService.update_project(db, project["id"], **changes)
-    return _start(db, user, project)
+    if (prompt and prompt != project.get("prompt")) or (repo and repo != project.get("repo_url")):
+        changes = {k: v for k, v in {"prompt": prompt, "repo_url": repo}.items() if v}
+        return ProjectService.update_project(db, project["id"], **changes)
+    return project
 
 
 @router.get("/runs")
@@ -182,7 +197,8 @@ def report_html_response(db: Store, run: Record, *, shared: bool = False) -> Res
 
 
 async def report_pdf_response(db: Store, run: Record, *, shared: bool = False) -> Response:
-    pdf = await html_to_pdf(render_html(build_report(db, run), shared=shared))
+    document = await asyncio.to_thread(lambda: render_html(build_report(db, run), shared=shared))
+    pdf = await html_to_pdf(document)
     return Response(content=pdf, media_type="application/pdf", headers={
         "Content-Disposition": f'attachment; filename="testsphere-run-{run["id"]}-report.pdf"', "Cache-Control": "private, no-store"})
 
@@ -196,7 +212,7 @@ def get_run_report(run_id: int, db: Store = Depends(get_db), user: User = Depend
 @router.get("/runs/{run_id}/report.pdf")
 async def get_run_report_pdf(run_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> Response:
     """The run's report as a PDF: summary, stages, each failure with its diagnosis and screenshot, all tests."""
-    return await report_pdf_response(db, _finished_run(db, user, run_id))
+    return await report_pdf_response(db, await asyncio.to_thread(_finished_run, db, user, run_id))
 
 
 @router.post("/projects/{project_id}/deploy", status_code=status.HTTP_201_CREATED)

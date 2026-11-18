@@ -12,6 +12,7 @@ When sign-in is required, findings are per user and the audit actor is the
 verified identity; with sign-in off, ``actor`` is whatever the client sends.
 """
 
+import asyncio
 import json
 from collections import Counter
 from typing import Any
@@ -112,7 +113,7 @@ async def scan(
     target actually returned (also included, redacted, as ``response_headers``),
     plus its tracked state (approval, retest) from earlier scans.
     """
-    actor = actor_for(user, req.actor)
+    actor = await asyncio.to_thread(actor_for, user, req.actor)
     if req.active and not settings.SECURITY_ACTIVE_SCAN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Active scanning is turned off on this server. Set SECURITY_ACTIVE_SCAN=true to "
@@ -125,11 +126,12 @@ async def scan(
         if req.active:
             active_findings = await active_scanner.scan(req.url)
     except (OutOfScopeError, ScanError, ActiveScanError) as exc:
-        store.record_audit(db, actor=actor, kind="scan", level="error", message=f"Scan refused/failed for {req.url}: {exc}",
-                           owner_uid=user.uid)
+        await asyncio.to_thread(store.record_audit, db, actor=actor, kind="scan", level="error",
+                                message=f"Scan refused/failed for {req.url}: {exc}", owner_uid=user.uid)
         raise _translate(exc) from exc
-    result = scan_result(db, scanner, snap, req.url, actor=actor, owner_uid=None if user.local else user.uid,
-                         extra_findings=active_findings)
+    # Saving reads and writes each finding: in a thread, so other requests are not held up
+    result = await asyncio.to_thread(scan_result, db, scanner, snap, req.url, actor=actor,
+                                     owner_uid=None if user.local else user.uid, extra_findings=active_findings)
     # Best-effort AI triage: reasons only over findings already produced in
     # scope, never contacts the target, and leaves the result untouched on any
     # failure.  analyze() re-runs on the already-fetched snapshot (cheap, no I/O).
@@ -228,17 +230,17 @@ async def _retest(row, scanner: PassiveScanner, db: Store, actor: str, owner_uid
                             detail=f"{refusal}, so this finding cannot be retested.")
     retester = active_scanner if row.check_id in ACTIVE_CHECK_IDS else scanner
     finding = Finding.model_validate(json.loads(row.data))
-    store.record_audit(db, actor=actor, kind="retest", ref=row.key, message=f"Retest started for {row.check_id} on {row.target_url}",
-                       owner_uid=owner_uid)
+    await asyncio.to_thread(store.record_audit, db, actor=actor, kind="retest", ref=row.key,
+                            message=f"Retest started for {row.check_id} on {row.target_url}", owner_uid=owner_uid)
     try:
         result = await retester.retest(finding)
     except (OutOfScopeError, ScanError, ActiveScanError) as exc:
-        store.record_audit(db, actor=actor, kind="retest", level="error", ref=row.key, message=f"Retest failed for {row.check_id}: {exc}",
-                           owner_uid=owner_uid)
+        await asyncio.to_thread(store.record_audit, db, actor=actor, kind="retest", level="error", ref=row.key,
+                                message=f"Retest failed for {row.check_id}: {exc}", owner_uid=owner_uid)
         raise _translate(exc) from exc
-    row = store.save_retest(db, row, result.retest_result.value, result.status.value)
-    store.record_audit(
-        db, actor=actor, kind="retest", ref=row.key,
+    row = await asyncio.to_thread(store.save_retest, db, row, result.retest_result.value, result.status.value)
+    await asyncio.to_thread(
+        store.record_audit, db, actor=actor, kind="retest", ref=row.key,
         level="success" if result.retest_result.value == "pass" else "warn",
         message=f"{row.check_id}: retest {result.retest_result.value.upper()} — {result.status.value}",
         owner_uid=owner_uid,
@@ -256,7 +258,9 @@ async def retest_finding(
     user: User = Depends(limit_runs),
 ) -> dict[str, Any]:
     """Re-run the check behind a tracked finding and store the result."""
-    return await _retest(_finding_or_404(db, key, user), scanner, db, actor_for(user, req.actor), user.uid,
+    row = await asyncio.to_thread(_finding_or_404, db, key, user)
+    actor = await asyncio.to_thread(actor_for, user, req.actor)
+    return await _retest(row, scanner, db, actor, user.uid,
                          active_scanner=active_scanner)
 
 

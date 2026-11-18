@@ -16,6 +16,7 @@ HTML, traces, other runs or anything else of the account.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
@@ -120,7 +121,7 @@ def _not_available() -> Response:
 
 @public_router.get("/{token}.pdf", include_in_schema=False)
 async def shared_report_pdf(token: str, db: Store = Depends(get_db)) -> Response:
-    run = _shared_run(db, token)
+    run = await asyncio.to_thread(_shared_run, db, token)
     return await report_pdf_response(db, run, shared=True) if run else _not_available()
 
 

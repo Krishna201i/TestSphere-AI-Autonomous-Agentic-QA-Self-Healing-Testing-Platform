@@ -295,3 +295,57 @@ def test_signed_in_users_need_to_be_listed_to_run_active_scans(active_client, mo
     monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "carol")
     resp = active_client.post(f"/api/security/findings/{key}/retest", json={}, headers={"Authorization": "Bearer ann"})
     assert resp.status_code == 403 and "cannot be retested" in resp.json()["detail"]
+
+
+# ── Event loop: a slow store must not stall other requests ───
+
+
+async def test_saving_a_scan_does_not_block_the_event_loop(fresh_store) -> None:
+    """Saving reads and writes each finding; on Firestore each is a network round
+    trip. They run in a thread, so the event loop (every other request) keeps going."""
+    import asyncio
+    import time
+
+    from backend.database.session import set_store
+    from backend.database.store import MemoryStore
+
+    class SlowStore(MemoryStore):  # every call costs a round trip
+        def find(self, *a, **k):
+            time.sleep(0.03)
+            return super().find(*a, **k)
+
+        def _create(self, *a, **k):
+            time.sleep(0.03)
+            return super()._create(*a, **k)
+
+        def _update(self, *a, **k):
+            time.sleep(0.03)
+            return super()._update(*a, **k)
+
+    set_store(SlowStore())
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, headers={"content-type": "text/html"}, text=""))
+    app.dependency_overrides[get_scanner] = lambda: PassiveScanner(ScopePolicy.of("app.test"), transport=transport)
+    gaps: list[float] = []
+    done = asyncio.Event()
+
+    async def ticker() -> None:  # how long the loop goes without running anything else
+        last = time.perf_counter()
+        while not done.is_set():
+            await asyncio.sleep(0.005)
+            now = time.perf_counter()
+            gaps.append(now - last)
+            last = now
+
+    try:
+        tick = asyncio.create_task(ticker())
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as client:
+            started = time.perf_counter()
+            resp = await client.post("/api/security/scan", json={"url": "http://app.test/"})
+            took = time.perf_counter() - started
+        done.set()
+        await tick
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200, resp.text
+    assert took > 0.3  # the slow store really was slow
+    assert max(gaps) < 0.15, f"event loop blocked for {max(gaps):.2f}s"

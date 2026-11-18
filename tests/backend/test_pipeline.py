@@ -640,3 +640,12 @@ def test_a_run_records_what_its_llm_calls_used(fresh_store, stub_network, monkey
 
     second = run_once(fresh_store, make_project(fresh_store), FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
     assert second["llm_usage"]["calls"] == 2  # each run has its own budget, not a running total
+
+
+def test_a_non_ascii_webhook_signature_is_refused_not_a_server_error(fresh_store, no_background):
+    client = TestClient(app, raise_server_exceptions=False)
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    resp = client.post(f"/api/webhooks/github/{project['id']}", content=push_payload(),
+                       headers={"X-GitHub-Event": "push", "X-Hub-Signature-256": "sha256=é".encode()})
+    assert resp.status_code == 401
+    assert no_background == []
