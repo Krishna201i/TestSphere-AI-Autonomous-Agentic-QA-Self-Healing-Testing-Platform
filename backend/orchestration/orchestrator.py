@@ -452,6 +452,10 @@ class PlatformWorkflowOrchestrator:
 
         # Initialize AgentState with initial events in AI Orchestrator
         state = self.ai_orchestrator.get_state(workflow_id)
+        # An execution run again (POST /workflow/execute/<id> after it finished)
+        # starts a new workflow instead of failing on the finished one
+        if state and state.current_step in (WorkflowStep.COMPLETED, WorkflowStep.ABORTED):
+            state = None
         if not state:
             state = AgentState(
                 workflow_id=workflow_id,

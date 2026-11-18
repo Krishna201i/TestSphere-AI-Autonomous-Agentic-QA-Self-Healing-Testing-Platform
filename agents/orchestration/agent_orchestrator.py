@@ -84,6 +84,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+MAX_REMEMBERED_WORKFLOWS = 500
+
+
+class _RecentWorkflows(dict):
+    """A dict of workflow states that forgets the least recently written
+    beyond ``MAX_REMEMBERED_WORKFLOWS`` (their events only feed the live view)."""
+
+    def __setitem__(self, key: str, value: AgentState) -> None:
+        self.pop(key, None)  # re-inserting moves it to the newest end
+        super().__setitem__(key, value)
+        while len(self) > MAX_REMEMBERED_WORKFLOWS:
+            del self[next(iter(self))]
+
+
 class AgentOrchestrator:
     """Coordinates the autonomous QA workflow.
 
@@ -144,8 +158,9 @@ class AgentOrchestrator:
                 ),
             )
 
-        # Active workflows indexed by workflow_id
-        self._workflows: dict[str, AgentState] = {}
+        # Workflows indexed by workflow_id; only the most recent are kept, so a
+        # long-running server does not hold every execution's state forever
+        self._workflows: dict[str, AgentState] = _RecentWorkflows()
 
         logger.info(
             "AgentOrchestrator initialized — "

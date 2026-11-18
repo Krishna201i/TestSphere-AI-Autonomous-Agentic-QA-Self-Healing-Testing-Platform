@@ -649,3 +649,29 @@ def test_a_non_ascii_webhook_signature_is_refused_not_a_server_error(fresh_store
                        headers={"X-GitHub-Event": "push", "X-Hub-Signature-256": "sha256=é".encode()})
     assert resp.status_code == 401
     assert no_background == []
+
+
+def test_generated_tests_no_longer_planned_are_retired_and_hidden(fresh_store):
+    """A link that went away left its generated test behind forever (never run, still listed)."""
+    project = make_project(fresh_store)
+    app_row = fresh_store.insert("applications", project_id=project["id"], name="A", base_url="https://a.example",
+                                 owner_uid=project.get("owner_uid"))
+    keep = fresh_store.insert(TEST_CASES, application_id=app_row["id"], external_id=f"pipe-{project['id']}-smoke", name="smoke", version=1)
+    gone = fresh_store.insert(TEST_CASES, application_id=app_row["id"], external_id=f"pipe-{project['id']}-link-old", name="old link", version=1)
+    mine = fresh_store.insert(TEST_CASES, application_id=app_row["id"], external_id="TC-MANUAL", name="saved by hand", version=1)
+
+    rows = fresh_store.find(TEST_CASES, application_id=app_row["id"])
+    assert runner._retire_unplanned(fresh_store, rows, {keep["id"]}) == 1
+    assert fresh_store.get(TEST_CASES, gone["id"])["retired"] is True
+    assert not fresh_store.get(TEST_CASES, keep["id"]).get("retired")
+    assert not fresh_store.get(TEST_CASES, mine["id"]).get("retired")  # saved tests are never retired
+
+    client = TestClient(app)
+    listed = {r["id"] for r in client.get("/api/test-cases").json()}
+    assert listed == {keep["id"], mine["id"]}
+    assert gone["id"] in {r["id"] for r in client.get("/api/test-cases?include_retired=true").json()}
+
+    # Planned again (the link is back): un-retired
+    rows = fresh_store.find(TEST_CASES, application_id=app_row["id"])
+    assert runner._retire_unplanned(fresh_store, rows, {keep["id"], gone["id"]}) == 0
+    assert fresh_store.get(TEST_CASES, gone["id"])["retired"] is False

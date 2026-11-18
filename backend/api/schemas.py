@@ -238,6 +238,8 @@ class TestCaseResponse(BaseModel):
     priority: str | None = None
     version: int
     quarantined: bool = False
+    # Generated, but no longer planned by the pipeline (kept with its history)
+    retired: bool = False
     created_at: datetime
     updated_at: datetime
 

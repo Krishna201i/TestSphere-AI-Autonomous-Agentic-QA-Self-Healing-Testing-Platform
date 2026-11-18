@@ -51,11 +51,13 @@ def create_test_case(
 @router.get("", response_model=list[TestCaseResponse])
 def list_test_cases(
     application_id: int | None = Query(None, description="Filter by parent Application ID"),
+    include_retired: bool = Query(False, description="Also list generated tests the pipeline no longer plans"),
     db: Store = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[Record]:
     """Retrieve the caller's test cases, with optional application_id filtering."""
-    return TestCaseService.list_test_cases(db=db, application_id=application_id, **scope(user))
+    rows = TestCaseService.list_test_cases(db=db, application_id=application_id, **scope(user))
+    return rows if include_retired else [r for r in rows if not r.get("retired")]
 
 
 @router.get("/{test_case_id}", response_model=TestCaseResponse)

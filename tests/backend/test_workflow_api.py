@@ -164,3 +164,55 @@ class TestPlanFromErrorPage(unittest.TestCase):
         res = self.client.post("/api/workflow/plan-and-execute", json={"app_url": "http://127.0.0.1:1/"})
         self.assertEqual(res.status_code, 422)
         self.assertIn("connection refused", res.json()["detail"])  # the real cause, not just "unreachable"
+
+
+@patch("backend.orchestration.orchestrator.run_test")
+@patch("backend.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
+def test_planning_the_same_page_again_updates_its_test_instead_of_adding_one(analyze, run_test, fresh_store):
+    """Each plan-and-execute call used to insert another test case with the same external id."""
+    from backend.models import TEST_CASES
+
+    analyze.return_value = {"success": True, "page_title": "Shop", "url": "https://shop.example/",
+                            "synthesized_test_case": {"name": "Shop", "steps": []}}
+    run_test.return_value = EngineTestResult(test_id="t", status=TestStatus.PASSED, started_at=datetime.now(UTC),
+                                             duration_ms=1, steps=[], artifacts_dir="artifacts")
+    client = TestClient(app)
+    payload = {"app_url": "https://shop.example/",
+               "steps": [{"step_number": 1, "action": "NAVIGATE", "value": "https://shop.example/"}]}
+    for _ in range(3):
+        assert client.post("/api/workflow/plan-and-execute", json=payload).status_code == 200
+    (row,) = [r for r in fresh_store.find(TEST_CASES) if str(r.get("external_id", "")).startswith("tc-auto-")]
+    assert row["version"] == 1  # same steps: same version
+
+    payload["steps"].append({"step_number": 2, "action": "ASSERT_VISIBLE", "target": "body"})
+    assert client.post("/api/workflow/plan-and-execute", json=payload).status_code == 200
+    (row,) = [r for r in fresh_store.find(TEST_CASES) if str(r.get("external_id", "")).startswith("tc-auto-")]
+    assert row["version"] == 2
+
+
+@patch("backend.orchestration.orchestrator.run_test")
+def test_an_execution_can_be_run_again(run_test, fresh_store):
+    """Running a finished execution again answered 500 ("cannot submit in step COMPLETED")."""
+    run_test.return_value = EngineTestResult(test_id="t", status=TestStatus.PASSED, started_at=datetime.now(UTC),
+                                             duration_ms=1, steps=[], artifacts_dir="artifacts")
+    project = ProjectService.create_project(fresh_store, name="P")
+    application = ApplicationService.create_application(fresh_store, project.id, name="A", base_url="https://a.example")
+    case = TestCaseService.create_test_case(fresh_store, application.id, external_id="TC-1", name="T")
+    execution = TestExecutionService.create_execution(fresh_store, case.id, status=TestExecutionStatus.PENDING)
+    client = TestClient(app)
+    for _ in range(2):
+        response = client.post(f"/api/workflow/execute/{execution.id}")
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "PASSED"
+
+
+def test_only_the_most_recent_workflows_are_kept_in_memory(monkeypatch):
+    from agents.orchestration import agent_orchestrator as ao
+
+    monkeypatch.setattr(ao, "MAX_REMEMBERED_WORKFLOWS", 3)
+    kept = ao._RecentWorkflows()
+    for i in range(5):
+        kept[f"wf-{i}"] = i
+    kept["wf-2"] = "updated"  # written again: now the newest
+    kept["wf-5"] = 5
+    assert list(kept) == ["wf-4", "wf-2", "wf-5"]

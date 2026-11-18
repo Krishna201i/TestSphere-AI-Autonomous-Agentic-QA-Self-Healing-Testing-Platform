@@ -69,6 +69,22 @@ ACTIVE = ("queued", "running")
 TRIGGERS = ("manual", "schedule", "webhook")
 GENERATED_PREFIX = "pipe-"
 
+
+def _retire_unplanned(db: Store, rows: list[Record], planned_ids: set[int]) -> int:
+    """Mark generated tests this run did not plan as retired (a link that went
+    away, an AI test the model no longer writes, a recording for an old goal),
+    and un-retire planned ones.  Retired tests are not run and are hidden from
+    the test list; their history stays.  Returns how many were retired now."""
+    newly = 0
+    for row in rows:
+        if not str(row.get("external_id") or "").startswith(GENERATED_PREFIX):
+            continue
+        should = row["id"] not in planned_ids
+        if bool(row.get("retired")) != should:
+            db.update(TEST_CASES, row["id"], retired=should)
+            newly += should
+    return newly
+
 _tasks: set = set()
 _run_tasks: dict[int, asyncio.Task] = {}  # run_id -> Task, for cancellation
 _lock_state: dict[str, Any] = {"loop": None, "lock": None}
@@ -533,11 +549,14 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
     if explored is not None:
         generated.append(explored)
 
-    saved = [tc for tc in db.find(TEST_CASES, application_id=application["id"], order_by="id")
-             if not str(tc.get("external_id") or "").startswith(GENERATED_PREFIX)]
+    all_rows = db.find(TEST_CASES, application_id=application["id"], order_by="id")
+    retired = _retire_unplanned(db, all_rows, {row["id"] for row in generated})
+    saved = [tc for tc in all_rows if not str(tc.get("external_id") or "").startswith(GENERATED_PREFIX)]
     detail = f"{len(generated) + len(saved)} tests: {len(generated)} generated ({created} new)"
     if saved:
         detail += f", {len(saved)} saved"
+    if retired:
+        detail += f" · retired {retired} generated test(s) no longer planned"
     if left_out:
         detail += f" · left out {len(left_out)} page(s) that did not load: " + ", ".join(left_out[:4])
     if ai_note:

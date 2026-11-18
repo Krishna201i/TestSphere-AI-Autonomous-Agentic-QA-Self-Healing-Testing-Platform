@@ -5,6 +5,7 @@ Provides endpoints to trigger autonomous test runs and stream real-time
 Server-Sent Events (SSE) telemetry to platform dashboards.
 """
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -82,11 +83,11 @@ async def plan_and_execute_workflow(
     creates an execution record, and executes the complete autonomous QA loop.
     """
     req = payload or PlanAndExecuteRequest()
-    actor = actor_for(user, None)
+    actor = await asyncio.to_thread(actor_for, user, None)
     try:
         live_analysis = None
         if req.test_case_id:
-            tc = db.get(TEST_CASES, req.test_case_id)
+            tc = await asyncio.to_thread(db.get, TEST_CASES, req.test_case_id)
             if not tc or not (user.local or tc.get("owner_uid") == user.uid):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -115,72 +116,19 @@ async def plan_and_execute_workflow(
                     f"HTTP {live_analysis.get('status_code')}" if live_analysis and live_analysis.get("status_code")
                     else (live_analysis or {}).get("error") or "unreachable"
                 )
-                record_audit(db, actor=actor, kind="qa", level="error", owner_uid=user.uid,
-                             message=f"QA run refused: {target_url} did not load ({reason})")
+                await asyncio.to_thread(record_audit, db, actor=actor, kind="qa", level="error", owner_uid=user.uid,
+                                        message=f"QA run refused: {target_url} did not load ({reason})")
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=f"Could not load {target_url} ({reason}). Check the URL — no tests were planned from an error page.",
                 )
 
-            # Locate or create project
-            proj = default_project(db, None if user.local else user.uid)
-
-            # Determine application name and URL
-            resolved_app_name = req.app_name
-            resolved_app_url = target_url
-            if live_analysis and live_analysis.get("page_title"):
-                if not resolved_app_name:
-                    resolved_app_name = live_analysis["page_title"][:60]
-                resolved_app_url = live_analysis["url"]
-
-            # Locate or create application
-            if req.application_id:
-                app_entity = db.get(APPLICATIONS, req.application_id)
-                if not app_entity or not (user.local or app_entity.get("owner_uid") == user.uid):
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Application #{req.application_id} not found",
-                    )
-            else:
-                app_entity = (
-                    db.find_one(APPLICATIONS, name=resolved_app_name, **scope(user)) if resolved_app_name else None
-                )
-                if not app_entity:
-                    app_entity = db.insert(
-                        APPLICATIONS,
-                        project_id=proj.id,
-                        name=resolved_app_name or urlparse(resolved_app_url).netloc or resolved_app_url,
-                        base_url=resolved_app_url,
-                        description=None,
-                        owner_uid=user.uid,
-                    )
-
-            # Determine executable test steps
-            effective_steps = req.steps
-            if not effective_steps and live_analysis:
-                effective_steps = live_analysis["synthesized_test_case"]["steps"]
-
-            resolved_tc_name = req.test_case_name
-            if not resolved_tc_name and live_analysis:
-                resolved_tc_name = live_analysis["synthesized_test_case"]["name"]
-
-            desc_content = json.dumps({
-                "steps": effective_steps or [],
-                "analysis": live_analysis,
-                "prompt": req.prompt,
-            })
-
-            tc = TestCaseService.create_test_case(
-                db,
-                application_id=app_entity.id,
-                name=resolved_tc_name or "Autonomous Planned Test Case",
-                description=desc_content,
-                external_id=f"tc-auto-{app_entity.id}",
-                owner_uid=user.uid,
-            )
+            # Project, application and test case: database work, in a thread
+            tc = await asyncio.to_thread(_save_planned_test, db, user, req, target_url, live_analysis)
 
         # Create execution record
-        execution = TestExecutionService.create_execution(
+        execution = await asyncio.to_thread(
+            TestExecutionService.create_execution,
             db, test_case_id=tc.id, status=TestExecutionStatus.PENDING, owner_uid=user.uid,
         )
 
@@ -194,8 +142,8 @@ async def plan_and_execute_workflow(
             res["analysis"] = live_analysis
 
         run_status = res.get("status", "UNKNOWN")
-        record_audit(
-            db, actor=actor, kind="qa", ref=str(execution.id), owner_uid=user.uid,
+        await asyncio.to_thread(
+            record_audit, db, actor=actor, kind="qa", ref=str(execution.id), owner_uid=user.uid,
             level={"FAILED": "error", "HEALED": "warn", "PASSED": "success"}.get(run_status, "info"),
             message=f"QA run #{execution.id} ({tc.name}) -> {run_status}"
                     + (f": {res['error_message']}" if res.get("error_message") else ""),
@@ -209,6 +157,54 @@ async def plan_and_execute_workflow(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Plan-and-execute failed unexpectedly ({type(exc).__name__}). The error is in the server log.",
         ) from exc
+
+
+def _save_planned_test(db: Store, user: User, req: PlanAndExecuteRequest, target_url: str,
+                       live_analysis: dict[str, Any] | None):
+    """The test case planned for *target_url*: created on the first call, updated
+    (a new version when its steps change) on the next ones, never duplicated."""
+    proj = default_project(db, None if user.local else user.uid)
+
+    resolved_app_name = req.app_name
+    resolved_app_url = target_url
+    if live_analysis and live_analysis.get("page_title"):
+        if not resolved_app_name:
+            resolved_app_name = live_analysis["page_title"][:60]
+        resolved_app_url = live_analysis["url"]
+
+    if req.application_id:
+        app_entity = db.get(APPLICATIONS, req.application_id)
+        if not app_entity or not (user.local or app_entity.get("owner_uid") == user.uid):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail=f"Application #{req.application_id} not found")
+    else:
+        app_entity = db.find_one(APPLICATIONS, name=resolved_app_name, **scope(user)) if resolved_app_name else None
+        if not app_entity:
+            app_entity = db.insert(
+                APPLICATIONS, project_id=proj.id,
+                name=resolved_app_name or urlparse(resolved_app_url).netloc or resolved_app_url,
+                base_url=resolved_app_url, description=None, owner_uid=user.uid,
+            )
+
+    effective_steps = req.steps
+    if not effective_steps and live_analysis:
+        effective_steps = live_analysis["synthesized_test_case"]["steps"]
+    resolved_tc_name = req.test_case_name
+    if not resolved_tc_name and live_analysis:
+        resolved_tc_name = live_analysis["synthesized_test_case"]["name"]
+    name = resolved_tc_name or "Autonomous Planned Test Case"
+    description = json.dumps({"steps": effective_steps or [], "analysis": live_analysis, "prompt": req.prompt})
+    external_id = f"tc-auto-{app_entity.id}"
+
+    existing = db.find_one(TEST_CASES, application_id=app_entity.id, external_id=external_id)
+    if existing is None:
+        return TestCaseService.create_test_case(db, application_id=app_entity.id, name=name, description=description,
+                                                external_id=external_id, owner_uid=user.uid)
+    old_steps = (json.loads(existing.get("description") or "{}") or {}).get("steps")
+    changes: dict[str, Any] = {"name": name, "description": description}
+    if old_steps != (effective_steps or []):
+        changes["version"] = int(existing.get("version") or 1) + 1
+    return db.update(TEST_CASES, existing["id"], **changes)
 
 
 @router.post("/execute/{execution_id}", status_code=status.HTTP_200_OK)
