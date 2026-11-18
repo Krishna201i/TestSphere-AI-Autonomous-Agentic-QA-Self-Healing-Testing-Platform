@@ -100,3 +100,19 @@ async def test_no_goal_or_no_model_means_no_exploration(fresh_store, site):  # n
     assert await explore.explored_test(fresh_store, project, app, explorer=GoalExplorer(ScriptedModel())) == (None, None)
     project, app = setup(fresh_store, site)
     assert await explore.explored_test(fresh_store, project, app) == (None, None)  # tests run on the mock model
+
+
+async def test_a_recording_still_replays_after_the_model_is_turned_off(fresh_store, site):  # noqa: F811
+    """A recording is plain steps: switching the provider back to mock (or losing the API key)
+    must not silently drop a test that was verified once."""
+    project, app = setup(fresh_store, site)
+    row, _ = await explore.explored_test(fresh_store, project, app, explorer=GoalExplorer(reach_portal()))
+
+    # No explorer passed and the platform model is the mock one: the AI explorer is off
+    again, note = await explore.explored_test(fresh_store, project, app)
+    assert again["id"] == row["id"]
+    assert note == "replaying the AI-explored recording (the AI explorer is off, so it is not re-recorded)"
+
+    # A recording made for an earlier goal is stale: not replayed
+    changed = ProjectService.update_project(fresh_store, project["id"], prompt="open the Doctor portal")
+    assert await explore.explored_test(fresh_store, changed, app) == (None, None)

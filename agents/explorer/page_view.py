@@ -124,10 +124,13 @@ class PageView:
     elements: list[PageElement]
 
     def element(self, index: Any) -> PageElement | None:
+        """The element numbered *index* (1-based, as the model sees them), or
+        None: 0 or a negative number would otherwise pick from the end."""
         try:
-            return self.elements[int(index) - 1]
-        except (TypeError, ValueError, IndexError):
+            i = int(index)
+        except (TypeError, ValueError):
             return None
+        return self.elements[i - 1] if 1 <= i <= len(self.elements) else None
 
     def describe(self) -> str:
         text = self.text[:MAX_PAGE_TEXT] + ("…" if len(self.text) > MAX_PAGE_TEXT else "")

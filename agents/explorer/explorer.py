@@ -47,6 +47,7 @@ Rules:
 - Never delete, pay, buy, transfer, sign out or change settings unless the goal says so.
 - When the goal is reached, answer "done" with a "check" that proves it on the current page:
   url_contains with part of the current URL, or text_visible with a short phrase from the visible text.
+  Pick something the start page did not already show (not the site's name): it must prove the goal's result.
 - If the goal cannot be reached, answer "give_up" and say why."""
 
 
@@ -75,6 +76,8 @@ class GoalExplorer:
         await _open(page, start_url)
         result.steps.append(_stored(1, "NAVIGATE", value=start_url, description=f"Open {start_url}"))
         bad_answers = 0
+        # What was already true before any action: a check that held there proves nothing
+        start = {"url": page.url, "text": " ".join((await page.inner_text("body")).split())}
 
         for turn in range(1, self.max_steps + 1):
             view = await read_page(page)
@@ -102,7 +105,7 @@ class GoalExplorer:
                 return result
             if action == "done":
                 check = decision.get("check") if isinstance(decision.get("check"), dict) else {}
-                verdict = await _verify(page, check)
+                verdict = await _verify(page, check, start)
                 if verdict is None:
                     result.reached, result.outcome = True, {"type": check["type"], "value": str(check["value"])}
                     result.steps.append(_check_step(len(result.steps) + 1, result.outcome))
@@ -235,14 +238,21 @@ async def _unique_locator(page: Any, candidates: list[str]) -> str | None:
     return None
 
 
-async def _verify(page: Any, check: dict[str, Any]) -> str | None:
-    """None when *check* holds on the current page, else why it does not."""
+async def _verify(page: Any, check: dict[str, Any], start: dict[str, str] | None = None) -> str | None:
+    """None when *check* holds on the current page, else why it does not.
+
+    A check that already held on the start page (the site's name, the start
+    URL) is refused: it would pass whether or not the goal was reached."""
     from engine.runner import _text_contains
 
     kind, value = check.get("type"), str(check.get("value") or "").strip()
     if kind not in ("url_contains", "text_visible") or not value:
         return "a done answer needs a check: url_contains or text_visible with a value"
     if kind == "url_contains":
+        if start and value in start["url"]:
+            return f"the start URL already contains {value!r}: pick something only the goal's result shows"
         return None if value in page.url else f"the URL {page.url} does not contain {value!r}"
+    if start and _text_contains(start["text"], value):
+        return f"the start page already shows {value!r}: pick something only the goal's result shows"
     text = " ".join((await page.inner_text("body")).split())
     return None if _text_contains(text, value) else f"the page does not show {value!r}"

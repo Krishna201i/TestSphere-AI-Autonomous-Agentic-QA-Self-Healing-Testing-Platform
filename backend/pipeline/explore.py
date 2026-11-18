@@ -61,10 +61,16 @@ async def explored_test(db: Store, project: Record, application: Record, *, expl
                         external_prefix: str = "pipe-") -> tuple[Record | None, str | None]:
     """The project's AI-explored test (recorded now, or the existing recording) and a note for the plan stage."""
     goal = (project.get("prompt") or "").strip()
-    if not goal or (explorer is None and not enabled()):
+    if not goal:
         return None, None
     external_id = f"{external_prefix}{project['id']}-{SLUG}"
     row = db.find_one(TEST_CASES, application_id=application["id"], external_id=external_id)
+    if explorer is None and not enabled():
+        # A recording is plain steps: it replays without the model.  One made
+        # for an earlier goal is stale and is not run.
+        if row is not None and _recorded_goal(row) == goal:
+            return row, "replaying the AI-explored recording (the AI explorer is off, so it is not re-recorded)"
+        return None, None
     why = needs_exploring(db, row, goal)
     if why is None:
         return row, "replaying the AI-explored recording"
@@ -91,7 +97,9 @@ async def explored_test(db: Store, project: Record, application: Record, *, expl
         # New steps replace what someone may have trusted: quarantined again until reviewed
         row = db.update(TEST_CASES, row["id"], name=name, description=description, quarantined=True,
                         healing_targets=result.healing_targets, version=int(row.get("version") or 1) + 1)
-    actions = len(result.steps) - 2  # without the opening navigation and the outcome check
+    actions = sum(1 for st in result.steps
+                  if str(st.get("action", "")).upper() not in ("NAVIGATE", "GOTO") and not
+                  str(st.get("action", "")).upper().startswith("ASSERT"))
     return row, (f"AI explorer recorded the goal in {actions} action(s) with {result.model_calls} model call(s) ({why}), "
                  f"quarantined until you trust it")
 

@@ -156,10 +156,12 @@ async def test_it_refuses_destructive_elements_and_other_sites(site, page):
 async def test_a_goal_that_asks_for_it_may_use_a_risky_element(site, page):
     model = ScriptedModel(
         lambda p: {"action": "click", "element": num(p, "Delete account")},
-        lambda p: {"action": "done", "check": {"type": "text_visible", "value": "Delete account"}},
+        lambda p: {"action": "give_up", "reason": "this demo button does nothing"},
     )
     result = await GoalExplorer(model).explore(page, site + "/", "delete account from the home page")
-    assert result.reached and result.steps[1]["target"] == '[data-testid="danger"]'
+    # The click was allowed and recorded (the button's text was on the page from the start,
+    # so it could not also serve as the proof that the goal was reached)
+    assert result.steps[1]["action"] == "CLICK" and result.steps[1]["target"] == '[data-testid="danger"]'
 
 
 async def test_a_done_whose_check_does_not_hold_is_not_recorded(site, page):
@@ -179,3 +181,28 @@ async def test_model_trouble_ends_the_exploration_without_raising(site, page):
     garbled = ScriptedModel(*[LLMResponseError("not JSON", provider="api")] * 3)
     result = await GoalExplorer(garbled).explore(page, site + "/", "open the Patient portal")
     assert not result.reached and "kept answering" in result.reason and result.model_calls == 3
+
+
+async def test_a_check_that_already_held_on_the_start_page_proves_nothing(site, page):
+    # The site's own name was on the page before any action: "done" with it is refused
+    model = ScriptedModel(
+        lambda p: {"action": "done", "check": {"type": "text_visible", "value": "National Healthcare"}},
+        lambda p: {"action": "done", "check": {"type": "url_contains", "value": "127.0.0.1"}},
+    )
+    result = await GoalExplorer(model, max_steps=2).explore(page, site + "/", "open the Patient portal")
+
+    assert not result.reached
+    assert all("the start page already shows" in n or "the start URL already contains" in n for n in result.notes)
+    assert not any(s["action"].startswith("ASSERT") for s in result.steps)
+
+
+def test_element_numbers_outside_the_listing_pick_nothing():
+    from agents.explorer.page_view import PageElement, PageView
+
+    view = PageView(url="u", title="t", text="", elements=[
+        PageElement(index=1, role="button", tag="button", label="A", primary="#a"),
+        PageElement(index=2, role="button", tag="button", label="B", primary="#b")])
+    assert view.element(1).label == "A" and view.element("2").label == "B"
+    # 0 and -1 used to index from the end of the list (the last element)
+    assert view.element(0) is None and view.element(-1) is None and view.element(3) is None
+    assert view.element("x") is None and view.element(None) is None
