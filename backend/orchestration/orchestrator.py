@@ -64,11 +64,13 @@ from backend.database.store import Store, StoreUnavailableError
 from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
 from backend.models.test_execution import TestExecutionStatus
 from backend.orchestration.converters import (
+    WRITE_BACK_CONFIDENCE,
     collect_learned_targets,
     element_record_from_fingerprint,
     engine_result_to_execution_result,
     learned_targets_by_locator,
     test_case_to_engine_plan,
+    write_back_heals,
 )
 from backend.reporting.diagnosis import diagnosis_of
 from engine.runner import run_test
@@ -342,6 +344,27 @@ def parse_stored_steps(raw_steps: list[dict[str, Any]], base_url: str) -> tuple[
         )
     return m1_steps, m1_assertions
 
+
+
+MAX_LOCATOR_HISTORY = 20
+
+
+def _writes_back(test_case: Any) -> bool:
+    """Whether healed locators are written into this test's stored steps:
+    saved tests and AI-explored recordings, not tests the pipeline rebuilds
+    from the live page on every run anyway."""
+    external = str(test_case.get("external_id") or "")
+    return not external.startswith("pipe-") or external.endswith("-explored")
+
+
+def _sure_heals(result: EngineTestResult) -> list[tuple[str, str]]:
+    """(old, new) locators the engine healed with at least WRITE_BACK_CONFIDENCE."""
+    return list(dict.fromkeys(
+        (sr.healing.original_locator, sr.healing.selected_locator)
+        for sr in result.steps
+        if sr.status == StepStatus.HEALED and sr.healing and sr.healing.selected_locator
+        and sr.healing.confidence >= WRITE_BACK_CONFIDENCE
+    ))
 
 # Hard cap on re-runs of a transient failure (the recovery policy sets the real limit)
 MAX_RETRY_RUNS = 3
@@ -804,8 +827,21 @@ class PlatformWorkflowOrchestrator:
             previous_url = step_res.page_url or previous_url
 
         targets = collect_learned_targets(engine_plan, shown_plan, shown_result)
+        changes: dict[str, Any] = {}
+        sure = _sure_heals(shown_result) if passed and _writes_back(test_case) else []
+        if sure:
+            description, targets = write_back_heals(test_case.get("description"), targets, sure)
+            if description is not None:
+                history = list(test_case.get("locator_history") or [])
+                history += [{"from": old, "to": new, "execution_id": execution_id,
+                             "at": datetime.now(UTC).isoformat()} for old, new in sure]
+                changes.update(description=description, version=int(test_case.get("version") or 1) + 1,
+                               locator_history=history[-MAX_LOCATOR_HISTORY:])
+                logger.info("Test case #%s: wrote back healed locator(s) %s", test_case.id, sure)
         if targets != (test_case.get("healing_targets") or []):
-            db.update(TEST_CASES, test_case.id, healing_targets=targets)
+            changes["healing_targets"] = targets
+        if changes:
+            db.update(TEST_CASES, test_case.id, **changes)
 
     @staticmethod
     def _remember_element(memory: MemoryStore, record: Any) -> None:

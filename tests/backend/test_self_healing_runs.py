@@ -597,3 +597,59 @@ async def test_an_unknown_stored_action_is_not_run_as_a_click():
         result = await _service().execute_test_run(db=db, execution_id=execution.id)
     assert run.await_count == 0
     assert result["status"] == "FAILED" and "could not be read" in result["error_message"]
+
+
+# ---------------------------------------------------------------------------
+# Write-back: a sure heal updates the stored test, so the next run passes
+# ---------------------------------------------------------------------------
+
+
+def test_write_back_rewrites_steps_and_keeps_the_old_locator_as_first_fallback():
+    import json
+
+    from backend.orchestration.converters import write_back_heals
+
+    description = json.dumps({"steps": [
+        {"action": "click", "target": "#submit"}, {"action": "assert_visible", "target": "#welcome"},
+        {"action": "click", "target": "#submit"}]})
+    targets = [{"locator": "#submit", "fallback_locators": ["#login-v2", 'button:has-text("Log in")'],
+                "fingerprint": {"tag": "button", "text": "Log in"}},
+               {"locator": "#welcome", "fallback_locators": [], "fingerprint": None}]
+    new_description, new_targets = write_back_heals(description, targets, [("#submit", "#login-v2")])
+
+    steps = json.loads(new_description)["steps"]
+    assert [s["target"] for s in steps] == ["#login-v2", "#welcome", "#login-v2"]
+    moved = learned_targets_by_locator(new_targets)["#login-v2"]
+    assert moved["fallback_locators"] == ["#submit", 'button:has-text("Log in")']
+    assert moved["fingerprint"] == {"tag": "button", "text": "Log in"}
+    assert "#submit" not in learned_targets_by_locator(new_targets)
+    # Nothing to rewrite: unchanged
+    assert write_back_heals(description, targets, [("#other", "#x")])[0] is None
+
+
+class TestHealWriteBack:
+    _setup = TestRealBrowserHealing._setup
+    _run = TestRealBrowserHealing._run
+
+    async def test_after_a_sure_heal_the_next_run_passes_as_written(self, site, tmp_path):
+        import json
+
+        url, publish = site
+        db, tc = self._setup(url)
+        service = _service(InMemoryStore())
+
+        assert (await self._run(db, tc, service, tmp_path))["status"] == "PASSED"
+        publish("login-v2")  # the button's id was renamed
+        healed = await self._run(db, tc, service, tmp_path)
+        assert healed["status"] == "HEALED", healed["error_message"]
+
+        stored = db.get(TEST_CASES, tc.id)
+        change = stored["locator_history"][-1]
+        assert change["from"] == "#submit" and change["to"] != "#submit"
+        targets = [s.get("target") for s in json.loads(stored["description"])["steps"]]
+        assert "#submit" not in targets and change["to"] in targets
+        learned = learned_targets_by_locator(stored["healing_targets"])
+        assert learned[change["to"]]["fallback_locators"][0] == "#submit"
+
+        third = await self._run(db, tc, service, tmp_path)
+        assert third["status"] == "PASSED", third["error_message"]  # no longer heals on every run

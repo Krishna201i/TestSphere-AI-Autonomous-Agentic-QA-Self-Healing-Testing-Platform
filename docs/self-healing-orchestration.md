@@ -91,6 +91,14 @@ Two more rules keep a failure from turning into a pass:
 - Healing memory is partitioned by owner: one account's history is never the baseline for
   another account's heal.
 
+**Writing a heal back.** When a run passes after a heal the engine made with confidence of at
+least 0.90, the stored test is updated: its steps target the new locator, the old one becomes the
+first fallback (a UI change that is undone heals straight back), and the change is listed in the
+test case's `locator_history`. The next run passes as written instead of healing again. A less
+certain heal is not written back: it keeps healing from the learned fallback and the run says
+HEALED, so a person sees it. Tests the pipeline rebuilds from the live page on every run are not
+rewritten (explorer recordings are).
+
 CI runs the quick healing benchmark with `--gate 0.90`: any false heal or missed refusal fails
 the build. `tests/backend/test_no_false_heals.py` covers the AI layer end to end in a real
 browser.

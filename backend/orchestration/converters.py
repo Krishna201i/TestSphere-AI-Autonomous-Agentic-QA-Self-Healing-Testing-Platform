@@ -6,6 +6,7 @@ Maintains bidirectional fidelity without modifying shared models or third-party 
 """
 
 
+import json
 import logging
 import re
 from html.parser import HTMLParser
@@ -126,6 +127,50 @@ def collect_learned_targets(
         }
     return list(entries.values())
 
+
+
+# A heal at least this sure rewrites the stored test (the next run passes as
+# written); a less certain one keeps healing from the learned fallback and the
+# run says HEALED, so a person sees it.
+WRITE_BACK_CONFIDENCE = 0.90
+
+
+def write_back_heals(
+    description: str | None,
+    healing_targets: list[dict[str, Any]] | None,
+    heals: list[tuple[str, str]],
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """The stored test with each healed locator written back.
+
+    *heals* are (old locator, new locator) pairs from a run that passed.  Every
+    stored step targeting the old locator now targets the new one; its learned
+    target is re-keyed to the new locator with the old one as the first
+    fallback (a UI change that is undone heals straight back) and the same
+    fingerprint.  Returns (new description or None if unchanged, new targets).
+    """
+    targets = [dict(t) for t in (healing_targets or []) if isinstance(t, dict)]
+    try:
+        stored = json.loads(description or "")
+    except ValueError:
+        stored = None
+    steps = stored.get("steps") if isinstance(stored, dict) else None
+    changed = False
+    for old, new in heals:
+        if not old or not new or old == new:
+            continue
+        for step in steps or []:
+            for key in ("target", "target_selector"):
+                if isinstance(step, dict) and step.get(key) == old:
+                    step[key] = new
+                    changed = True
+        by_locator = {t.get("locator"): t for t in targets}
+        entry = by_locator.pop(old, None)
+        if entry is not None:
+            rest = [loc for loc in entry.get("fallback_locators") or [] if loc not in (old, new)]
+            merged = {**entry, "locator": new, "fallback_locators": [old, *rest][:MAX_LEARNED_FALLBACKS]}
+            by_locator[new] = merged
+            targets = list(by_locator.values())
+    return (json.dumps(stored) if changed else None), targets
 
 # ── Elements of a page (for the AI healer) ───────────────────
 
