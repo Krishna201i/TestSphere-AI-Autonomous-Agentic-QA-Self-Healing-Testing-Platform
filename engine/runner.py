@@ -588,7 +588,15 @@ async def _perform_action_with_locator(
         assert actual == expected, f"assert_value failed: expected {expected!r}, got {actual!r}"
 
     elif action == ActionType.ASSERT_VISIBLE:
-        await loc.wait_for(state="visible", timeout=timeout)
+        try:
+            await loc.wait_for(state="visible", timeout=timeout)
+        except PlaywrightTimeoutError:
+            # On the page but not shown: the check failed (never a locator to
+            # heal onto some visible look-alike).  Not on the page at all: the
+            # locator may be broken, so the timeout goes to healing.
+            if await page.locator(locator_str).count() > 0:
+                raise AssertionError(f"assert_visible failed: {locator_str!r} is on the page but not visible") from None
+            raise
         is_visible = await loc.is_visible()
         assert is_visible, f"assert_visible failed: {locator_str!r} is not visible"
 

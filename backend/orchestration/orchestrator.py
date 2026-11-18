@@ -119,6 +119,42 @@ def apply_healed_selector(
     return plan.model_copy(update={"steps": steps})
 
 
+
+def offer_heal_candidate(
+    plan: EngineTestPlan,
+    broken_selector: str,
+    failed_step: int,
+    candidate: str,
+) -> EngineTestPlan:
+    """A copy of *plan* where the broken step(s) keep their locator and get
+    *candidate* as their first fallback.
+
+    The engine then judges the candidate in the live page with its own rules
+    (same tag and kind of control, shared identity, score threshold against the
+    stored fingerprint): the AI healer proposes, the engine decides.  Replacing
+    the locator outright skipped all of that, so a look-alike the engine had
+    refused could still be "validated" by a test that happened to pass.
+    """
+    matches = [
+        bool(broken_selector) and st.target is not None and st.target.primary_locator == broken_selector
+        for st in plan.steps
+    ]
+    if not any(matches):
+        matches = [idx == failed_step - 1 and st.target is not None for idx, st in enumerate(plan.steps)]
+    steps: list[EngineStep] = []
+    for step, hit in zip(plan.steps, matches, strict=True):
+        step_copy = step.model_copy(deep=True)
+        if hit:
+            rest = [loc for loc in step_copy.target.fallback_locators if loc != candidate]
+            step_copy.target.fallback_locators = [candidate, *rest]
+        steps.append(step_copy)
+    return plan.model_copy(update={"steps": steps})
+
+
+def _engine_accepted(result: EngineTestResult, candidate: str) -> bool:
+    """Whether the engine healed a step onto *candidate* in *result*."""
+    return any(sr.healing is not None and sr.healing.selected_locator == candidate for sr in result.steps)
+
 _STEP_VERBS = {
     "goto": "Open", "click": "Click", "fill": "Type into", "press": "Press", "select": "Choose in",
     "assert_text": "Check the text of", "assert_visible": "Check that it shows", "wait_for": "Wait for",
@@ -485,6 +521,7 @@ class PlatformWorkflowOrchestrator:
         engine_result: EngineTestResult = await _run(engine_plan, options=run_opts,
                                                          visual=settings.VISUAL_REGRESSION, visual_baseline=baseline)
         runs = [engine_result]  # every browser run, so their working files are removed
+        ai_heal: tuple[str, str] | None = None  # (broken locator, AI healer's validated candidate)
         shown_result, shown_plan = engine_result, engine_plan  # the run whose steps the dashboard shows
 
         exec_result = self._submit_ready(engine_result, workflow_id, m1_test_case.test_id, engine_plan)
@@ -533,6 +570,7 @@ class PlatformWorkflowOrchestrator:
                 logger.exception("Execution #%s: AI self-healing failed", execution.id)
             if healed is not None:
                 shown_plan, shown_result, candidate = healed
+                ai_heal = (exec_result.failure_context.target_selector, candidate.selector)
                 final_status = TestExecutionStatus.HEALED.value
                 error_msg = (f"Self-healed {exec_result.failure_context.target_selector} -> {candidate.selector} "
                              f"(AI healer, confidence {candidate.confidence:.2f})")
@@ -546,7 +584,7 @@ class PlatformWorkflowOrchestrator:
         # Learn from the run: healing memory and the targets' fallbacks/fingerprints
         try:
             self._learn_from_run(db, test_case, execution.id, m1_test_case, engine_plan, shown_plan,
-                                 shown_result, final_status, error_msg, duration_ms)
+                                 shown_result, final_status, error_msg, duration_ms, ai_heal=ai_heal)
         except Exception:  # noqa: BLE001 - learning is best-effort; the run's result stands
             logger.exception("Execution #%s: could not record what the run learned", execution.id)
 
@@ -669,15 +707,18 @@ class PlatformWorkflowOrchestrator:
             if not original:
                 break
             logger.info("Self-healing proposed replacement selector: %s. Validating with engine...", candidate.selector)
-            healed_plan = apply_healed_selector(
+            healed_plan = offer_heal_candidate(
                 engine_plan,
                 broken_selector=original,
                 failed_step=fc.failed_step if fc else 0,
-                healed_selector=candidate.selector,
+                candidate=candidate.selector,
             )
             validation_result = await _run(healed_plan, options=run_opts)
             runs.append(validation_result)
-            passed = validation_result.status in (TestStatus.PASSED, TestStatus.HEALED)
+            # Validated only when the engine itself accepted this candidate and
+            # the whole test then passed with it
+            passed = (validation_result.status in (TestStatus.PASSED, TestStatus.HEALED)
+                      and _engine_accepted(validation_result, candidate.selector))
 
             feedback = HealingResultFeedback(
                 test_case_id=recommendation.test_id,
@@ -709,6 +750,7 @@ class PlatformWorkflowOrchestrator:
         final_status: str,
         error_msg: str | None,
         duration_ms: int,
+        ai_heal: tuple[str, str] | None = None,
     ) -> None:
         """Record the run in healing memory and keep what the engine learned.
 
@@ -746,7 +788,9 @@ class PlatformWorkflowOrchestrator:
                     page_url=previous_url,  # the page the step acted on
                     execution_id=f"exec-{execution_id}",
                 ))
-            if passed and step_res.status == StepStatus.HEALED and step_res.healing and step_res.healing.selected_locator:
+            if (passed and step_res.status == StepStatus.HEALED and step_res.healing and step_res.healing.selected_locator
+                    # the AI healer's validated candidate is already recorded, with its own source
+                    and (step_res.healing.original_locator, step_res.healing.selected_locator) != ai_heal):
                 self.ai_orchestrator.record_healing_feedback(HealingResultFeedback(
                     test_case_id=test_id,
                     execution_id=f"exec-{execution_id}",

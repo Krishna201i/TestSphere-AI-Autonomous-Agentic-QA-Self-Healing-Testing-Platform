@@ -14,6 +14,9 @@ backend (``insert``, ``find``, ``delete_where``)::
 
 Each persisted record carries the ``owner_uid`` of the run that produced it
 (set with ``memory_owner``), so erasing an account removes its memory too.
+Records are also kept apart in memory by owner: every lookup runs over the
+current owner's records only, so one user's ``#submit`` is never the element
+another user's heal is compared with.
 Only the newest ``max_records`` records are replayed at start-up, so a cold
 start reads a bounded number of documents however large the collection grows.
 """
@@ -60,10 +63,31 @@ _KINDS = {
 }
 
 
+_INDEXES = ("_executions", "_elements", "_healing")
+
+
+def _owner_index(name: str) -> property:
+    """One of InMemoryStore's indexes, resolved to the current owner's partition."""
+
+    def get(self: PersistentMemoryStore) -> dict:
+        return self._partition()[name]
+
+    def set_(self: PersistentMemoryStore, value: dict) -> None:
+        self._partition()[name] = value
+
+    return property(get, set_)
+
+
 class PersistentMemoryStore(InMemoryStore):
-    """``InMemoryStore`` whose records are also persisted to a document store."""
+    """``InMemoryStore`` whose records are also persisted to a document store,
+    partitioned by owner."""
+
+    _executions = _owner_index("_executions")
+    _elements = _owner_index("_elements")
+    _healing = _owner_index("_healing")
 
     def __init__(self, store: Any, max_records: int = DEFAULT_MAX_RECORDS) -> None:
+        self._parts: dict[str | None, dict[str, dict]] = {}
         super().__init__()
         self._store = store
         self._max_records = max_records
@@ -84,17 +108,25 @@ class PersistentMemoryStore(InMemoryStore):
         self._persist("healing", record)
 
     def clear(self) -> None:
-        super().clear()
+        self._parts.clear()
         for kind in _KINDS:
             self._store.delete_where(COLLECTION, kind=kind)
 
     def reload(self) -> None:
         """Rebuild the in-memory indexes from the stored records (e.g. after
         an account's records were erased)."""
-        InMemoryStore.clear(self)
+        self._parts.clear()
         self._load()
 
     # ── Internals ─────────────────────────────────────────────
+
+    def _partition(self) -> dict[str, dict]:
+        """The current owner's indexes (created empty on first use)."""
+        parts = self.__dict__.setdefault("_parts", {})
+        owner = _owner.get()
+        if owner not in parts:
+            parts[owner] = {name: {} for name in _INDEXES}
+        return parts[owner]
 
     def _persist(self, kind: str, record) -> None:
         self._store.insert(COLLECTION, kind=kind, data=record.model_dump_json(), owner_uid=_owner.get())
@@ -112,7 +144,8 @@ class PersistentMemoryStore(InMemoryStore):
             if model is None:
                 continue
             try:
-                loaders[row["kind"]](model.model_validate_json(row["data"]))
+                with memory_owner(row.get("owner_uid")):  # into its owner's partition
+                    loaders[row["kind"]](model.model_validate_json(row["data"]))
                 counts[row["kind"]] += 1
             except ValueError as exc:  # schema drift / bad row: skip, don't crash startup
                 logger.warning("Skipping unreadable %s memory record: %s", row["kind"], exc)

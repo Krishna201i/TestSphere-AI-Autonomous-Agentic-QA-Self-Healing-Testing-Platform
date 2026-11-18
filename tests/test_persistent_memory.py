@@ -61,3 +61,26 @@ def test_start_up_record_limit_comes_from_settings(monkeypatch):
     monkeypatch.setattr(settings, "AGENT_MEMORY_MAX_RECORDS", 50)
     store = orchestrator.create_memory_store()
     assert store._max_records == 50
+
+
+def test_one_owners_healing_memory_is_never_used_for_another(tmp_path: Path) -> None:
+    """Lookups matched on the selector alone, across every user: another account's
+    "#submit" could be the element someone else's heal was compared with."""
+    from agents.memory.persistent_store import memory_owner
+
+    path = tmp_path / "db.json"
+    memory = PersistentMemoryStore(LocalStore(path))
+    with memory_owner("alice"):
+        memory.store_healing_record(_record(1, old="#submit"))
+    with memory_owner("bob"):
+        assert memory.get_healing_history("#submit") == []
+        memory.store_healing_record(_record(2, old="#submit"))
+        assert [r.new_selector for r in memory.get_healing_history("#submit")] == ["#new2"]
+
+    restarted = PersistentMemoryStore(LocalStore(path))  # replayed into each owner's partition
+    with memory_owner("alice"):
+        assert [r.new_selector for r in restarted.get_healing_history("#submit")] == ["#new1"]
+    with memory_owner("bob"):
+        assert [r.new_selector for r in restarted.get_healing_history("#submit")] == ["#new2"]
+    with memory_owner("carol"):
+        assert restarted.get_healing_history("#submit") == []

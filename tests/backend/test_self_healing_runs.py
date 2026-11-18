@@ -150,7 +150,12 @@ class TestAIHealingOnARun:
         failed = _result(TestStatus.FAILED, _ok("step-1"), StepResult(
             step_id="step-2", status=StepStatus.FAILED, duration_ms=1500, error=LOCATOR_TIMEOUT,
             dom_snapshot_path=str(snapshot), page_url="https://shop.example/login"))
-        validated = _result(TestStatus.PASSED, _ok("step-1"), _ok("step-2"))
+        # The engine judged the offered candidate and healed onto it
+        accepted = StepResult(step_id="step-2", status=StepStatus.HEALED, duration_ms=1,
+                              page_url="https://shop.example/login",
+                              healing=HealingReport(original_locator="#login-button", selected_locator="#sign-in",
+                                                    confidence=0.8, strategy_used="fallback[0]"))
+        validated = _result(TestStatus.HEALED, _ok("step-1"), accepted)
         db, tc, execution = _setup(LOGIN_STEPS, _known_login_button())
         memory = InMemoryStore()
 
@@ -161,7 +166,10 @@ class TestAIHealingOnARun:
         assert "#login-button -> #sign-in" in result["error_message"]
         assert run.await_count == 2
         validation_plan = run.await_args_list[1].args[0]
-        assert validation_plan.steps[1].target.primary_locator == "#sign-in"  # only the broken step changed
+        # The candidate is offered to the engine (which applies its own checks), not forced in
+        assert validation_plan.steps[1].target.primary_locator == "#login-button"
+        assert validation_plan.steps[1].target.fallback_locators[0] == "#sign-in"
+        assert validation_plan.steps[0].target is None or "#sign-in" not in validation_plan.steps[0].target.fallback_locators
         assert db.get(TEST_EXECUTIONS, execution.id).status == "HEALED"
 
         # The validated heal is in healing memory, with the run itself
@@ -436,7 +444,10 @@ class TestHealingMemoryStorage:
         fresh_store.delete_where(COLLECTION, owner_uid="alice")  # what DELETE /me does
         orchestration.forget_healing_memory()
 
-        assert [r.new_selector for r in memory.get_healing_history("#old")] == ["#new2"]
+        with memory_owner("bob"):
+            assert [r.new_selector for r in memory.get_healing_history("#old")] == ["#new2"]
+        with memory_owner("alice"):
+            assert memory.get_healing_history("#old") == []
 
     def test_account_erasure_covers_healing_memory(self):
         from backend.api import me
