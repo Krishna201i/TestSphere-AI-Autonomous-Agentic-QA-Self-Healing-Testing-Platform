@@ -26,6 +26,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from collections import Counter
 from collections.abc import Callable
 from typing import Any
@@ -418,7 +419,8 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
         state.stage("heal", "done", "Nothing needed healing")
 
     # ── security ──
-    security = await _stage_security(state, app_url, owner, scanner, active=bool(project.get("active_scan")))
+    security = await _stage_security(state, app_url, owner, scanner, active=bool(project.get("active_scan")),
+                                     pages=_tested_pages(test_cases, app_url))
 
     # ── report ──
     _report(state, project, results, security)
@@ -647,8 +649,28 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
     return results
 
 
+def _tested_pages(test_cases: list[Record], app_url: str) -> list[str]:
+    """Same-site pages this run's linked-page and route tests opened: the
+    security stage scans them as well as the app URL (no crawl of its own)."""
+    from urllib.parse import urlsplit
+
+    host = urlsplit(app_url).netloc.lower()
+    pages: list[str] = []
+    for tc in test_cases:
+        if not re.search(r"-(?:link|route)-", str(tc.get("external_id") or "")):
+            continue
+        try:
+            steps = json.loads(tc.get("description") or "{}").get("steps") or []
+        except (ValueError, AttributeError):
+            continue
+        url = next((s.get("value") for s in steps if str(s.get("action", "")).upper() in ("NAVIGATE", "GOTO")), None)
+        if url and urlsplit(url).netloc.lower() == host:
+            pages.append(url)
+    return list(dict.fromkeys(pages))
+
+
 async def _stage_security(state: _RunState, app_url: str, owner: str | None, scanner: Any,
-                          *, active: bool = False) -> dict[str, Any] | None:
+                          *, active: bool = False, pages: list[str] | None = None) -> dict[str, Any] | None:
     from backend.api.security import (
         active_scan_refusal,
         get_active_scanner,
@@ -662,19 +684,38 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
     refusal = active_scan_refusal(owner) if active else None
     run_active = active and refusal is None
     state.stage("security", "running")
-    try:
-        snap = await scanner.fetch(app_url)
-        active_findings = await get_active_scanner().scan(app_url) if run_active else []
-    except OutOfScopeError as exc:
-        state.stage("security", "skipped", f"{exc}. Add the host to SECURITY_SCAN_ALLOWED_HOSTS (only hosts you own) to scan it.")
-        return None
-    except (ScanError, ActiveScanError) as exc:
-        state.stage("security", "failed", str(exc))
-        return None
-    result = scan_result(state.db, scanner, snap, app_url, actor=state.doc["actor"], owner_uid=owner,
-                         extra_findings=active_findings, active=run_active)
+    # One active scanner for every page: its request budget covers the whole run
+    active_scanner = get_active_scanner() if run_active else None
+    urls = list(dict.fromkeys([app_url, *(pages or [])]))[: 1 + settings.SECURITY_MAX_PAGES]
+    result: dict[str, Any] = {"findings": [], "reopened": [], "resolved": [], "pages": []}
+    skipped = 0
+    for url in urls:
+        try:
+            snap = await scanner.fetch(url)
+            active_findings = await active_scanner.scan(url) if active_scanner else []
+        except OutOfScopeError as exc:
+            if url == app_url:
+                state.stage("security", "skipped", f"{exc}. Add the host to SECURITY_SCAN_ALLOWED_HOSTS (only hosts you own) to scan it.")
+                return None
+            skipped += 1
+            continue
+        except (ScanError, ActiveScanError) as exc:
+            if url == app_url:
+                state.stage("security", "failed", str(exc))
+                return None
+            skipped += 1  # another page that did not answer: the rest still count
+            continue
+        page = scan_result(state.db, scanner, snap, url, actor=state.doc["actor"], owner_uid=owner,
+                           extra_findings=active_findings, active=run_active)
+        for key in ("findings", "reopened", "resolved"):
+            result[key] += page[key]
+        result["pages"].append(url)
     counts = Counter(f["severity"] for f in result["findings"])
     detail = ", ".join(f"{counts[s]} {s}" for s in ("critical", "high", "medium", "low", "info") if counts[s]) or "no findings"
+    if len(result["pages"]) > 1:
+        detail = f"{len(result['pages'])} pages scanned · {detail}"
+    if skipped:
+        detail += f" · {skipped} page(s) could not be scanned"
     if result["reopened"]:
         detail += f" · {len(result['reopened'])} reappeared"
     if refusal:

@@ -579,10 +579,10 @@ def test_active_scan_runs_in_the_pipeline_only_when_project_and_server_both_allo
     run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
     assert calls["n"] == 0
 
-    # Both on → run once
+    # Both on → run (on the app URL and the pages the run reached)
     monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", True)
     run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
-    assert calls["n"] == 1
+    assert calls["n"] >= 1
 
     # Server on but project flag off → not run
     calls["n"] = 0
@@ -597,7 +597,7 @@ def test_active_scan_runs_in_the_pipeline_only_when_project_and_server_both_allo
     assert calls["n"] == 0
     monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "local-dev")
     run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
-    assert calls["n"] == 1
+    assert calls["n"] >= 1  # (at least: every page the run reached)
 
 
 def test_every_result_says_what_it_checked_and_how_long_it_took(fresh_store, stub_network):
@@ -675,3 +675,26 @@ def test_generated_tests_no_longer_planned_are_retired_and_hidden(fresh_store):
     rows = fresh_store.find(TEST_CASES, application_id=app_row["id"])
     assert runner._retire_unplanned(fresh_store, rows, {keep["id"], gone["id"]}) == 0
     assert fresh_store.get(TEST_CASES, gone["id"])["retired"] is False
+
+
+def test_the_security_stage_scans_the_pages_the_run_reached(fresh_store, stub_network):
+    """It scanned the app URL only; the linked pages the QA stage already reached are scanned too."""
+    from backend.models import PIPELINE_RUNS, SECURITY_FINDINGS
+
+    fetched = []
+    scanner = scanner_for({"content-type": "text/html"})
+    original = scanner.fetch
+
+    async def spy(url):
+        fetched.append(url)
+        return await original(url)
+
+    scanner.fetch = spy
+    project = make_project(fresh_store)
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner)
+
+    assert fetched == [URL, "http://app.test/about"]  # /pricing did not load: never a test, never scanned
+    targets = {r["target_url"] for r in fresh_store.find(SECURITY_FINDINGS)}
+    assert targets == {URL, "http://app.test/about"}  # each page's findings are tracked on their own
+    stage = next(s for s in fresh_store.find(PIPELINE_RUNS)[0]["stages"] if s["key"] == "security")
+    assert stage["detail"].startswith("2 pages scanned")
