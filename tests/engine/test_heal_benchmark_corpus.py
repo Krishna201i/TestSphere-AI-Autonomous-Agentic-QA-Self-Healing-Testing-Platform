@@ -31,3 +31,13 @@ def test_steps_match_the_element_kind():
     assert step_for(PAGES["login"], "remember").action.value == "click"
     _, el = find(PAGES["shop"], "add")
     assert el.attrs["id"] == "add-2"
+
+
+def test_the_ci_gate_fails_on_any_false_heal_or_missed_refusal_or_low_heal_rate():
+    from engine.heal_benchmark import gate_problems
+
+    good = {"false_heals": 0, "refusal_rate": 1.0, "heal_rate": 0.923}
+    assert gate_problems(good, 0.90) == []
+    assert "false heal" in gate_problems({**good, "false_heals": 1}, 0.90)[0]
+    assert "refused only" in gate_problems({**good, "refusal_rate": 0.75}, 0.90)[0]
+    assert "below 90%" in gate_problems({**good, "heal_rate": 0.85}, 0.90)[0]

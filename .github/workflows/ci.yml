@@ -72,6 +72,11 @@ jobs:
           TEST_POSTGRES_URL: postgresql://postgres:ci@127.0.0.1:5432/shop
         run: python -m pytest -q
 
+      # The published healing numbers are a promise: any false heal, or a
+      # drop below 90% of the cases it should heal (92.3% today), fails CI
+      - name: Healing benchmark gate (quick, 52 cases)
+        run: python -m engine.heal_benchmark --quick --gate 0.90
+
       - name: Dependency audit
         run: pip-audit -r requirements.txt --require-hashes
 

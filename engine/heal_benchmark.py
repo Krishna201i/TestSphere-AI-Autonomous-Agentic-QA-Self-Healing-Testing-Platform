@@ -605,6 +605,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--quick", action="store_true", help="one target per page")
     parser.add_argument("--concurrency", type=int, default=2)
+    parser.add_argument("--gate", type=float, metavar="MIN_HEAL_RATE", default=None,
+                        help="CI: exit 1 if the TestSphere healer makes any false heal, heals any case it should "
+                             "refuse, or heals fewer than MIN_HEAL_RATE (0-1) of the cases it should heal")
     args = parser.parse_args()
     started = time.monotonic()
     results = asyncio.run(run(quick=args.quick, concurrency=args.concurrency))
@@ -613,6 +616,21 @@ def main() -> None:
     for k, v in s.items():
         print(f"{k:11s} heal {v['heal_rate']:.1%}  false-heal {v['false_heal_rate']:.1%}  refuse {v['refusal_rate']:.1%}")
     print(f"Wrote {md} and {csv_path} in {time.monotonic() - started:.0f}s")
+    if args.gate is not None and (problems := gate_problems(s["testsphere"], args.gate)):
+        print("Healing benchmark gate FAILED: " + "; ".join(problems))
+        raise SystemExit(1)
+
+
+def gate_problems(ours: dict[str, float], min_heal_rate: float) -> list[str]:
+    """Why the healer's results fail the CI gate (empty when they pass)."""
+    problems = []
+    if ours["false_heals"]:
+        problems.append(f"{ours['false_heals']} false heal(s): a test acted on the wrong element")
+    if ours["refusal_rate"] < 1.0:
+        problems.append(f"refused only {ours['refusal_rate']:.1%} of the cases where healing is wrong")
+    if ours["heal_rate"] < min_heal_rate:
+        problems.append(f"healed {ours['heal_rate']:.1%} of the cases it should, below {min_heal_rate:.0%}")
+    return problems
 
 
 if __name__ == "__main__":
