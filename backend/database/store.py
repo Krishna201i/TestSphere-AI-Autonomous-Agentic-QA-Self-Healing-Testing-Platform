@@ -510,19 +510,26 @@ class FirestoreStore(Store):
         return self._call(run)
 
     def _update_if(self, collection, doc_id, field, expected, changes):
-        from google.cloud import firestore as gcf
+        """Compare-and-set without a transaction: the write carries the read's
+        update time as a precondition, so it lands only if nobody changed the
+        document in between.  Under contention exactly one caller wins and the
+        rest get False at once; transactions instead queued on the document's
+        lock and could all give up ("Failed to commit transaction")."""
+        from google.api_core.exceptions import Aborted, FailedPrecondition, NotFound
 
         ref = self._db.collection(collection).document(str(_as_int(doc_id)))
 
-        @gcf.transactional
-        def swap(txn) -> bool:
-            snap = ref.get(transaction=txn)
+        def run() -> bool:
+            snap = ref.get()
             if not snap.exists or (snap.to_dict() or {}).get(field) != expected:
                 return False
-            txn.update(ref, changes)
+            try:
+                ref.update(changes, option=self._db.write_option(last_update_time=snap.update_time))
+            except (FailedPrecondition, Aborted, NotFound):
+                return False  # changed or deleted since it was read: someone else won
             return True
 
-        return self._call(lambda: swap(self._db.transaction()))
+        return self._call(run)
 
     def delete(self, collection, doc_id):
         def run():
