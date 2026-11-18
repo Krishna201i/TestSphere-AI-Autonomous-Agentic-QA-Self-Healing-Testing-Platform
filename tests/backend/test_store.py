@@ -221,6 +221,51 @@ def test_update_if_treats_a_missing_field_as_none(store) -> None:
     assert store.get("projects", row["id"])["next_run_at"] == "t1"
 
 
+def test_concurrent_inserts_get_unique_ids_in_every_collection(store) -> None:
+    ids: dict[str, list[int]] = {"projects": [], "audit_events": []}
+    lock = threading.Lock()
+
+    def add(collection: str) -> None:
+        row = store.insert(collection, name="x")
+        with lock:
+            ids[collection].append(row["id"])
+
+    threads = [threading.Thread(target=add, args=(c,)) for c in ids for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for collection, got in ids.items():
+        assert sorted(got) == list(range(1, 11)), collection
+
+
+@pytest.fixture
+def firestore_store():
+    if not os.getenv("FIRESTORE_EMULATOR_HOST"):
+        pytest.skip("Firestore emulator not running (set FIRESTORE_EMULATOR_HOST)")
+    s = FirestoreStore.from_settings(None, "demo-testsphere")
+    s.clear()
+    yield s
+    s.clear()
+
+
+def test_firestore_ids_continue_from_the_legacy_shared_counter(firestore_store) -> None:
+    # Older versions kept every collection's counter in one _meta/counters document
+    firestore_store._db.collection("_meta").document("counters").set({"projects": 41, "audit_events": 7})
+    assert firestore_store.insert("projects", name="P").id == 42
+    assert firestore_store.insert("projects", name="Q").id == 43
+    assert firestore_store.insert("audit_events", message="m").id == 8
+    assert firestore_store.insert("applications", name="A").id == 1  # never counted before
+
+
+def test_firestore_insert_never_overwrites_an_existing_document(firestore_store) -> None:
+    # An id handed out twice (an older process on the legacy counter) must not clobber data
+    firestore_store._db.collection("projects").document("1").set({"id": 1, "name": "keep me"})
+    row = firestore_store.insert("projects", name="new")
+    assert row.id == 2
+    assert firestore_store.get("projects", 1)["name"] == "keep me"
+
+
 def test_concurrent_update_if_has_exactly_one_winner(store) -> None:
     row = store.insert("projects", name="p", next_run_at="t0")
     wins = []

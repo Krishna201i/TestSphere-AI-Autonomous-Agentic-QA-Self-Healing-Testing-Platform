@@ -57,7 +57,10 @@ named collections of documents with integer ids, equality filters and ordering. 
 | `memory` | `MemoryStore` | Tests |
 
 Every backend passes the same contract tests (`tests/backend/test_store.py`), including Firestore via the official emulator.
-Ids are per-collection counters (in Firestore: `_meta/counters`, incremented transactionally); every document has
+Ids are per-collection integers. In Firestore an insert claims the next id with `create()` (which never overwrites an
+existing document) and raises the collection's hint `_meta/counters_<collection>.next` with the atomic `Maximum`
+transform, so concurrent inserts never wait on a transaction and deleted ids are never reused; a collection without a
+hint continues from the older shared `_meta/counters` document. Every document has
 `id`, `created_at` and `updated_at` (ISO 8601 UTC strings).
 
 ### Collections

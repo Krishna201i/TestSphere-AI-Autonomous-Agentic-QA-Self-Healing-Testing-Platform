@@ -367,8 +367,8 @@ class FirestoreStore(Store):
     """Cloud Firestore backend.
 
     Documents live in a collection per entity with the integer id as the
-    document id; ids come from per-collection counters in ``_meta/counters``
-    incremented transactionally.  Equality filters run in Firestore; ordering
+    document id; ids come from one counter document per collection
+    (``_meta/counters_<collection>``) incremented transactionally.  Equality filters run in Firestore; ordering
     with filters is done in Python so no composite indexes are required.
     """
 
@@ -399,27 +399,44 @@ class FirestoreStore(Store):
             logger.error("Firestore error: %s", (str(exc).splitlines() or [repr(exc)])[0][:300])
             raise StoreUnavailableError(describe_firestore_error(exc)) from exc
 
-    def _next_id(self, collection: str) -> int:
-        from google.cloud import firestore as gcf
+    # Id allocation without transactions.  A transactional counter serializes
+    # every insert into a collection, and a burst of concurrent inserts (audit
+    # entries during a pipeline run) fails with "Transaction lock timeout".
+    # Instead each collection has a hint, _meta/counters_<collection>.next (the
+    # highest id handed out), raised with the atomic Maximum transform so it
+    # never goes down, and the id itself is claimed with create(), which fails
+    # if the document exists: Firestore guarantees uniqueness, a stale hint
+    # only costs a retry, and deleted ids are never reused.
+    _LEGACY_COUNTERS = "counters"  # older versions kept every collection's counter here
+    _MAX_ID_ATTEMPTS = 100
 
-        counters = self._db.collection("_meta").document("counters")
-        transaction = self._db.transaction()
+    def _counter_ref(self, collection: str):
+        return self._db.collection("_meta").document(f"counters_{collection}")
 
-        @gcf.transactional
-        def bump(txn) -> int:
-            snap = counters.get(transaction=txn)
-            current = (snap.to_dict() or {}).get(collection, 0) if snap.exists else 0
-            txn.set(counters, {collection: current + 1}, merge=True)
-            return current + 1
-
-        return bump(transaction)
+    def _id_hint(self, collection: str) -> int:
+        snap = self._counter_ref(collection).get()
+        if snap.exists:
+            return int((snap.to_dict() or {}).get("next", 0))
+        # First use: continue from the legacy shared counter
+        legacy = self._db.collection("_meta").document(self._LEGACY_COUNTERS).get()
+        return int((legacy.to_dict() or {}).get(collection, 0)) if legacy.exists else 0
 
     def _create(self, collection, data):
+        from google.api_core.exceptions import AlreadyExists
+        from google.cloud.firestore_v1.transforms import Maximum
+
         def run():
-            doc_id = self._next_id(collection)
-            doc = {"id": doc_id, **data}
-            self._db.collection(collection).document(str(doc_id)).set(doc)
-            return Record(doc)
+            doc_id = self._id_hint(collection)
+            for _ in range(self._MAX_ID_ATTEMPTS):
+                doc_id += 1
+                doc = {"id": doc_id, **data}
+                try:
+                    self._db.collection(collection).document(str(doc_id)).create(doc)
+                except AlreadyExists:
+                    continue  # taken by a concurrent insert: the next id
+                self._counter_ref(collection).set({"next": Maximum(doc_id)}, merge=True)
+                return Record(doc)
+            raise StoreUnavailableError(f"Could not allocate a free id in {collection}.")
         return self._call(run)
 
     def get(self, collection, doc_id):
