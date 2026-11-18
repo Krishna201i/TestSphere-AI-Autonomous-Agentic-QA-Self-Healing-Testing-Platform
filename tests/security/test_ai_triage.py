@@ -110,3 +110,38 @@ async def test_match_is_pure_and_defensive():
     insights = _match({"findings": [{"check_id": "SEC-HDR-FRAME", "priority": "oops"}]}, [f])
     # non-int priority falls back without raising
     assert insights == {} or isinstance(insights[f.key], AIInsight)
+
+
+async def test_the_most_severe_findings_reach_the_model_when_there_are_too_many():
+    """The list was cut at 20 before sorting: 25 cookie findings pushed a critical SQLi out."""
+    import json
+
+    from security.ai import MAX_FINDINGS
+
+    noise = [_finding("SEC-COOKIE-FLAGS", component=f"cookie {i}", sev=Severity.LOW) for i in range(25)]
+    sqli = _finding("SEC-SQLI-ERROR", sev=Severity.CRITICAL)
+    seen = {}
+
+    class Spy(_FakeClient):
+        async def generate_json(self, request):
+            seen["prompt"] = request.prompt
+            return {"findings": []}
+
+    await triage("https://app.test/", [*noise, sqli], client=Spy())
+    digest = json.loads(seen["prompt"].split("Findings (JSON):\n", 1)[1].split("\n\nReturn ONLY", 1)[0])
+    assert len(digest) == MAX_FINDINGS
+    assert digest[0]["check_id"] == "SEC-SQLI-ERROR"
+
+
+async def test_two_findings_of_one_check_get_their_own_analysis():
+    """Insights were matched by check_id: XSS in two parameters shared one text."""
+    q = _finding("SEC-XSS-REFLECTED", component="https://app.test/search (query param 'q')")
+    name = _finding("SEC-XSS-REFLECTED", component="https://app.test/profile (body param 'name')")
+    client = _FakeClient(payload={"findings": [
+        {"ref": "F1", "check_id": "SEC-XSS-REFLECTED", "priority": 1, "summary": "search box",
+         "explanation": "e", "remediation": "escape q"},
+        {"ref": "F2", "check_id": "SEC-XSS-REFLECTED", "priority": 2, "summary": "profile name",
+         "explanation": "e", "remediation": "escape name"},
+    ]})
+    out = await triage("https://app.test/", [q, name], client=client)
+    assert out[q.key].summary == "search box" and out[name.key].summary == "profile name"

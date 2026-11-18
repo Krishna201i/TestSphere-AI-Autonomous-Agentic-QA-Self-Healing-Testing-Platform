@@ -3,6 +3,7 @@ TestSphere-AI — Security finding persistence and the audit trail.
 """
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 from backend.database.store import Record, Store, now_iso
@@ -52,6 +53,7 @@ def list_findings(db: Store, target_url: str | None = None, **filters: Any) -> l
 
 def save_scan(
     db: Store, target_url: str, findings: list[dict[str, Any]], owner_uid: str | None = None,
+    checked: Callable[[str], bool] | None = None,
 ) -> dict[str, list[Record]]:
     """Upsert this scan's findings for *target_url*.
 
@@ -59,7 +61,9 @@ def save_scan(
     - A previously resolved finding that shows up again is a regression:
       reopened, approval and retest cleared.
     - Open findings for this target that no longer appear are resolved —
-      the scan itself is a retest that passed.
+      the scan itself is a retest that passed — but only for checks this scan
+      ran (*checked* tells which; all by default): a passive-only scan says
+      nothing about an XSS the active scanner found.
 
     With *owner_uid*, only that user's findings are matched (each user tracks
     their own lifecycle for the same target).
@@ -90,7 +94,7 @@ def save_scan(
         current.append(row)
 
     for row in db.find(SECURITY_FINDINGS, target_url=target_url, **owner):
-        if row["key"] not in seen and row["status"] == "open":
+        if row["key"] not in seen and row["status"] == "open" and (checked is None or checked(row["check_id"])):
             resolved.append(db.update(SECURITY_FINDINGS, row["id"], status="resolved", retest_result="pass", retested_at=now))
 
     return {"current": current, "reopened": reopened, "resolved": resolved}

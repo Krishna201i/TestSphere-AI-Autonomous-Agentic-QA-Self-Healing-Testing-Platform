@@ -105,3 +105,16 @@ def test_patches_belong_to_their_owner(repo, monkeypatch):
     monkeypatch.setattr(me, "_delete_sign_in_account", lambda uid: True)
     client.request("DELETE", "/api/me", json={"confirm": "DELETE MY ACCOUNT"}, headers=alice)
     assert get_store().find("fix_patches", owner_uid="alice") == []
+
+
+def test_once_findings_are_approved_only_those_are_patched(repo):
+    """Approval was recorded but never used: every open finding went into the patch."""
+    db = get_store()
+    ProjectService.create_project(db, name="Shop", owner_uid="local-dev", app_url=SITE, repo_url=str(repo))
+    frame = seed_finding(db, "SEC-HDR-FRAME")
+    seed_finding(db, "SEC-HDR-XCTO")
+    db.update(SECURITY_FINDINGS, frame["id"], approved_by="Krishna", approved_at="2026-11-19T00:00:00+00:00")
+
+    body = TestClient(app).post("/api/security/patches", json={"target_url": SITE}).json()
+    assert body["finding_keys"] == [frame["key"]]
+    assert "X-Frame-Options" in body["patch"] and "X-Content-Type-Options" not in body["patch"]

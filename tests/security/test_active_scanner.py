@@ -38,6 +38,10 @@ class _Vulnerable(BaseHTTPRequestHandler):
             self.send_header("Location", q.get("next", "/"))
             self.end_headers()
             return None
+        if u.path == "/twice":
+            # Escaped in the search box, raw in the heading: still XSS
+            v = q.get("q", "")
+            return self._html(f'<input name="q" value="{html.escape(v)}"><h1>Results for {v}</h1>')
         if u.path == "/safe":
             # Escapes input, parameterises queries: nothing to find
             return self._html(f"<h1>Hello {html.escape(q.get('q', ''))}</h1>")
@@ -116,3 +120,9 @@ async def test_the_request_budget_is_never_exceeded(site):
     scanner = ActiveScanner(ScopePolicy.of(urlsplit(site).netloc), max_requests=3)
     await scanner.scan(f"{site}/search?q=a&r=b&s=c&t=d")
     assert scanner._sent <= 3
+
+
+async def test_xss_is_found_when_the_page_also_shows_an_escaped_copy(site):
+    """The value escaped in one place and raw in another was reported as safe."""
+    findings = await _scanner(site).scan(f"{site}/twice?q=hello")
+    assert [f.check_id for f in findings if f.check_id == "SEC-XSS-REFLECTED"] == ["SEC-XSS-REFLECTED"]

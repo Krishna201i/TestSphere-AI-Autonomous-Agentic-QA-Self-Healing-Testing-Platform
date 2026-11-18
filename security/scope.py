@@ -45,7 +45,10 @@ class ScopePolicy:
         if not host:
             raise OutOfScopeError(f"URL has no host: {url!r}")
 
-        port = parts.port or (443 if parts.scheme == "https" else 80)
+        try:
+            port = parts.port or (443 if parts.scheme == "https" else 80)
+        except ValueError as exc:  # ":99999" or ":abc": a malformed URL, not a crash
+            raise OutOfScopeError(f"URL has an invalid port: {url!r}") from exc
         if host in self.allowed_hosts or f"{host}:{port}" in self.allowed_hosts:
             return
         raise OutOfScopeError(

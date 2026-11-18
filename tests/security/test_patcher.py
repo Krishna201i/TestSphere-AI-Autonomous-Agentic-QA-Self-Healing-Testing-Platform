@@ -187,7 +187,8 @@ def test_express_middleware_cors_and_cookies(tmp_path):
     assert result.frameworks == ["express"]
     assert '+app.disable("x-powered-by");' in text
     assert '+  res.setHeader("X-Frame-Options", "DENY");' in text
-    assert 'cors({ origin: ["https://shop.example"], credentials: true })' in text
+    # The origin is narrowed; credentials stay off as they were (cors() sends none)
+    assert 'cors({ origin: ["https://shop.example"] })' in text and "credentials" not in text
     assert 'res.cookie("session", token, { httpOnly: true, secure: true, sameSite: "lax" });' in text
     assert result.manual == []
     if shutil.which("node"):

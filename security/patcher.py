@@ -424,7 +424,9 @@ def _patch_express(text: str, m: re.Match, fix: Fix, origin: str | None, secure:
         line_no = text[: m.end()].count("\n") + 1
         text = _insert_after_line(text, line_no, "\n".join([f"{indent}// Security headers from TestSphere fix proposals ({ids})", *block]))
     if fix.cors and origin:
-        new = re.sub(r"\bcors\(\s*\)", f'cors({{ origin: ["{_q(origin)}"], credentials: true }})', text)
+        # Only the allowed origin changes: cors() sent no credentials, and turning
+        # them on would widen what this fix is meant to narrow
+        new = re.sub(r"\bcors\(\s*\)", f'cors({{ origin: ["{_q(origin)}"] }})', text)
         new = re.sub(r"(\bcors\(\s*\{[^}]*?\borigin\s*:\s*)(true|\"\*\"|'\*')", rf'\1["{_q(origin)}"]', new)
         if new != text:
             text = new

@@ -349,3 +349,75 @@ async def test_saving_a_scan_does_not_block_the_event_loop(fresh_store) -> None:
     assert resp.status_code == 200, resp.text
     assert took > 0.3  # the slow store really was slow
     assert max(gaps) < 0.15, f"event loop blocked for {max(gaps):.2f}s"
+
+
+def test_a_passive_scan_never_resolves_what_only_the_active_scanner_checks(active_client) -> None:
+    """A passive-only rescan used to mark the XSS found by an active scan as resolved
+    (retest PASS), and the next active scan then reported it as a "regression"."""
+    url = "http://app.test/search?q=hi"
+    active_client.post("/api/security/scan", json={"url": url, "active": True})
+    passive = active_client.post("/api/security/scan", json={"url": url}).json()
+    assert not any(r["check_id"] == "SEC-XSS-REFLECTED" for r in passive["resolved"])
+    xss = next(f for f in active_client.get("/api/security/findings").json() if f["check_id"] == "SEC-XSS-REFLECTED")
+    assert xss["status"] == "open" and xss["retest_result"] is None
+
+    # The next active scan finds it again: still the same open finding, not a regression
+    again = active_client.post("/api/security/scan", json={"url": url, "active": True}).json()
+    assert not any(r["check_id"] == "SEC-XSS-REFLECTED" for r in again["reopened"])
+
+
+def test_the_stateless_retest_uses_the_check_that_found_it(active_client, monkeypatch) -> None:
+    """An active finding sent to /security/retest went to the passive scanner and came back "pass"."""
+    url = "http://app.test/search?q=hi"
+    xss = _by_id(active_client.post("/api/security/scan", json={"url": url, "active": True}).json()["findings"])[
+        "SEC-XSS-REFLECTED"]
+    body = {k: v for k, v in xss.items() if k in (
+        "check_id", "source", "title", "severity", "component", "target_url", "evidence")}
+    assert active_client.post("/api/security/retest", json=body).json()["retest_result"] == "fail"  # still vulnerable
+
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", False)
+    assert active_client.post("/api/security/retest", json=body).status_code == 403
+
+    dep = {**body, "check_id": "SEC-DEP-PYSEC-1"}
+    assert active_client.post("/api/security/retest", json=dep).status_code == 422
+
+
+def test_a_hosted_server_never_scans_its_own_internal_ports(monkeypatch) -> None:
+    """Loopback is in every scan scope (local development), so on a hosted server any
+    signed-in user could scan the server's own internal services and read their headers."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    hits = []
+
+    class Internal(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            hits.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<p>internal admin</p>")
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Internal)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/admin"
+    client = TestClient(app)
+    try:
+        monkeypatch.setattr(settings, "ALLOW_PRIVATE_TARGETS", False)  # a hosted server
+        resp = client.post("/api/security/scan", json={"url": url})
+        assert resp.status_code == 403 and "private or internal" in resp.json()["detail"]
+        assert hits == []
+
+        monkeypatch.setattr(settings, "ALLOW_PRIVATE_TARGETS", True)  # local development
+        assert client.post("/api/security/scan", json={"url": url}).status_code == 200
+        assert hits == ["/admin"]
+    finally:
+        server.shutdown()
+
+
+def test_a_malformed_port_is_refused_not_a_server_error(client) -> None:
+    resp = client.post("/api/security/scan", json={"url": "http://app.test:99999/"})
+    assert resp.status_code == 403 and "invalid port" in resp.json()["detail"]

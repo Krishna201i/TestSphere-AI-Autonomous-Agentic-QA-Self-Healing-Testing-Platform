@@ -15,6 +15,7 @@ verified identity; with sign-in off, ``actor`` is whatever the client sends.
 import asyncio
 import json
 from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -24,6 +25,7 @@ from backend.auth import User, actor_for, get_current_user, scope
 from backend.config import settings
 from backend.database.session import get_db
 from backend.database.store import Store
+from backend.netguard import BlockedTargetError, PinnedTransport
 from backend.ratelimit import limit_runs
 from backend.services import security_service as store
 from security import (
@@ -60,14 +62,29 @@ def _configured_scope() -> ScopePolicy:
     return ScopePolicy.of(*LOOPBACK_HOSTS, *extra)
 
 
+class _ScannerTransport(PinnedTransport):
+    """The server's SSRF guard for the scanners: scope says which hosts may be
+    tested, this says the addresses they resolve to must be public on a hosted
+    server (loopback is in every scope, for local development, so without it any
+    user could scan the server's own internal ports).  A refusal reads like any
+    other out-of-scope target."""
+
+    async def handle_async_request(self, request):
+        try:
+            return await super().handle_async_request(request)
+        except BlockedTargetError as exc:
+            raise OutOfScopeError(str(exc)) from exc
+
+
 def get_scanner() -> PassiveScanner:
     """Build a passive scanner limited to the configured scope (overridable in tests)."""
-    return PassiveScanner(_configured_scope())
+    return PassiveScanner(_configured_scope(), transport=_ScannerTransport())
 
 
 def get_active_scanner() -> ActiveScanner:
     """Build an active scanner limited to the configured scope (overridable in tests)."""
-    return ActiveScanner(_configured_scope(), max_requests=settings.SECURITY_ACTIVE_MAX_REQUESTS)
+    return ActiveScanner(_configured_scope(), max_requests=settings.SECURITY_ACTIVE_MAX_REQUESTS,
+                         transport=_ScannerTransport())
 
 
 def active_scan_refusal(uid: str | None) -> str | None:
@@ -80,6 +97,13 @@ def active_scan_refusal(uid: str | None) -> str | None:
     if uid not in allowed:
         return "Active scanning is not enabled for this account (SECURITY_ACTIVE_SCAN_USERS)"
     return None
+
+
+def checks_run(active: bool) -> Callable[[str], bool]:
+    """Which finding kinds a page scan checked: the passive ones always, the
+    active ones only when the active scanner ran; dependency findings never
+    (they come from the repository, not the page)."""
+    return lambda check_id: not check_id.startswith("SEC-DEP-") and (active or check_id not in ACTIVE_CHECK_IDS)
 
 
 def _translate(exc: Exception) -> HTTPException:
@@ -131,7 +155,8 @@ async def scan(
         raise _translate(exc) from exc
     # Saving reads and writes each finding: in a thread, so other requests are not held up
     result = await asyncio.to_thread(scan_result, db, scanner, snap, req.url, actor=actor,
-                                     owner_uid=None if user.local else user.uid, extra_findings=active_findings)
+                                     owner_uid=None if user.local else user.uid, extra_findings=active_findings,
+                                     active=bool(req.active))
     # Best-effort AI triage: reasons only over findings already produced in
     # scope, never contacts the target, and leaves the result untouched on any
     # failure.  analyze() re-runs on the already-fetched snapshot (cheap, no I/O).
@@ -158,11 +183,13 @@ async def _attach_ai(result: dict[str, Any], url: str, findings: list[Finding]) 
 
 
 def scan_result(db: Store, scanner: PassiveScanner, snap, url: str, *, actor: str, owner_uid: str | None,
-                extra_findings: list[Finding] | None = None) -> dict[str, Any]:
+                extra_findings: list[Finding] | None = None, active: bool = False) -> dict[str, Any]:
     """Analyze a fetched page, persist the findings and audit the scan (also used by the pipeline).
 
     *extra_findings* are findings produced elsewhere (e.g. the active scanner)
-    that are persisted and retested alongside the passive ones.
+    that are persisted and retested alongside the passive ones.  *active* says
+    the active scanner ran: only then may its earlier findings be resolved by
+    their absence.
     """
     findings = scanner.analyze(snap) + list(extra_findings or [])
     headers = [(k.decode("latin-1"), v.decode("latin-1")) for k, v in snap.headers.raw]
@@ -170,11 +197,12 @@ def scan_result(db: Store, scanner: PassiveScanner, snap, url: str, *, actor: st
         f.model_dump(mode="json") | {"key": f.key, "remediation": propose(f, headers).model_dump()}
         for f in findings
     ]
-    saved = store.save_scan(db, url, payload, owner_uid=owner_uid)
+    saved = store.save_scan(db, url, payload, owner_uid=owner_uid, checked=checks_run(active))
 
     store.record_audit(
         db, actor=actor, kind="scan", level="warn" if findings else "success",
-        message=f"Passive scan of {url}: {len(findings)} finding(s)", owner_uid=owner_uid,
+        message=f"{'Active and passive' if active else 'Passive'} scan of {url}: {len(findings)} finding(s)",
+        owner_uid=owner_uid,
     )
     for row in saved["resolved"]:
         store.record_audit(db, actor="scanner", kind="retest", level="success", ref=row.key,
@@ -266,11 +294,28 @@ async def retest_finding(
 
 @router.post("/retest", status_code=status.HTTP_200_OK)
 async def retest(
-    finding: Finding, scanner: PassiveScanner = Depends(get_scanner), _user: User = Depends(limit_runs),
+    finding: Finding,
+    scanner: PassiveScanner = Depends(get_scanner),
+    active_scanner: ActiveScanner = Depends(get_active_scanner),
+    user: User = Depends(limit_runs),
 ) -> dict[str, Any]:
-    """Stateless retest of a finding passed in the body (not stored)."""
+    """Stateless retest of a finding passed in the body (not stored).
+
+    Each finding is retested by the check that produced it: an XSS or SQL
+    injection finding needs the active scanner (with the same permission as a
+    scan), and passing one to the passive scanner wrongly came back "pass".
+    """
+    if finding.check_id.startswith("SEC-DEP-"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="A vulnerable dependency is retested by ingesting the repository again.")
+    retester = scanner
+    if finding.check_id in ACTIVE_CHECK_IDS:
+        if refusal := active_scan_refusal(user.uid):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail=f"{refusal}, so this finding cannot be retested.")
+        retester = active_scanner
     try:
-        result = await scanner.retest(finding)
-    except (OutOfScopeError, ScanError) as exc:
+        result = await retester.retest(finding)
+    except (OutOfScopeError, ScanError, ActiveScanError) as exc:
         raise _translate(exc) from exc
     return result.model_dump(mode="json") | {"key": result.key}

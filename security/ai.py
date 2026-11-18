@@ -62,11 +62,24 @@ def enabled() -> bool:
     return LLMConfig.from_env().provider != "mock"
 
 
+_SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+
+def _for_model(findings: list[Finding]) -> list[Finding]:
+    """The findings the model sees: the most severe first, so the cut at
+    ``MAX_FINDINGS`` drops low-severity noise, never a critical finding."""
+    ranked = sorted(findings, key=lambda f: _SEVERITY_RANK.get(f.severity.value, 5))
+    return ranked[:MAX_FINDINGS]
+
+
 def _finding_digest(findings: list[Finding]) -> list[dict[str, Any]]:
-    """Compact, model-facing view of each finding (no secrets, no raw headers)."""
+    """Compact, model-facing view of each finding (no secrets, no raw headers).
+    Each has its own ``ref`` (F1, F2, ...) so two findings of the same check (XSS
+    in two parameters) get their own analysis."""
     out: list[dict[str, Any]] = []
-    for f in findings[:MAX_FINDINGS]:
+    for i, f in enumerate(_for_model(findings), start=1):
         out.append({
+            "ref": f"F{i}",
             "check_id": f.check_id,
             "title": f.title,
             "severity": f.severity.value,
@@ -96,11 +109,11 @@ def _build_prompt(target_url: str, findings: list[Finding]) -> str:
         f"Findings (JSON):\n{json.dumps(digest, indent=2)}\n\n"
         "Return ONLY a JSON object of this exact shape:\n"
         '{\n  "findings": [\n'
-        '    {"check_id": "<id from above>", "priority": <int, 1 = most urgent>,\n'
+        '    {"ref": "<ref from above>", "check_id": "<its check_id>", "priority": <int, 1 = most urgent>,\n'
         '     "summary": "<one sentence>", "explanation": "<how it could be abused>",\n'
         '     "remediation": "<concrete steps>"}\n'
         "  ]\n}\n"
-        "Include one entry per finding above, keyed by its check_id. No prose outside the JSON."
+        "Include one entry per finding above, keyed by its ref. No prose outside the JSON."
     )
 
 
@@ -150,11 +163,12 @@ async def triage(
         logger.warning("security AI triage errored (%s); keeping rule-based findings", exc)
         return {}
 
-    return _match(raw, findings)
+    return _match(raw, _for_model(findings))
 
 
 def _match(raw: dict[str, Any], findings: list[Finding]) -> dict[str, AIInsight]:
-    """Attach model output to real findings by ``check_id``; drop anything else."""
+    """Attach model output to real findings by ``ref`` (one finding), else by
+    ``check_id`` (every finding of that check); drop anything else."""
     items = raw.get("findings") if isinstance(raw, dict) else None
     if not isinstance(items, list):
         return {}
@@ -164,13 +178,15 @@ def _match(raw: dict[str, Any], findings: list[Finding]) -> dict[str, AIInsight]
     by_check: dict[str, list[Finding]] = {}
     for f in findings:
         by_check.setdefault(f.check_id, []).append(f)
+    by_ref = {f"F{i}": f for i, f in enumerate(findings, start=1)}
 
     insights: dict[str, AIInsight] = {}
     for item in items:
         if not isinstance(item, dict):
             continue
         check_id = item.get("check_id")
-        targets = by_check.get(check_id)
+        ref = by_ref.get(str(item.get("ref") or ""))
+        targets = [ref] if ref is not None and ref.check_id == (check_id or ref.check_id) else by_check.get(check_id)
         if not targets:
             continue  # model invented an id; ignore it
         try:

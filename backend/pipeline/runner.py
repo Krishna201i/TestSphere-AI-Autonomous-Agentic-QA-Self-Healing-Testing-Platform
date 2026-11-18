@@ -672,7 +672,7 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
         state.stage("security", "failed", str(exc))
         return None
     result = scan_result(state.db, scanner, snap, app_url, actor=state.doc["actor"], owner_uid=owner,
-                         extra_findings=active_findings)
+                         extra_findings=active_findings, active=run_active)
     counts = Counter(f["severity"] for f in result["findings"])
     detail = ", ".join(f"{counts[s]} {s}" for s in ("critical", "high", "medium", "low", "info") if counts[s]) or "no findings"
     if result["reopened"]:

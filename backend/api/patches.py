@@ -122,11 +122,14 @@ async def create_patch(
     user: User = Depends(limit_runs),
 ) -> dict[str, Any]:
     """Build a patch for the open findings of *target_url* against its repository."""
-    rows = findings_store.list_findings(db, target_url=payload.target_url, **scope(user))
+    rows = await asyncio.to_thread(findings_store.list_findings, db, target_url=payload.target_url, **scope(user))
     findings = [findings_store.serialize(r) for r in rows if r["status"] == "open"]
     if payload.finding_keys:
         wanted = set(payload.finding_keys)
         findings = [f for f in findings if f["key"] in wanted]
+    elif any(f.get("approved_by") for f in findings):
+        # Someone reviewed the proposals: change only what they approved
+        findings = [f for f in findings if f.get("approved_by")]
     if not findings:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail="No open findings for this site; scan it first.")
@@ -189,7 +192,7 @@ def _check_text(file: dict[str, Any]) -> str:
 
 
 def _pr_body(row: Record) -> str:
-    lines = ["Security fixes proposed by **TestSphere AI** for issues its passive scan found on "
+    lines = ["Security fixes proposed by **TestSphere AI** for issues its security scan found on "
              f"{row['target_url']}.", "", "### What changes"]
     lines += [f"- `{a['check_id']}`: {a['how']} (`{a['file']}`)" for a in row.get("applied") or []]
     manual = row.get("manual") or []

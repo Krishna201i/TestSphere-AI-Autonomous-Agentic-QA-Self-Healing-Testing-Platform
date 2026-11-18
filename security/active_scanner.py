@@ -33,7 +33,6 @@ Checks (``check_id``):
 
 from __future__ import annotations
 
-import html
 import logging
 import re
 import secrets
@@ -221,18 +220,19 @@ class ActiveScanner:
         marker = f"ts{token}<img/src=x>"
         resp = await self._request(http, point, marker)
         if resp is not None and "html" in resp.headers.get("content-type", "") and marker in resp.text:
-            # Reflected *and* unescaped (the escaped form would not contain '<img')
-            if html.escape(marker) not in resp.text or resp.text.count(marker) > resp.text.count(html.escape(marker)):
-                findings.append(Finding(
-                    check_id="SEC-XSS-REFLECTED", source=FindingSource.SECURITY,
-                    title="Reflected cross-site scripting (XSS)", severity=Severity.HIGH, confidence=0.9,
-                    component=component, target_url=point.source_url,
-                    evidence=[f"The {where} parameter {point.field!r} was reflected into the HTML response "
-                              f"without escaping (sent {marker!r}, found it verbatim in the page)."],
-                    root_cause="User input is written into the HTML page without output encoding.",
-                    recommendation="HTML-escape all user input before rendering it, or use a templating engine that "
-                                   "auto-escapes. Add a Content-Security-Policy as defence in depth.",
-                ))
+            # The verbatim marker (with its '<img') is an unescaped reflection: an
+            # escaped copy can never contain it.  Pages often echo a value twice
+            # (escaped in the search box, raw in a heading); the raw one is the hole.
+            findings.append(Finding(
+                check_id="SEC-XSS-REFLECTED", source=FindingSource.SECURITY,
+                title="Reflected cross-site scripting (XSS)", severity=Severity.HIGH, confidence=0.9,
+                component=component, target_url=point.source_url,
+                evidence=[f"The {where} parameter {point.field!r} was reflected into the HTML response "
+                          f"without escaping (sent {marker!r}, found it verbatim in the page)."],
+                root_cause="User input is written into the HTML page without output encoding.",
+                recommendation="HTML-escape all user input before rendering it, or use a templating engine that "
+                               "auto-escapes. Add a Content-Security-Policy as defence in depth.",
+            ))
 
         # ── Error-based SQL injection: a single quote that reaches a query
         #    unescaped produces a database error only the quote triggers
