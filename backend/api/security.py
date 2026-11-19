@@ -27,6 +27,7 @@ from backend.database.session import get_db
 from backend.database.store import Store
 from backend.netguard import BlockedTargetError, PinnedTransport
 from backend.ratelimit import limit_runs
+from backend.services import domain_verify
 from backend.services import security_service as store
 from security import (
     ACTIVE_CHECK_IDS,
@@ -91,8 +92,12 @@ def get_active_scanner() -> ActiveScanner:
                          transport=_ScannerTransport(), xss_confirmer=confirm_in_browser)
 
 
-def active_scan_refusal(uid: str | None) -> str | None:
-    """Why *uid* may not run the active scanner, or None when it may."""
+def active_scan_refusal(uid: str | None, url: str | None = None, db: Store | None = None) -> str | None:
+    """Why *uid* may not run the active scanner (against *url*), or None when it may.
+
+    The server must allow active scanning, the account must be listed, and
+    (with *url* and *db*) the account must have proven it owns the host.
+    """
     if not settings.SECURITY_ACTIVE_SCAN:
         return "Active scanning is turned off on this server"
     if not settings.AUTH_REQUIRED:
@@ -100,6 +105,8 @@ def active_scan_refusal(uid: str | None) -> str | None:
     allowed = {u.strip() for u in settings.SECURITY_ACTIVE_SCAN_USERS.split(",") if u.strip()}
     if uid not in allowed:
         return "Active scanning is not enabled for this account (SECURITY_ACTIVE_SCAN_USERS)"
+    if url is not None and db is not None:
+        return domain_verify.refusal(db, uid, url)
     return None
 
 
@@ -148,7 +155,7 @@ async def scan(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Active scanning is turned off on this server. Set SECURITY_ACTIVE_SCAN=true to "
                                    "enable it, and only for hosts you are authorized to test.")
-    if req.active and (refusal := active_scan_refusal(user.uid)):
+    if req.active and (refusal := await asyncio.to_thread(active_scan_refusal, user.uid, req.url, db)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"{refusal}.")
     try:
         snap = await scanner.fetch(req.url, probe_files=True)
@@ -266,7 +273,8 @@ async def _retest(row, scanner: PassiveScanner, db: Store, actor: str, owner_uid
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Active scanning is turned off on this server, so this finding cannot be retested. "
                                    "Set SECURITY_ACTIVE_SCAN=true to enable it.")
-    if row.check_id in ACTIVE_CHECK_IDS and (refusal := active_scan_refusal(owner_uid)):
+    if row.check_id in ACTIVE_CHECK_IDS and (
+            refusal := await asyncio.to_thread(active_scan_refusal, owner_uid, row.target_url, db)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail=f"{refusal}, so this finding cannot be retested.")
     retester = active_scanner if row.check_id in ACTIVE_CHECK_IDS else scanner
@@ -310,6 +318,7 @@ async def retest(
     finding: Finding,
     scanner: PassiveScanner = Depends(get_scanner),
     active_scanner: ActiveScanner = Depends(get_active_scanner),
+    db: Store = Depends(get_db),
     user: User = Depends(limit_runs),
 ) -> dict[str, Any]:
     """Stateless retest of a finding passed in the body (not stored).
@@ -323,7 +332,8 @@ async def retest(
                             detail="A vulnerable dependency is retested by ingesting the repository again.")
     retester = scanner
     if finding.check_id in ACTIVE_CHECK_IDS:
-        if refusal := active_scan_refusal(user.uid):
+        if refusal := await asyncio.to_thread(active_scan_refusal, user.uid,
+                                              finding.target_url or finding.component, db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                                 detail=f"{refusal}, so this finding cannot be retested.")
         retester = active_scanner

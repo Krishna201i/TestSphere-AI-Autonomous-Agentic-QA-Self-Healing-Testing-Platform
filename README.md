@@ -162,6 +162,7 @@ Production runs on one AWS EC2 instance (API with the dashboard, a pipeline work
 | `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_BASE_URL` | AI model (`mock`, `local` such as Ollama, or any OpenAI-compatible `api`) |
 | `SECURITY_SCAN_ALLOWED_HOSTS` | Hosts the scanner may contact (only hosts you own or may test) |
 | `SECURITY_ACTIVE_SCAN` | Allow active (DAST) scanning — XSS, SQLi and open-redirect probes; off by default, authorized hosts only |
+| `REQUIRE_DOMAIN_VERIFICATION` | Active scans need proof the account owns the host: a project's token published at `/.well-known/testsphere-verify.txt` (`POST /api/projects/{id}/domain-verification`), valid 30 days; `auto` (default) = on for a hosted server with sign-in, or `on` / `off` |
 | `ARTIFACT_STORE=s3` (or `gcs`), `ARTIFACT_BUCKET` | Keep screenshots and traces in an S3 (or Cloud Storage) bucket |
 | `TOKEN_ENCRYPTION_KEY` | Encrypts connected GitHub tokens (required when hosted) |
 | `PIPELINE_EXECUTION=worker` | Run pipelines in a separate worker service |

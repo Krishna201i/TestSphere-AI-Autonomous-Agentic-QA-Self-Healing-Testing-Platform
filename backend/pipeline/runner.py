@@ -683,7 +683,7 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
 
     scanner = scanner or get_scanner()
     # Active scanning only when the project asked for it and the server allows it for the owner
-    refusal = active_scan_refusal(owner) if active else None
+    refusal = active_scan_refusal(owner, app_url, state.db) if active else None
     run_active = active and refusal is None
     state.stage("security", "running")
     # One active scanner for every page: its request budget covers the whole run

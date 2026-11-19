@@ -193,6 +193,11 @@ class Settings(BaseSettings):
     # Besides the app URL, how many of the pages the pipeline reached (linked
     # pages and code routes on the same site) its security stage scans too
     SECURITY_MAX_PAGES: int = Field(default_factory=lambda: max(0, int(os.getenv("SECURITY_MAX_PAGES", "5"))))
+    # Active scans need proof the account owns the host (a token at
+    # /.well-known/testsphere-verify.txt): "auto" (a hosted server with
+    # sign-in), "on" or "off"
+    REQUIRE_DOMAIN_VERIFICATION: str = Field(
+        default_factory=lambda: os.getenv("REQUIRE_DOMAIN_VERIFICATION", "auto").strip().lower())
     SECURITY_ACTIVE_MAX_REQUESTS: int = Field(
         default_factory=lambda: max(1, int(os.getenv("SECURITY_ACTIVE_MAX_REQUESTS", "300"))))
     # AI triage of scan findings (prioritize, explain, draft fixes). Like the

@@ -440,3 +440,24 @@ def test_the_ai_triage_is_kept_on_the_findings(client, monkeypatch) -> None:
 
     listed = client.get("/api/security/findings").json()
     assert listed and all(f["ai"]["summary"] == f"note:{f['check_id']}" for f in listed)
+
+
+def test_an_active_scan_of_an_unverified_host_is_refused_until_it_is_verified(active_client, monkeypatch) -> None:
+    from backend import auth
+    from backend.database.session import get_store
+    from tests.backend.test_domain_verification import _verified
+
+    monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "ann")
+    monkeypatch.setattr(settings, "REQUIRE_DOMAIN_VERIFICATION", "on")
+    monkeypatch.setattr(auth, "verify_token", lambda t: {"uid": "ann", "firebase": {"sign_in_provider": "password"}})
+    body = {"url": "http://app.test/search?q=hi", "active": True}
+    headers = {"Authorization": "Bearer ann"}
+
+    refused = active_client.post("/api/security/scan", json=body, headers=headers)
+    assert refused.status_code == 403 and "not verified" in refused.json()["detail"]
+
+    _verified(get_store(), "ann", "app.test")
+    allowed = active_client.post("/api/security/scan", json=body, headers=headers)
+    assert allowed.status_code == 200, allowed.text
+    assert any(f["check_id"] == "SEC-XSS-REFLECTED" for f in allowed.json()["findings"])

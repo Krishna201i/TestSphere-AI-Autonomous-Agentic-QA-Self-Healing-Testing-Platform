@@ -19,7 +19,9 @@ from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
 from backend.database.session import get_db
 from backend.database.store import Record, Store, now_iso
 from backend.models import PROJECTS
+from backend.ratelimit import limit_runs
 from backend.secretbox import SecretBoxError, encrypt
+from backend.services import domain_verify
 from backend.services.project_service import PIPELINE_FIELDS, ProjectService
 from backend.services.security_service import record_audit
 
@@ -79,6 +81,26 @@ def rotate_webhook_secret(project_id: int, db: Store = Depends(get_db), user: Us
     """Generate a new GitHub webhook secret (the old one stops working)."""
     owned_project(db, user, project_id)
     return ProjectService.rotate_webhook_secret(db, project_id)
+
+
+@router.get("/{project_id}/domain-verification")
+def get_domain_verification(project_id: int, db: Store = Depends(get_db),
+                            user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """The token to publish before active scans, and whether the host is verified."""
+    return domain_verify.instructions(db, owned_project(db, user, project_id))
+
+
+@router.post("/{project_id}/domain-verification")
+async def verify_domain(project_id: int, db: Store = Depends(get_db),
+                        user: User = Depends(limit_runs)) -> dict[str, Any]:
+    """Fetch the site's /.well-known/testsphere-verify.txt and, if it holds the
+    project's token, allow active scans of that host for 30 days."""
+    project = await asyncio.to_thread(owned_project, db, user, project_id)
+    ok, message = await domain_verify.check(db, project)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
+    project = await asyncio.to_thread(owned_project, db, user, project_id)
+    return {**domain_verify.instructions(db, project), "message": message}
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
