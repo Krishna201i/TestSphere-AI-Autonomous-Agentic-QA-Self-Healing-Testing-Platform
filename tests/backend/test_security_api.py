@@ -413,7 +413,7 @@ def test_a_hosted_server_never_scans_its_own_internal_ports(monkeypatch) -> None
 
         monkeypatch.setattr(settings, "ALLOW_PRIVATE_TARGETS", True)  # local development
         assert client.post("/api/security/scan", json={"url": url}).status_code == 200
-        assert hits == ["/admin"]
+        assert hits[0] == "/admin"  # then the root's /.git/HEAD and /.env probes
     finally:
         server.shutdown()
 

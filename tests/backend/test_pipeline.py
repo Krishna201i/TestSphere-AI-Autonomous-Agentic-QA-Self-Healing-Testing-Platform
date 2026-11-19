@@ -91,7 +91,7 @@ def scanner_for(headers):
 
 
 class OutOfScope:
-    async def fetch(self, url):
+    async def fetch(self, url, **_):
         raise OutOfScopeError("app.test:80 is not in the authorized scope (127.0.0.1)")
 
 
@@ -685,9 +685,9 @@ def test_the_security_stage_scans_the_pages_the_run_reached(fresh_store, stub_ne
     scanner = scanner_for({"content-type": "text/html"})
     original = scanner.fetch
 
-    async def spy(url):
+    async def spy(url, **kwargs):
         fetched.append(url)
-        return await original(url)
+        return await original(url, **kwargs)
 
     scanner.fetch = spy
     project = make_project(fresh_store)

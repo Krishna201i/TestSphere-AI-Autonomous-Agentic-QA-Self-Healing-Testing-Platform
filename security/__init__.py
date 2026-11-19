@@ -15,12 +15,12 @@ from security.findings import (
     Severity,
     dedupe,
 )
-from security.passive_scanner import PassiveScanner, ScanError
+from security.passive_scanner import EXPOSURE_CHECK_IDS, PassiveScanner, ScanError
 from security.scope import OutOfScopeError, ScopePolicy
 
 __all__ = [
     "Finding", "FindingSource", "FindingStatus", "RetestResult", "Severity", "dedupe",
-    "PassiveScanner", "ScanError", "ActiveScanner", "ActiveScanError", "ACTIVE_CHECK_IDS",
+    "PassiveScanner", "ScanError", "ActiveScanner", "ActiveScanError", "ACTIVE_CHECK_IDS", "EXPOSURE_CHECK_IDS",
     "OutOfScopeError", "ScopePolicy",
     "AIInsight", "ai_triage",
 ]

@@ -28,6 +28,17 @@ Checks (``check_id``):
     SEC-TRANSPORT-HTTP   non-loopback page served over plain HTTP
     SEC-FORM-PASSWORD    password field sent over plain HTTP
     SEC-MIXED-CONTENT    HTTPS page loading http:// resources
+    SEC-CSP-WEAK         a CSP whose scripts may still be inline, from anywhere or over HTTP
+    SEC-COOKIE-SAMESITE-NONE  cookie sent cross-site (SameSite=None) without Secure
+    SEC-ERROR-DISCLOSURE stack trace or framework debug page shown to visitors
+    SEC-DIR-LISTING      web server lists a directory's files
+    SEC-CSRF             state-changing form without an anti-CSRF token (medium confidence)
+    SEC-EXPOSED-GIT      /.git/ downloadable (source code and history)
+    SEC-EXPOSED-ENV      /.env downloadable (secrets)
+
+The two SEC-EXPOSED checks are the only extra requests (two GETs at the site's
+root, on a scan of the app URL); every check needs more than one signal before
+it reports, so an app answering every path with its index page is not flagged.
 """
 
 from __future__ import annotations
@@ -35,7 +46,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
@@ -74,6 +85,8 @@ class PageSnapshot:
     status: int
     headers: httpx.Headers
     html: str
+    # Found by the requests a scan of the app URL adds (exposed /.git, /.env)
+    exposures: list[Finding] = field(default_factory=list)
 
     @property
     def is_https(self) -> bool:
@@ -90,13 +103,20 @@ class _PageParser(HTMLParser):
         self.form_actions: list[str] = []
         self.has_password = False
         self.resources: list[str] = []
+        # (method, action, field names) of each form
+        self.forms: list[tuple[str, str, list[str]]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         a = {k: v or "" for k, v in attrs}
         if tag == "form":
             self.form_actions.append(a.get("action", ""))
-        elif tag == "input" and a.get("type", "").lower() == "password":
+            self.forms.append(((a.get("method") or "get").lower(), a.get("action", ""), []))
+        elif tag in ("input", "textarea", "select", "button") and self.forms and a.get("name"):
+            self.forms[-1][2].append(a["name"])
+        if tag == "input" and a.get("type", "").lower() == "password":
             self.has_password = True
+        if tag == "meta" and a.get("name", "").lower() in ("csrf-token", "csrf-param", "_csrf"):
+            self.forms.append(("meta", "", [a["name"]]))  # a page-wide token (Rails, Laravel)
         attr = self._RESOURCE_ATTRS.get(tag)
         if attr and a.get(attr):
             if tag != "link" or "stylesheet" in a.get("rel", "").lower():
@@ -331,13 +351,161 @@ def check_mixed_content(snap: PageSnapshot, page: _PageParser) -> list[Finding]:
     )]
 
 
+# ── Checks that need more than one signal ──────────────────────────────────
+
+
+def _csp_directive(csp: str, name: str) -> str | None:
+    for part in csp.split(";"):
+        bits = part.strip().split(None, 1)
+        if bits and bits[0].lower() == name:
+            return bits[1] if len(bits) > 1 else ""
+    return None
+
+
+def check_csp_strength(snap: PageSnapshot) -> list[Finding]:
+    csp = snap.headers.get("content-security-policy", "")
+    if not csp:
+        return []  # absent: SEC-HDR-CSP says so
+    scripts = _csp_directive(csp, "script-src")
+    if scripts is None:
+        scripts = _csp_directive(csp, "default-src")
+    if scripts is None:
+        return [_finding(snap, "SEC-CSP-WEAK", title="Content-Security-Policy does not restrict scripts",
+                         severity=Severity.MEDIUM, evidence=[f"Content-Security-Policy: {csp[:200]}",
+                                                             "No script-src or default-src directive"],
+                         root_cause="Scripts may load from anywhere, so the policy does not stop injected scripts.",
+                         recommendation="Add script-src 'self' (plus nonces or hashes for inline scripts).")]
+    sources = scripts.lower().split()
+    nonce_or_hash = any(t.startswith(("'nonce-", "'sha256-", "'sha384-", "'sha512-")) for t in sources)
+    weak = []
+    if "'unsafe-inline'" in sources and not nonce_or_hash:  # with a nonce/hash, browsers ignore it
+        weak.append("'unsafe-inline' (inline scripts run, so injected ones do too)")
+    if "*" in sources:
+        weak.append("* (scripts from any host)")
+    weak += [f"{t} (scripts over plain HTTP)" for t in sources if t in ("http:", "http://*")]
+    if "data:" in sources:
+        weak.append("data: (scripts from data: URLs)")
+    if not weak:
+        return []
+    return [_finding(snap, "SEC-CSP-WEAK", title="Content-Security-Policy allows injected scripts to run",
+                     severity=Severity.MEDIUM, evidence=[f"script sources: {scripts[:200]}", *weak],
+                     root_cause="The policy is present but permits the script sources an attacker would use.",
+                     recommendation="Remove 'unsafe-inline', *, http: and data: from script-src; use nonces or hashes.")]
+
+
+def check_samesite_none(snap: PageSnapshot) -> list[Finding]:
+    findings = []
+    for raw in snap.headers.get_list("set-cookie"):
+        name, flags = _parse_cookie(raw)
+        samesite = re.search(r";\s*samesite\s*=\s*(\w+)", raw, re.IGNORECASE)
+        if samesite and samesite.group(1).lower() == "none" and "secure" not in flags:
+            findings.append(_finding(
+                snap, "SEC-COOKIE-SAMESITE-NONE", component=f"{snap.url} (cookie: {name})",
+                title=f"Cookie '{name}' is sent cross-site without Secure",
+                severity=Severity.MEDIUM,
+                evidence=[f"Set-Cookie: {name}=…; SameSite=None without Secure"],
+                root_cause="SameSite=None cookies go with requests from other sites; without Secure they also "
+                           "travel over plain HTTP (current browsers reject such cookies outright).",
+                recommendation=f"Add Secure to the '{name}' cookie, or use SameSite=Lax if it need not be cross-site."))
+    return findings
+
+
+# Signatures of stack traces and framework debug pages: each one is specific
+# enough that ordinary page text does not contain it
+_ERROR_SIGNATURES = [
+    ("Python traceback", re.compile(r"Traceback \(most recent call last\):")),
+    ("Django debug page", re.compile(r"You(?:&#x27;|&#39;|')re seeing this error because you have\s+<code>DEBUG = True")),
+    ("Werkzeug debugger", re.compile(r"Werkzeug Debugger|The debugger caught an exception in your WSGI application")),
+    ("Java stack trace", re.compile(r"(?:Exception|Error)(?::[^\n<]*)?\s+at [\w$.]+\([\w$]+\.java:\d+\)")),
+    (".NET stack trace", re.compile(r"\[\w+(?:\.\w+)*Exception: .*?\]\s*(?:<[^>]+>\s*)*\s*\w+(?:\.\w+)+\(", re.DOTALL)),
+    ("PHP error", re.compile(r"<b>(?:Fatal error|Parse error|Warning)</b>:\s.+? in <b>/[^<]+\.php</b> on line <b>\d+</b>")),
+    ("Node.js stack trace", re.compile(r"(?:Error|TypeError|ReferenceError): [^\n<]+\n\s+at .+? \((?:/|[A-Z]:\\\\).+?:\d+:\d+\)")),
+    ("Rails exception page", re.compile(r"Action Controller: Exception caught")),
+]
+
+
+def check_error_disclosure(snap: PageSnapshot) -> list[Finding]:
+    found = [label for label, pattern in _ERROR_SIGNATURES if pattern.search(snap.html)]
+    if not found:
+        return []
+    return [_finding(snap, "SEC-ERROR-DISCLOSURE", title="Error details shown to visitors",
+                     severity=Severity.MEDIUM, evidence=[f"The page shows a {label}" for label in found],
+                     root_cause="Errors are rendered with internals (code paths, versions, sometimes settings).",
+                     recommendation="Turn off debug mode in production and show a generic error page; log the details.")]
+
+
+def check_directory_listing(snap: PageSnapshot) -> list[Finding]:
+    title = re.search(r"<title>\s*Index of /", snap.html, re.IGNORECASE)
+    body = re.search(r"<h1>\s*Index of /|>\s*Parent Directory\s*<", snap.html, re.IGNORECASE)
+    if not (title and body):
+        return []
+    return [_finding(snap, "SEC-DIR-LISTING", title="Directory listing is enabled", severity=Severity.MEDIUM,
+                     evidence=["The page is a server-generated 'Index of /' listing"],
+                     root_cause="The web server lists files of a directory without an index page.",
+                     recommendation="Turn off directory listing (nginx autoindex off; Apache Options -Indexes).")]
+
+
+_TOKEN_FIELD = re.compile(r"csrf|xsrf|_token|authenticity|nonce|requestverification|__requestverif", re.IGNORECASE)
+
+
+def check_csrf(snap: PageSnapshot, page: _PageParser) -> list[Finding]:
+    if any(method == "meta" for method, _, _ in page.forms):
+        return []  # a page-wide token the app's scripts send
+    unprotected = [(action, fields) for method, action, fields in page.forms
+                   if method == "post" and not any(_TOKEN_FIELD.search(f) for f in fields)]
+    if not unprotected:
+        return []
+    cookies = " ".join(snap.headers.get_list("set-cookie")).lower()
+    if re.search(r"samesite\s*=\s*(?:lax|strict)", cookies):
+        return []  # its cookies are not sent with another site's form post
+    return [_finding(snap, "SEC-CSRF", title="Form without an anti-CSRF token", severity=Severity.MEDIUM,
+                     confidence=0.5,
+                     evidence=[f"POST form to {action or '(this page)'} has no token field "
+                               f"(fields: {', '.join(fields[:8]) or 'none'})" for action, fields in unprotected[:5]]
+                     + ["No cookie on this page sets SameSite=Lax or Strict (browsers default to Lax, "
+                        "so check the session cookie before acting on this)"],
+                     root_cause="Another site could make a signed-in visitor's browser submit this form.",
+                     recommendation="Add a per-session anti-CSRF token to the form (most frameworks have one), "
+                                    "and set SameSite=Lax on the session cookie.")]
+
+
+def _env_finding(snap: PageSnapshot, url: str, body: str) -> Finding | None:
+    names = re.findall(r"(?m)^\s*(?:export\s+)?([A-Z][A-Z0-9_]{1,63})\s*=", body)
+    secret = [n for n in names if re.search(r"PASS|SECRET|KEY|TOKEN|DATABASE_URL|DSN|PRIVATE", n)]
+    if len(names) < 2 or not secret:
+        return None
+    return _finding(snap, "SEC-EXPOSED-ENV", component=url, title="Environment file (.env) is downloadable",
+                    severity=Severity.CRITICAL,
+                    evidence=[f"{url} returns {len(names)} settings, including {', '.join(secret[:5])} "
+                              "(values not recorded)"],
+                    root_cause="The project's .env file is served as a static file.",
+                    recommendation="Block dotfiles in the web server, move .env out of the web root, "
+                                   "and rotate every secret it holds.")
+
+
+def _git_finding(snap: PageSnapshot, url: str, body: str) -> Finding | None:
+    if not re.match(r"\s*(?:ref: refs/[\w./-]+|[0-9a-f]{40})\s*$", body):
+        return None
+    return _finding(snap, "SEC-EXPOSED-GIT", component=url, title="Git repository (.git) is downloadable",
+                    severity=Severity.HIGH, evidence=[f"{url} returns a Git HEAD: {body.strip()[:60]}"],
+                    root_cause="The .git folder is served, so the source code and its history can be downloaded.",
+                    recommendation="Block /.git in the web server and deploy without the .git folder.")
+
+
+EXPOSURE_PROBES = [("/.git/HEAD", _git_finding), ("/.env", _env_finding)]
+EXPOSURE_CHECK_IDS = frozenset({"SEC-EXPOSED-GIT", "SEC-EXPOSED-ENV"})
+
+
 HEADER_CHECKS: list[Callable[[PageSnapshot], list[Finding]]] = [
     check_csp, check_framing, check_content_type_options, check_referrer_policy,
     check_hsts, check_disclosure, check_cors, check_cookies, check_transport,
+    check_csp_strength, check_samesite_none,
 ]
 HTML_CHECKS: list[Callable[[PageSnapshot, _PageParser], list[Finding]]] = [
-    check_password_forms, check_mixed_content,
+    check_password_forms, check_mixed_content, check_csrf,
 ]
+# HTML-text checks (no parsing needed)
+TEXT_CHECKS: list[Callable[[PageSnapshot], list[Finding]]] = [check_error_disclosure, check_directory_listing]
 
 
 # ---------------------------------------------------------------------------
@@ -373,8 +541,10 @@ class PassiveScanner:
         self._max_redirects = max_redirects
         self._transport = transport
 
-    async def fetch(self, url: str) -> PageSnapshot:
-        """GET *url*, following redirects manually so every hop is scope-checked."""
+    async def fetch(self, url: str, *, probe_files: bool = False) -> PageSnapshot:
+        """GET *url*, following redirects manually so every hop is scope-checked.
+        With *probe_files*, also look for an exposed /.git and /.env at the
+        site's root (two more GETs; done for the app URL, not every page)."""
         self.scope.check(url)
         headers = {"User-Agent": USER_AGENT, "Origin": PROBE_ORIGIN}
         current = url
@@ -396,9 +566,32 @@ class PassiveScanner:
 
                 content_type = response.headers.get("content-type", "")
                 html = response.text if "html" in content_type else ""
-                return PageSnapshot(url, str(response.url), response.status_code, response.headers, html)
+                snap = PageSnapshot(url, str(response.url), response.status_code, response.headers, html)
+                if probe_files:
+                    snap.exposures = await self._probe_files(http, snap)
+                return snap
 
         raise ScanError(f"Too many redirects (>{self._max_redirects}) starting at {url}")
+
+    async def _probe_files(self, http: httpx.AsyncClient, snap: PageSnapshot) -> list[Finding]:
+        """Findings for files that must never be served (no redirects followed)."""
+        from urllib.parse import urlsplit, urlunsplit
+
+        parts = urlsplit(snap.url)
+        found = []
+        for path, judge in EXPOSURE_PROBES:
+            url = urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+            try:
+                self.scope.check(url)
+                response = await http.get(url, headers={"User-Agent": USER_AGENT})
+            except Exception as exc:  # noqa: BLE001 - out of scope, refused or unreachable: no finding
+                log.debug("Exposure probe %s skipped: %s", url, exc)
+                continue
+            if response.status_code != 200 or "html" in response.headers.get("content-type", ""):
+                continue  # an app answering every path with its index page serves HTML
+            if finding := judge(snap, url, response.text[:20_000]):
+                found.append(finding)
+        return found
 
     def analyze(self, snap: PageSnapshot) -> list[Finding]:
         """Run every check against an already-fetched page."""
@@ -407,11 +600,13 @@ class PassiveScanner:
             page = _PageParser()
             page.feed(snap.html)
             findings += [f for check in HTML_CHECKS for f in check(snap, page)]
+            findings += [f for check in TEXT_CHECKS for f in check(snap)]
+        findings += snap.exposures
         return dedupe(findings)
 
     async def scan(self, url: str) -> list[Finding]:
-        """Fetch *url* and return its findings, most severe first."""
-        snap = await self.fetch(url)
+        """Fetch *url* (and probe for exposed files) and return its findings, most severe first."""
+        snap = await self.fetch(url, probe_files=True)
         findings = self.analyze(snap)
         log.info("Passive scan of %s: %d findings", url, len(findings))
         return findings

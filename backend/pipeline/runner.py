@@ -691,7 +691,7 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
     skipped = 0
     for url in urls:
         try:
-            snap = await scanner.fetch(url)
+            snap = await scanner.fetch(url, probe_files=url == app_url)
             active_findings = await active_scanner.scan(url) if active_scanner else []
         except OutOfScopeError as exc:
             if url == app_url:
@@ -706,7 +706,7 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
             skipped += 1  # another page that did not answer: the rest still count
             continue
         page = scan_result(state.db, scanner, snap, url, actor=state.doc["actor"], owner_uid=owner,
-                           extra_findings=active_findings, active=run_active)
+                           extra_findings=active_findings, active=run_active, probed=url == app_url)
         for key in ("findings", "reopened", "resolved"):
             result[key] += page[key]
         result["pages"].append(url)

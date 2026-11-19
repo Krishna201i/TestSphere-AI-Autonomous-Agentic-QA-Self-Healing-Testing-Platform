@@ -30,6 +30,7 @@ from backend.ratelimit import limit_runs
 from backend.services import security_service as store
 from security import (
     ACTIVE_CHECK_IDS,
+    EXPOSURE_CHECK_IDS,
     ActiveScanError,
     ActiveScanner,
     Finding,
@@ -102,11 +103,13 @@ def active_scan_refusal(uid: str | None) -> str | None:
     return None
 
 
-def checks_run(active: bool) -> Callable[[str], bool]:
+def checks_run(active: bool, probed: bool = True) -> Callable[[str], bool]:
     """Which finding kinds a page scan checked: the passive ones always, the
-    active ones only when the active scanner ran; dependency findings never
-    (they come from the repository, not the page)."""
-    return lambda check_id: not check_id.startswith("SEC-DEP-") and (active or check_id not in ACTIVE_CHECK_IDS)
+    active ones only when the active scanner ran, exposed files only when they
+    were probed for; dependency findings never (they come from the repository)."""
+    return lambda check_id: (not check_id.startswith("SEC-DEP-")
+                             and (active or check_id not in ACTIVE_CHECK_IDS)
+                             and (probed or check_id not in EXPOSURE_CHECK_IDS))
 
 
 def _translate(exc: Exception) -> HTTPException:
@@ -148,7 +151,7 @@ async def scan(
     if req.active and (refusal := active_scan_refusal(user.uid)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"{refusal}.")
     try:
-        snap = await scanner.fetch(req.url)
+        snap = await scanner.fetch(req.url, probe_files=True)
         active_findings: list[Finding] = []
         if req.active:
             active_findings = await active_scanner.scan(req.url)
@@ -186,7 +189,8 @@ async def _attach_ai(result: dict[str, Any], url: str, findings: list[Finding]) 
 
 
 def scan_result(db: Store, scanner: PassiveScanner, snap, url: str, *, actor: str, owner_uid: str | None,
-                extra_findings: list[Finding] | None = None, active: bool = False) -> dict[str, Any]:
+                extra_findings: list[Finding] | None = None, active: bool = False,
+                probed: bool = True) -> dict[str, Any]:
     """Analyze a fetched page, persist the findings and audit the scan (also used by the pipeline).
 
     *extra_findings* are findings produced elsewhere (e.g. the active scanner)
@@ -200,7 +204,7 @@ def scan_result(db: Store, scanner: PassiveScanner, snap, url: str, *, actor: st
         f.model_dump(mode="json") | {"key": f.key, "remediation": propose(f, headers).model_dump()}
         for f in findings
     ]
-    saved = store.save_scan(db, url, payload, owner_uid=owner_uid, checked=checks_run(active))
+    saved = store.save_scan(db, url, payload, owner_uid=owner_uid, checked=checks_run(active, probed))
 
     store.record_audit(
         db, actor=actor, kind="scan", level="warn" if findings else "success",
