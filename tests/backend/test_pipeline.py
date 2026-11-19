@@ -163,7 +163,8 @@ def test_a_login_forms_own_tests_run_and_a_goal_it_could_not_run_says_why(fresh_
     orch = FakeOrchestrator({})
     run = run_once(fresh_store, project, orch, scanner_for({"content-type": "text/html"}))
 
-    assert stub_network["analyze_options"][URL] == {"allow_test_accounts": True, "email_domain": "qa.acme.dev"}
+    assert stub_network["analyze_options"][URL] == {"allow_test_accounts": True, "email_domain": "qa.acme.dev",
+                                                    "test_data": {}}
     assert "Login: a wrong password is refused with a message" in orch.ran
     detail = stage(run, "plan")["detail"]
     assert "Not tested from your goal: “test the login (needs credentials in the goal)”" in detail

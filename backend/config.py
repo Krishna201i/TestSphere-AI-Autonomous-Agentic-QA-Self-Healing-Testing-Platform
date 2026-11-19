@@ -245,6 +245,10 @@ class Settings(BaseSettings):
     # An AI agent reaches the written goal in a browser once and records it as a test (auto: with a real model)
     PIPELINE_AI_EXPLORER: str = Field(default_factory=lambda: os.getenv("PIPELINE_AI_EXPLORER", "auto").lower())
     PIPELINE_AI_EXPLORER_TIMEOUT: float = Field(default_factory=lambda: float(os.getenv("PIPELINE_AI_EXPLORER_TIMEOUT", "240")))
+    # Acceptance check: a generated test that passed runs once more on a
+    # deliberately broken copy of its page; at most this many per run (each is
+    # one more browser run, and a test is checked once per version of its steps)
+    ACCEPTANCE_MAX_PER_RUN: int = Field(default_factory=lambda: max(0, int(os.getenv("ACCEPTANCE_MAX_PER_RUN", "5"))))
     # Check pinned dependency versions against OSV.dev (sends package names and versions, never code)
     DEPENDENCY_SCAN: bool = Field(default_factory=lambda: os.getenv("DEPENDENCY_SCAN", "true").lower() in ("true", "1"))
 

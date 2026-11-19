@@ -272,6 +272,14 @@ class EngineConfig(BaseModel):
     )
 
 
+class PageMutation(BaseModel):
+    """A deliberately broken page, for checking that a test can tell: the
+    elements and text its checks rely on are removed as the page renders."""
+
+    hide_selectors: list[str] = Field(default_factory=list, description="CSS selectors of elements to remove")
+    hide_texts: list[str] = Field(default_factory=list, description="Text to remove (case-insensitive)")
+
+
 class RunOptions(BaseModel):
     """
     Per-run overrides for EngineConfig fields.
@@ -290,10 +298,12 @@ class RunOptions(BaseModel):
     quick_heal_ms: int | None = Field(None, ge=0)
     browser: Literal["chromium", "firefox", "webkit"] | None = None
     viewport: str | None = Field(None, pattern=r"^[1-9]\d{2,3}x[1-9]\d{2,3}$")
+    # Not an EngineConfig setting: the run breaks the page on purpose (acceptance checks)
+    mutation: PageMutation | None = None
 
     def merged(self, base: EngineConfig) -> EngineConfig:
         """Return a new EngineConfig with non-None overrides applied."""
-        overrides = {k: v for k, v in self.model_dump().items() if v is not None}
+        overrides = {k: v for k, v in self.model_dump(exclude={"mutation"}).items() if v is not None}
         return base.model_copy(update=overrides)
 
 

@@ -38,7 +38,19 @@ def enabled() -> bool:
     return mode == "on" or (mode == "auto" and LLMConfig.from_env().provider != "mock")
 
 
-def page_context(analysis: dict[str, Any], prompt: str | None, frameworks: list[str] | None = None):
+def _profile_note(profile: Any) -> str:
+    """What the project's profile asks of the planner; never a password."""
+    if profile is None:
+        return ""
+    note = f" Kinds of tests wanted: {', '.join(profile.test_types)}."
+    data = {k: v for k, v in profile.test_data.items() if k != "password"}
+    if data:
+        note += " Type these values where a field asks for them: " + ", ".join(f"{k} = {v!r}" for k, v in data.items()) + "."
+    return note
+
+
+def page_context(analysis: dict[str, Any], prompt: str | None, frameworks: list[str] | None = None,
+                 profile: Any = None):
     """The planner's view of the analyzed page."""
     from agents.planner.schemas import ApplicationContext, ElementContext, PageContext
 
@@ -53,7 +65,8 @@ def page_context(analysis: dict[str, Any], prompt: str | None, frameworks: list[
     return ApplicationContext(
         app_name=analysis.get("page_title") or urlparse(url).netloc,
         app_url=url,
-        description=(f"Goal: {prompt}. " if prompt else "") + (analysis.get("meta_description") or ""),
+        description=(f"Goal: {prompt}. " if prompt else "") + (analysis.get("meta_description") or "")
+        + _profile_note(profile),
         pages=[PageContext(url=urlparse(url).path or "/", title=analysis.get("page_title") or "", elements=elements,
                            navigation_elements=list((inv.get("links") or [])[:15]))],
         technology_stack=frameworks or [],
@@ -71,7 +84,7 @@ def to_suite_tests(cases: list[Any], analysis: dict[str, Any]) -> tuple[list[dic
     known = {e["selector"] for e in [*(inv.get("inputs") or []), *(inv.get("buttons") or [])] if e.get("selector")} | _ANY_PAGE
     url = analysis["url"]
     kept, dropped = [], 0
-    for tc in cases[:MAX_AI_TESTS]:
+    for tc in cases[:20]:  # the profile's max_ai_tests limits what is kept (backend/pipeline/profile.py)
         steps: list[dict[str, Any]] = [{"step_number": 1, "action": "NAVIGATE", "value": url, "target": None,
                                         "description": f"Open {url}"}]
         ok = True
@@ -122,7 +135,7 @@ def _add_check(steps: list[dict[str, Any]], assertion: Any, known: set[str]) -> 
 
 
 async def ai_tests(analysis: dict[str, Any], prompt: str | None, frameworks: list[str] | None = None, *,
-                   planner: Any = None, timeout: float | None = None) -> tuple[list[dict[str, Any]], str | None]:
+                   planner: Any = None, timeout: float | None = None, profile: Any = None) -> tuple[list[dict[str, Any]], str | None]:
     """Extra tests from the planner agent and a note for the plan stage (None when the planner is off)."""
     if planner is None and not enabled():
         return [], None
@@ -133,7 +146,8 @@ async def ai_tests(analysis: dict[str, Any], prompt: str | None, frameworks: lis
 
             planner = LLMTestPlanner(llm_client=create_platform_llm_client())
         plan = await asyncio.wait_for(
-            planner.generate_test_plan(page_context(analysis, prompt, frameworks), max_tests=MAX_AI_TESTS),
+            planner.generate_test_plan(page_context(analysis, prompt, frameworks, profile),
+                                       max_tests=profile.max_ai_tests if profile is not None else MAX_AI_TESTS),
             timeout=timeout or settings.PIPELINE_AI_PLANNER_TIMEOUT)
     except Exception as exc:  # noqa: BLE001 - the rule-based suite still runs
         logger.warning("AI planner skipped: %s", exc)

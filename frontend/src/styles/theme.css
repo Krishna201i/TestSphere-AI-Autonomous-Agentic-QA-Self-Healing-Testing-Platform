@@ -204,6 +204,8 @@ h1, h2, h3, h4 { line-height: var(--lh-tight); }
 .mt-2 { margin-top: var(--s-2); }
 .mt-3 { margin-top: var(--s-3); }
 .ml-2 { margin-left: var(--s-2); }
+fieldset { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--s-3) var(--s-4); }
+legend { padding: 0 var(--s-1); }
 .stack { display: flex; flex-direction: column; gap: var(--s-3); min-width: 0; }
 .stack-sm { display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; }
 .stack-lg { display: flex; flex-direction: column; gap: var(--s-4); min-width: 0; }

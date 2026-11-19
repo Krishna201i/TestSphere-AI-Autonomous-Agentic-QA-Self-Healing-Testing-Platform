@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import mimetypes
 import re
@@ -60,6 +61,7 @@ from .schemas import (
     ElementFingerprint,
     EngineConfig,
     HealingReport,
+    PageMutation,
     RunOptions,
     Step,
     StepResult,
@@ -127,6 +129,8 @@ async def run_test(
         async with BrowserSession(config, trace_path=f"{artifacts_dir}/_trace.zip",
                                   storage_state=storage_state) as session:
             page = await session.new_page()
+            if options is not None and options.mutation is not None:
+                await page.context.add_init_script(_mutation_script(options.mutation))
             downloads: list[str] = []       # files offered during the current step
             download_tasks: list[asyncio.Task] = []
             new_tabs: list[Page] = []        # tabs opened during the current step
@@ -644,6 +648,48 @@ def _quote(text: str) -> str:
     if len(text) <= _QUOTE_MAX:
         return f"'{text}'"
     return f"'{text[:_QUOTE_MAX].rstrip()}…' ({len(text):,} characters)"
+
+
+def _mutation_script(mutation: PageMutation) -> str:
+    """Init script that keeps *mutation*'s elements and text off every page of
+    the run, as it renders and whenever scripts change it.  Text goes the way
+    checks read it: case-insensitive, and also when it spans several tags
+    ("Welcome <b>back</b>"), by removing the smallest element that shows it."""
+    return r"""(() => {
+  const SELECTORS = __SELECTORS__, TEXTS = __TEXTS__.map((t) => t.toLowerCase()).filter(Boolean);
+  const norm = (s) => (s || '').replace(/\s+/g, ' ').toLowerCase();
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const strip = () => {
+    for (const sel of SELECTORS) { try { document.querySelectorAll(sel).forEach((el) => el.remove()); } catch (e) {} }
+    if (!TEXTS.length || !document.body) return;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const n of nodes) {
+      let v = n.nodeValue;
+      for (const t of TEXTS) v = v.replace(new RegExp(esc(t), 'gi'), '');
+      if (v !== n.nodeValue) n.nodeValue = v;
+    }
+    for (const t of TEXTS) {
+      if (norm(document.title).includes(t)) document.title = '';
+      if (!norm(document.body.innerText).includes(t)) continue;
+      let el = document.body, deeper = true;
+      while (deeper) {
+        deeper = false;
+        for (const child of el.children) {
+          if (norm(child.innerText).includes(t)) { el = child; deeper = true; break; }
+        }
+      }
+      if (el !== document.body) el.remove();
+    }
+  };
+  const start = () => {
+    strip();
+    new MutationObserver(strip).observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+})();""".replace("__SELECTORS__", json.dumps(mutation.hide_selectors)).replace(
+        "__TEXTS__", json.dumps(mutation.hide_texts))
 
 
 def _text_contains(actual: str, expected: str) -> bool:

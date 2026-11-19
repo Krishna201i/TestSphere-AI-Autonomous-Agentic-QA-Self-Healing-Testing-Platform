@@ -76,8 +76,10 @@ def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict
         name = f"Scenario: {prompt.strip()[:60]}" if prompt and prompt.strip() else f"Interaction: {title[:50] or url}"
         tests.append({"slug": "interaction", "name": name, "category": "functional", "steps": synthesized})
 
-    # A login or sign-up form's own tests (backend/services/auth_plan.py)
+    # A login or sign-up form's own tests (backend/services/auth_plan.py), and
+    # what the page's other forms must refuse (backend/services/form_checks.py)
     tests += analysis.get("auth_tests") or []
+    tests += analysis.get("form_tests") or []
 
     headings = inventory.get("headings") or []
     if headings:

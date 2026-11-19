@@ -14,6 +14,7 @@ from backend.config import git_hosts
 from backend.models.test_execution import TestExecutionStatus
 from backend.notify import NOTIFY_CHOICES, check_alert_webhook
 from backend.pipeline.deploy_config import check_hook_url
+from backend.pipeline.profile import GenerationProfile
 from ingestion.source import SourceError, validate_git_url
 
 # ============================================================================
@@ -50,6 +51,8 @@ class _ProjectPipelineFields(BaseModel):
     deploy_on_pass: bool | None = Field(None, description="Deploy and verify automatically after a passing run")
     sign_in_first: bool | None = Field(None, description="Run the goal's sign-in test first; linked and route pages "
                                                          "then start signed in (the session is kept in memory only)")
+    generation_profile: GenerationProfile | None = Field(
+        None, description="What the pipeline generates: test types, test data, AI test limit, strict, acceptance check")
     active_scan: bool | None = Field(None, description="Also run the active (DAST) security scan in the pipeline; "
                                                        "only takes effect where the server has SECURITY_ACTIVE_SCAN on")
     allow_test_accounts: bool | None = Field(None, description="Let the sign-up test create a real account on the app, "
@@ -150,6 +153,7 @@ class ProjectResponse(BaseModel):
     deploy_on_pass: bool | None = None
     sign_in_first: bool | None = None
     active_scan: bool | None = None
+    generation_profile: dict | None = None
     allow_test_accounts: bool | None = None
     test_email_domain: str | None = None
     last_deploy_id: int | None = None

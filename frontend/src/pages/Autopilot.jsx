@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  CheckCircle2, Circle, Copy, Database, Download, GitBranch, Loader2, MinusCircle, Play, RefreshCw, Rocket, ShieldCheck, Unplug, X, XCircle, Zap,
+  CheckCircle2, Circle, Copy, Database, Download, GitBranch, Loader2, ListChecks, MinusCircle, Play, RefreshCw, Rocket, ShieldCheck, Unplug, X, XCircle, Zap,
 } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import {
@@ -227,6 +227,91 @@ function CopyField({ label, value }) {
         }}><Copy size={13} /> {copied ? 'Copied' : 'Copy'}</button>
       </span>
     </label>
+  );
+}
+
+const TEST_TYPES = [
+  ['smoke', 'Smoke', 'the page loads'],
+  ['functional', 'Functional', "your goal and the page's form"],
+  ['negative', 'Negative', 'what must be refused: wrong password, empty or invalid input'],
+  ['content', 'Content', 'the main heading is shown'],
+  ['pages', 'Linked pages', 'linked pages and code routes render'],
+];
+const DATA_KEYS = [['text', 'Text to type (search term, item)'], ['email', 'Email'], ['name', 'Name'],
+  ['username', 'User name'], ['password', 'Password (never sent to the AI)']];
+const DEFAULT_PROFILE = { test_types: TEST_TYPES.map((t) => t[0]), test_data: {}, max_ai_tests: 5, strict: false, acceptance: true };
+
+/** What the pipeline generates for this project: test types, test data, AI tests, strictness, broken-page check. */
+function GenerationProfile({ project, onChanged }) {
+  const [profile, setProfile] = useState({ ...DEFAULT_PROFILE, ...(project.generation_profile || {}) });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => { setProfile({ ...DEFAULT_PROFILE, ...(project.generation_profile || {}) }); }, [project.id, project.generation_profile]);
+
+  const toggle = (type) => setProfile((p) => ({
+    ...p,
+    test_types: p.test_types.includes(type) ? p.test_types.filter((t) => t !== type) : [...p.test_types, type],
+  }));
+  const setData = (key, value) => setProfile((p) => ({ ...p, test_data: { ...p.test_data, [key]: value } }));
+
+  async function save(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const testData = Object.fromEntries(Object.entries(profile.test_data).filter(([, v]) => String(v).trim()));
+      await updateProject(project.id, { generation_profile: { ...profile, test_data: testData } });
+      setSaved(true);
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="form-stack" onSubmit={save}>
+      <h4 className="section-title"><ListChecks size={14} className="icon-inline" /> Test generation</h4>
+      <fieldset className="form-stack m-0">
+        <legend className="small"><b>Kinds of tests</b></legend>
+        {TEST_TYPES.map(([id, label, hint]) => (
+          <label key={id} className="check">
+            <input type="checkbox" checked={profile.test_types.includes(id)} onChange={() => toggle(id)} />
+            {label} <span className="muted">— {hint}</span>
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="form-stack m-0">
+        <legend className="small"><b>Test data</b> <span className="muted">(values typed into matching fields; your goal&apos;s values win)</span></legend>
+        {DATA_KEYS.map(([key, label]) => (
+          <label key={key} className="field">
+            {label}
+            <input className="input" type={key === 'password' ? 'password' : 'text'} autoComplete="off" value={profile.test_data[key] || ''}
+              onChange={(e) => setData(key, e.target.value)} maxLength={200} />
+          </label>
+        ))}
+      </fieldset>
+      <label className="field">
+        AI-written tests per run (0 = none; used when an AI model is configured)
+        <input className="input" type="number" min={0} max={20} value={profile.max_ai_tests}
+          onChange={(e) => setProfile({ ...profile, max_ai_tests: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })} />
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={profile.strict} onChange={(e) => setProfile({ ...profile, strict: e.target.checked })} />
+        Strict: leave out tests that only check a page renders
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={profile.acceptance} onChange={(e) => setProfile({ ...profile, acceptance: e.target.checked })} />
+        Broken-page check: run each new test once on a copy of the page with what it checks removed, to prove it can fail
+      </label>
+      <div><button type="submit" className="btn btn-sm" disabled={busy || profile.test_types.length === 0}>{busy ? 'Saving…' : 'Save'}</button></div>
+      {saved && <div className="small" role="status">Saved. The next run generates tests this way.</div>}
+      {error && <div className="error-text" role="alert">{error}</div>}
+    </form>
   );
 }
 
@@ -488,6 +573,7 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                   <div><button type="button" className="btn btn-sm" disabled={busy} onClick={() => act(() => rotateWebhookSecret(project.id))}><RefreshCw size={13} /> New secret</button></div>
                   <ProjectDatabase project={project} onChanged={onChanged} />
                   <DomainVerification project={project} />
+                  <GenerationProfile project={project} onChanged={onChanged} />
                 </div>
               </div>
             )}

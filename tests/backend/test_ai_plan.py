@@ -75,7 +75,7 @@ def test_off_with_the_mock_model(monkeypatch):
 
 
 def test_the_plan_stage_quarantines_ai_tests(fresh_store, monkeypatch):
-    async def fake_ai(analysis, prompt, frameworks=None):
+    async def fake_ai(analysis, prompt, frameworks=None, **_):
         return ai_plan.to_suite_tests([LOGIN], analysis)[0], "AI planner added 1 test(s)"
 
     monkeypatch.setattr(ai_plan, "ai_tests", fake_ai)
@@ -91,7 +91,7 @@ def test_the_plan_stage_quarantines_ai_tests(fresh_store, monkeypatch):
     # the model reuses the id for different steps: that test was never reviewed
     changed = case("TC_LOGIN", [(TestAction.FILL, "#user", "bob"), (TestAction.CLICK, "#go", None)])
 
-    async def changed_ai(analysis, prompt, frameworks=None):
+    async def changed_ai(analysis, prompt, frameworks=None, **_):
         return ai_plan.to_suite_tests([changed], analysis)[0], "AI planner added 1 test(s)"
 
     monkeypatch.setattr(ai_plan, "ai_tests", changed_ai)

@@ -49,6 +49,8 @@ from backend.models import (
 from backend.models.test_execution import TestExecutionStatus
 from backend.notify import notify_run
 from backend.pipeline import ai_plan, explore, suite
+from backend.pipeline.profile import profile_of
+from backend.pipeline.profile import select as select_by_profile
 from backend.reporting.summary import run_summary
 from backend.services.security_service import record_audit
 from backend.services.test_case_service import TestCaseService
@@ -363,7 +365,7 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
     state.stage("analyze", "running")
     analysis = await URLAnalyzerService.analyze_live_website(
         url=app_url, prompt=project.get("prompt"), allow_test_accounts=bool(project.get("allow_test_accounts")),
-        email_domain=project.get("test_email_domain"))
+        email_domain=project.get("test_email_domain"), test_data=profile_of(project).test_data)
     if not analysis.get("success"):
         reason = f"HTTP {analysis['status_code']}" if analysis.get("status_code") else (analysis.get("error") or "unreachable")
         state.stage("analyze", "failed", f"{app_url} did not load ({reason})")
@@ -404,6 +406,8 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
     goal_text = URLAnalyzerService.prompt_values(project.get("prompt")).get("text")
     database = await asyncio.to_thread(dbsource.finish_check, db_check, [goal_text] if goal_text else [])
     state.save(database=database)
+    if profile_of(project).acceptance:
+        await _stage_acceptance(state, test_cases, results, app_url)
 
     # ── heal ──
     healed = [r for r in results if r["healed"]]
@@ -501,8 +505,10 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
         application = db.insert(APPLICATIONS, project_id=project["id"], name=(analysis.get("page_title") or project["name"])[:60],
                                 base_url=app_url, description="Created by the automated pipeline", owner_uid=owner)
 
+    profile = profile_of(project)
     planned = suite.page_tests(analysis, project.get("prompt"))
-    extra, ai_note = await ai_plan.ai_tests(analysis, project.get("prompt"), (blueprint or {}).get("frameworks"))
+    extra, ai_note = ([], None) if profile.max_ai_tests == 0 else await ai_plan.ai_tests(
+        analysis, project.get("prompt"), (blueprint or {}).get("frameworks"), profile=profile)
     planned += extra
     candidates = suite.candidate_pages(analysis, blueprint, link_limit=settings.PIPELINE_LINK_PAGES,
                                        route_limit=settings.PIPELINE_ROUTE_PAGES)
@@ -521,6 +527,7 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
                     if pages.get(c["url"]) and not suite.redirected(c, pages[c["url"]]) else suite.render_test(c)
                     for c in reachable]
 
+    planned = select_by_profile(planned, profile)
     generated, created = [], 0
     for test in planned:
         external_id = f"{GENERATED_PREFIX}{project['id']}-{test['slug']}"
@@ -647,6 +654,30 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
                 f"{len(results) - all_failed} of {len(results)} passed" + (f", {failed} failed" if failed else "")
                 + (f", {quarantined_failed} quarantined failed (does not fail the run)" if quarantined_failed else ""))
     return results
+
+
+async def _stage_acceptance(state: _RunState, test_cases: list[Record], results: list[dict[str, Any]],
+                            app_url: str) -> None:
+    """Run new or changed tests that passed on a deliberately broken page
+    (``backend/pipeline/acceptance.py``) and note each test's verdict."""
+    from backend.pipeline import acceptance
+
+    if settings.ACCEPTANCE_MAX_PER_RUN <= 0:
+        return
+    counts = await acceptance.check_new_tests(state.db, test_cases, results, app_url,
+                                              limit=settings.ACCEPTANCE_MAX_PER_RUN)
+    verdicts = {tc["id"]: (state.db.get(TEST_CASES, tc["id"]) or {}).get("acceptance") for tc in test_cases}
+    for r in results:
+        if (v := verdicts.get(r["test_case_id"])) and v.get("status"):
+            r["acceptance"] = v["status"]
+    state.save(tests=results)
+    if counts:
+        stage = next((s for s in state.doc["stages"] if s["key"] == "execute"), None)
+        words = {"verified": "verified", "asserts_nothing": "check nothing", "inconclusive": "inconclusive",
+                 "unverifiable": "cannot be checked this way"}
+        summary = ", ".join(f"{n} {words.get(k, k)}" for k, n in sorted(counts.items()))
+        if stage:
+            state.stage("execute", stage["status"], f"{stage.get('detail') or ''} · broken-page check: {summary}")
 
 
 def _tested_pages(test_cases: list[Record], app_url: str) -> list[str]:

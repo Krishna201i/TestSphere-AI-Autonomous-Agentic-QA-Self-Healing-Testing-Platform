@@ -24,6 +24,8 @@ os.environ.setdefault("ARTIFACT_TRACES", "false")
 os.environ.setdefault("DEPENDENCY_SCAN", "false")
 # Visual baselines only where a test turns them on
 os.environ.setdefault("VISUAL_REGRESSION", "false")
+# The broken-page acceptance check only where a test turns it on (it is one more real browser run)
+os.environ.setdefault("ACCEPTANCE_MAX_PER_RUN", "0")
 
 
 @pytest.fixture(autouse=True)

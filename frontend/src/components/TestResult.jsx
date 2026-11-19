@@ -8,6 +8,12 @@ export function ResultBadges({ test }) {
       <span className={`status ${label}`}>{label}</span>
       {test.flaky && <span className="status FLAKY">Flaky</span>}
       {test.quarantined && <span className="pill gray">Quarantined</span>}
+      {test.acceptance === 'verified' && (
+        <span className="pill green" title="It failed when what it checks was removed from the page">Proven by a broken-page check</span>
+      )}
+      {test.acceptance === 'asserts_nothing' && (
+        <span className="pill orange" title="It still passed with what it checks removed from the page">Checks nothing (broken-page check)</span>
+      )}
     </span>
   );
 }

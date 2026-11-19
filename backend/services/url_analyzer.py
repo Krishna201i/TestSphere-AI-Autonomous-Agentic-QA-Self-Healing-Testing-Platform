@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 import httpx
 
 from backend.netguard import PinnedTransport
-from backend.services import auth_plan, goal_plan
+from backend.services import auth_plan, form_checks, goal_plan
 from engine.locators import best_unique, css_string, stable_candidates
 
 logger = logging.getLogger("testsphere.analyzer")
@@ -96,6 +96,7 @@ class URLAnalyzerService:
         *,
         allow_test_accounts: bool = False,
         email_domain: str | None = None,
+        test_data: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Fetch real website HTML, inspect DOM elements, and synthesize live test plan.
 
@@ -188,9 +189,12 @@ class URLAnalyzerService:
             allow_test_accounts=allow_test_accounts,
             email_domain=email_domain,
             blocked=blocked,
+            test_data=test_data,
         )
         auth_tests = cls._auth_tests(normalized_url, inputs, buttons, prompt, blocked,
                                      allow_test_accounts=allow_test_accounts, email_domain=email_domain)
+        # Input the page's other forms must refuse (backend/services/form_checks.py)
+        form_tests = [] if blocked else form_checks.negative_tests(normalized_url, inputs, buttons, html, prompt)
 
         # Generate real telemetry event logs
         events = cls._generate_telemetry_events(
@@ -245,6 +249,7 @@ class URLAnalyzerService:
             },
             # A login or sign-up form's own tests: wrong password, empty form, ...
             "auth_tests": auth_tests,
+            "form_tests": form_tests,
             "blocked": blocked,
             "events": events,
             "error": error_encountered,
@@ -744,6 +749,7 @@ class URLAnalyzerService:
         allow_test_accounts: bool = False,
         email_domain: str | None = None,
         blocked: str | None = None,
+        test_data: dict[str, str] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
         """Steps for the page's form and the written goal, and which parts of the goal they test.
 
@@ -768,7 +774,8 @@ class URLAnalyzerService:
         # successful login or submit has already moved to another page (the
         # smoke test checks the title of the page as loaded).
 
-        given = cls.prompt_values(prompt)
+        # The profile's test data, with the goal's own values winning
+        given = {**(test_data or {}), **cls.prompt_values(prompt)}
         parts = goal_plan.split_goal(prompt)
         use_form = not parts or goal_plan.is_form_part(parts[0], given) \
             or not goal_plan.later_part_steps(0, parts[0], given)
