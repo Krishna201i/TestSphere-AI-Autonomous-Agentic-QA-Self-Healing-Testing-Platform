@@ -152,6 +152,10 @@ export const getProjectDatabase = (id) => request(`/api/projects/${id}/database`
 export const linkProjectDatabase = (id, url) => request(`/api/projects/${id}/database`, { method: 'PUT', body: { url } });
 export const unlinkProjectDatabase = (id) => request(`/api/projects/${id}/database`, { method: 'DELETE' });
 export const rotateWebhookSecret = (id) => request(`/api/projects/${id}/webhook-secret`, { method: 'POST' });
+/** Proof the project owns its site, needed before active scans: the token to publish and the current state. */
+export const getDomainVerification = (id) => request(`/api/projects/${id}/domain-verification`);
+/** Fetch the site's /.well-known/testsphere-verify.txt now and record the host as verified if it holds the token. */
+export const verifyDomain = (id) => request(`/api/projects/${id}/domain-verification`, { method: 'POST' });
 export const runProjectPipeline = (projectId, ingest = false) =>
   request('/api/pipelines/run', { method: 'POST', body: { project_id: projectId, ingest } });
 /** Verified deploy: hook -> health -> smoke tests -> rollback on failure. */

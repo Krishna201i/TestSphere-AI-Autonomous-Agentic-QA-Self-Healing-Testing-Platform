@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { deployState, executionStats, groupedResults, loopModel, mergeStageStatus, pct, testDetail } from '../lib/derive';
+import {
+  RADAR_AXES, confidenceLabel, deployState, executionStats, groupedResults, loopModel, mergeStageStatus, pct, radarValues, testDetail,
+} from '../lib/derive';
 
 const run = (status) => ({ status });
 
@@ -144,5 +146,23 @@ describe('test results in reports', () => {
     ]);
     expect(groups.map((g) => [g.label, g.tests.map((t) => t.execution_id)]))
       .toEqual([['Smoke', [1]], ['Linked pages', [4, 3]], ['Saved tests', [5]]]);
+  });
+});
+
+describe('security checks on the dashboard', () => {
+  it('places every check the scanners report on a radar axis', () => {
+    const shown = new Set(RADAR_AXES.flatMap((a) => a.checks));
+    for (const id of ['SEC-CSP-WEAK', 'SEC-COOKIE-SAMESITE-NONE', 'SEC-ERROR-DISCLOSURE', 'SEC-DIR-LISTING',
+      'SEC-EXPOSED-GIT', 'SEC-EXPOSED-ENV', 'SEC-CSRF', 'SEC-XSS-REFLECTED', 'SEC-SQLI-ERROR', 'SEC-OPEN-REDIRECT']) {
+      expect(shown.has(id), id).toBe(true);
+    }
+    const injection = RADAR_AXES.findIndex((a) => a.id === 'injection');
+    expect(radarValues([{ check_id: 'SEC-SQLI-ERROR', severity: 'critical' }])[injection]).toBeGreaterThan(0);
+  });
+
+  it('says when an XSS was proven in a browser and when a finding needs a manual look', () => {
+    expect(confidenceLabel({ check_id: 'SEC-XSS-REFLECTED', confidence: 1 }).text).toMatch(/Confirmed/);
+    expect(confidenceLabel({ check_id: 'SEC-XSS-REFLECTED', confidence: 0.5 }).text).toMatch(/Not confirmed/);
+    expect(confidenceLabel({ check_id: 'SEC-HDR-CSP', confidence: 0.9 })).toBeNull();
   });
 });

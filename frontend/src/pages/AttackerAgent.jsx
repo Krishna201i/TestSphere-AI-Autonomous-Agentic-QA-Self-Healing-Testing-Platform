@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { RadarChart } from '../components/charts';
-import { RADAR_AXES, SEVERITY_ORDER, radarValues, timeAgo, urlError } from '../lib/derive';
+import { RADAR_AXES, SEVERITY_ORDER, confidenceLabel, radarValues, timeAgo, urlError } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
 
 export default function AttackerAgent({ onNavigate }) {
@@ -137,7 +137,13 @@ export default function AttackerAgent({ onNavigate }) {
             <dt>Evidence</dt><dd>{selected.evidence.map((e, i) => <div key={i} className="mono small">{e}</div>)}</dd>
             <dt>Root cause</dt><dd>{selected.root_cause}</dd>
             <dt>Recommendation</dt><dd>{selected.recommendation}</dd>
-            <dt>Confidence</dt><dd>{Math.round(selected.confidence * 100)}%</dd>
+            <dt>Confidence</dt>
+            <dd>
+              {Math.round(selected.confidence * 100)}%
+              {confidenceLabel(selected) && (
+                <span className={`pill ${confidenceLabel(selected).tone} ml-2`}>{confidenceLabel(selected).text}</span>
+              )}
+            </dd>
           </dl>
           <div className="row">
             <button type="button" className="btn btn-primary" onClick={() => { setSelectedKey(selected.key); onNavigate('remediation'); }}>

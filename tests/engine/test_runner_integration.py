@@ -273,7 +273,9 @@ async def test_wait_for_ms(demo_server: str) -> None:
     )
     result = await run_test(plan)
     assert result.status == TestStatus.PASSED
-    assert result.steps[1].duration_ms >= 200
+    # The wait really happened; a timer may wake a millisecond early and the
+    # duration is truncated to whole ms (CI saw 199)
+    assert result.steps[1].duration_ms >= 195
 
 
 async def test_full_dashboard_assertions(demo_server: str) -> None:

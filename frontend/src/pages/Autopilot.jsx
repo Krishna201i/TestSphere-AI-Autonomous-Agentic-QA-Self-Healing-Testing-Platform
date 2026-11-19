@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  CheckCircle2, Circle, Copy, Database, Download, GitBranch, Loader2, MinusCircle, Play, RefreshCw, Rocket, Unplug, X, XCircle, Zap,
+  CheckCircle2, Circle, Copy, Database, Download, GitBranch, Loader2, MinusCircle, Play, RefreshCw, Rocket, ShieldCheck, Unplug, X, XCircle, Zap,
 } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import {
   cancelPipelineRun,
   deployProject,
+  getDomainVerification,
   getPipelineRun,
   getProjectDatabase,
   getRunJunit,
@@ -15,6 +16,7 @@ import {
   runProjectPipeline,
   unlinkProjectDatabase,
   updateProject,
+  verifyDomain,
   webhookUrl,
 } from '../services/api';
 import { ResultBadges, ResultDetail, RunSummary } from '../components/TestResult';
@@ -228,6 +230,66 @@ function CopyField({ label, value }) {
   );
 }
 
+/** Proof the project owns its site: active scans (real attack payloads) need it on a hosted server. */
+function DomainVerification({ project }) {
+  const [info, setInfo] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [message, setMessage] = useState(null);
+
+  useEffect(() => {
+    if (!project.app_url) return;
+    getDomainVerification(project.id).then(setInfo).catch((err) => setError(err.message));
+  }, [project.id, project.app_url]);
+
+  async function verify() {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await verifyDomain(project.id);
+      setInfo(result);
+      setMessage(result.message);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!project.app_url) return null;
+  const verified = info?.verified_at && info.verified_host === info.host;
+  return (
+    <div className="form-stack">
+      <h4 className="section-title"><ShieldCheck size={14} className="icon-inline" /> Domain verification</h4>
+      {verified ? (
+        <div className="small">
+          <span className="pill green">Verified</span>{' '}
+          <b>{info.host}</b> <span className="muted">· {timeAgo(info.verified_at)}, valid {info.valid_days} days</span>
+        </div>
+      ) : (
+        <p className="hint m-0">
+          Active scans send real attack payloads, so they only run against a site you prove is yours: publish this token
+          as a file at the address below, then verify.
+        </p>
+      )}
+      {info && (
+        <>
+          <CopyField label="Token (the file's content)" value={info.token} />
+          <CopyField label="Publish it at" value={info.file_url || ''} />
+        </>
+      )}
+      <div>
+        <button type="button" className="btn btn-sm" disabled={busy || !info} onClick={verify}>
+          {busy ? 'Checking…' : verified ? 'Verify again' : 'Verify'}
+        </button>
+      </div>
+      {message && <div className="small" role="status">{message}</div>}
+      {error && <div className="error-text" role="alert">{error}</div>}
+    </div>
+  );
+}
+
 /** The app's database as a read-only input: runs report what the tests changed in it. */
 function ProjectDatabase({ project, onChanged }) {
   const [info, setInfo] = useState(null);
@@ -379,7 +441,8 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                   <label className="check">
                     <input type="checkbox" checked={form.active_scan}
                       onChange={(e) => setForm({ ...form, active_scan: e.target.checked })} />
-                    Active security scan (sends test attacks — reflected XSS, SQL injection, open redirect; only for apps you own, and only where the server enables it)
+                    Active security scan (sends test attacks — reflected XSS, SQL injection, open redirect; only for apps you own,
+                    only where the server enables it, and once the domain is verified below)
                   </label>
                   <label className="field">
                     Chat alerts (Slack, Discord, Google Chat or Teams webhook URL)
@@ -424,6 +487,7 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                   <CopyField label="GitLab URL" value={webhookUrl(project.id, 'gitlab')} />
                   <div><button type="button" className="btn btn-sm" disabled={busy} onClick={() => act(() => rotateWebhookSecret(project.id))}><RefreshCw size={13} /> New secret</button></div>
                   <ProjectDatabase project={project} onChanged={onChanged} />
+                  <DomainVerification project={project} />
                 </div>
               </div>
             )}

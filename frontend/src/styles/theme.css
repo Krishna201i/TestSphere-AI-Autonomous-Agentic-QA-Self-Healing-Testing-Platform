@@ -203,6 +203,7 @@ h1, h2, h3, h4 { line-height: var(--lh-tight); }
 .m-0 { margin: 0; }
 .mt-2 { margin-top: var(--s-2); }
 .mt-3 { margin-top: var(--s-3); }
+.ml-2 { margin-left: var(--s-2); }
 .stack { display: flex; flex-direction: column; gap: var(--s-3); min-width: 0; }
 .stack-sm { display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; }
 .stack-lg { display: flex; flex-direction: column; gap: var(--s-4); min-width: 0; }

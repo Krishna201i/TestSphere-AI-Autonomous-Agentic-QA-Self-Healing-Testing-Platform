@@ -7,13 +7,23 @@ export const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
 const SEVERITY_WEIGHT = { critical: 1, high: 0.8, medium: 0.5, low: 0.25, info: 0.1 };
 
 export const RADAR_AXES = [
-  { id: 'headers', label: 'Headers', checks: ['SEC-HDR-CSP', 'SEC-HDR-FRAME', 'SEC-HDR-XCTO', 'SEC-HDR-REFERRER'] },
+  { id: 'headers', label: 'Headers', checks: ['SEC-HDR-CSP', 'SEC-CSP-WEAK', 'SEC-HDR-FRAME', 'SEC-HDR-XCTO', 'SEC-HDR-REFERRER'] },
   { id: 'transport', label: 'Transport', checks: ['SEC-HDR-HSTS', 'SEC-TRANSPORT-HTTP'] },
-  { id: 'cookies', label: 'Cookies', checks: ['SEC-COOKIE-FLAGS'] },
+  { id: 'cookies', label: 'Cookies', checks: ['SEC-COOKIE-FLAGS', 'SEC-COOKIE-SAMESITE-NONE'] },
   { id: 'cors', label: 'CORS', checks: ['SEC-CORS'] },
-  { id: 'disclosure', label: 'Disclosure', checks: ['SEC-DISCLOSURE'] },
-  { id: 'content', label: 'Content', checks: ['SEC-MIXED-CONTENT', 'SEC-FORM-PASSWORD'] },
+  { id: 'disclosure', label: 'Disclosure',
+    checks: ['SEC-DISCLOSURE', 'SEC-ERROR-DISCLOSURE', 'SEC-DIR-LISTING', 'SEC-EXPOSED-GIT', 'SEC-EXPOSED-ENV'] },
+  { id: 'content', label: 'Content', checks: ['SEC-MIXED-CONTENT', 'SEC-FORM-PASSWORD', 'SEC-CSRF'] },
+  { id: 'injection', label: 'Injection', checks: ['SEC-XSS-REFLECTED', 'SEC-SQLI-ERROR', 'SEC-OPEN-REDIRECT'] },
 ];
+
+/** How sure a finding is, as a reviewer reads it: proven in a real browser, or worth a manual look. */
+export function confidenceLabel(finding) {
+  if (!finding) return null;
+  if (finding.confidence >= 1 && finding.check_id === 'SEC-XSS-REFLECTED') return { text: 'Confirmed in a real browser', tone: 'green' };
+  if (finding.confidence <= 0.5) return { text: 'Not confirmed — check by hand', tone: 'orange' };
+  return null;
+}
 
 /** Exposure per radar axis in [0, 1] (severity-weighted, saturating). */
 export function radarValues(findings = []) {
