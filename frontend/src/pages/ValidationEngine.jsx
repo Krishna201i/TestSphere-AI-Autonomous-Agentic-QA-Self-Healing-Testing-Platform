@@ -1,12 +1,16 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useWorkspace } from '../state/Workspace';
 import { executionStats, pct, retestStats, timeAgo } from '../lib/derive';
 import { HealthBox, ResultTiles } from '../components/ValidationCard';
 import Deployments from '../components/Deployments';
+import Pager from '../components/Pager';
+import { usePaged } from '../lib/usePaged';
 
 export default function ValidationEngine({ onNavigate }) {
   const { executions, executionTotals, testCases, findings, retests, retest, retesting } = useWorkspace();
   const ex = executionStats(executions, executionTotals);
+  const newestFirst = useMemo(() => [...executions].reverse(), [executions]);
+  const execPage = usePaged(newestFirst, 15);
   const rt = retestStats(retests);
   const nameOf = (id) => testCases.find((t) => t.id === id)?.name || `Test case #${id}`;
   // Approved fixes are listed before their first retest, so they can get one
@@ -83,13 +87,13 @@ export default function ValidationEngine({ onNavigate }) {
       </section>
 
       <section className="card">
-        <div className="card-head"><h3>Test executions</h3><span className="muted small">{executions.length > 50 ? `latest 50 of ${ex.total} finished` : executions.length}</span></div>
+        <div className="card-head"><h3>Test executions</h3><span className="muted small">{executions.length}</span></div>
         {executions.length === 0 ? <div className="empty">No executions yet.</div> : (
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>#</th><th>Test case</th><th>Status</th><th>Duration</th><th>Detail</th><th>When</th></tr></thead>
               <tbody>
-                {[...executions].reverse().slice(0, 50).map((e) => (
+                {execPage.items.map((e) => (
                   <tr key={e.id}>
                     <td>{e.id}</td>
                     <td className="cell-wrap">{nameOf(e.test_case_id)}</td>
@@ -103,6 +107,7 @@ export default function ValidationEngine({ onNavigate }) {
             </table>
           </div>
         )}
+        <Pager paged={execPage} label="executions" />
       </section>
     </div>
   );

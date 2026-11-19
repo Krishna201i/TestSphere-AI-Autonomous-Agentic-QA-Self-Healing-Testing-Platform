@@ -4,6 +4,8 @@ import { ApprovalControls, DiffView } from '../components/RemediationCard';
 import FixPatchCard from '../components/FixPatch';
 import { timeAgo } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
+import Pager from '../components/Pager';
+import { usePaged } from '../lib/usePaged';
 
 function proposalState(f, approvals, retests) {
   if (retests[f.key]?.result === 'pass') return ['resolved', 'Resolved'];
@@ -36,6 +38,8 @@ function LocatorHealing() {
   const { lastRun, executions } = useWorkspace();
   const healedSteps = (lastRun?.engine_steps || []).filter((s) => s.healing);
   const healedRuns = executions.filter((e) => e.status === 'HEALED').slice(-8).reverse();
+  // Each healed step is a tall box (its candidates table): a few per page
+  const stepPage = usePaged(healedSteps, 3);
 
   return (
     <section className="card">
@@ -46,7 +50,7 @@ function LocatorHealing() {
       {healedSteps.length === 0 && healedRuns.length === 0 && (
         <div className="empty">No healing activity yet. Heals appear when a test's locator breaks and the engine repairs it.</div>
       )}
-      {healedSteps.map((s) => (
+      {stepPage.items.map((s) => (
         <div key={s.step_id} className="subbox">
           <div className="approve-row">
             <span className="title">{lastRun.label} · step {s.step_id}</span>
@@ -75,6 +79,7 @@ function LocatorHealing() {
           )}
         </div>
       ))}
+      <Pager paged={stepPage} label="healed steps" />
       {healedRuns.length > 0 && (
         <div className="table-wrap">
           <table className="table">
@@ -95,6 +100,7 @@ export default function RemediationBridge({ onNavigate }) {
   const { lastScan, selectedKey, setSelectedKey, approvals, retests } = useWorkspace();
   const findings = lastScan?.findings || [];
   const selected = findings.find((f) => f.key === selectedKey) || findings.find((f) => f.remediation?.kind === 'header') || findings[0];
+  const proposalPage = usePaged(findings, 10);
 
   return (
     <div className="page">
@@ -120,7 +126,7 @@ export default function RemediationBridge({ onNavigate }) {
             <div className="table-wrap">
               <table className="table">
                 <tbody>
-                  {findings.map((f) => {
+                  {proposalPage.items.map((f) => {
                     const [cls, label] = proposalState(f, approvals, retests);
                     return (
                       <tr key={f.key} className={`selectable ${selected?.key === f.key ? 'selected' : ''}`} {...selectableRow(() => setSelectedKey(f.key), selected?.key === f.key)}>
@@ -133,6 +139,7 @@ export default function RemediationBridge({ onNavigate }) {
                 </tbody>
               </table>
             </div>
+            <Pager paged={proposalPage} label="proposals" />
           </section>
 
           {selected && (

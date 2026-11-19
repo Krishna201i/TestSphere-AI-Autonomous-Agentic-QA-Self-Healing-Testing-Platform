@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Play } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { loopModel, timeAgo, toDate, urlError } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
 import LoopPanel from '../components/PipelineLoop';
 import CodebaseIngestion from '../components/CodebaseIngestion';
+import Pager from '../components/Pager';
+import { usePaged } from '../lib/usePaged';
 
 const BUILT_LABEL = { built: 'Built', partial: 'Partly built', planned: 'Planned' };
 const BUILT_TONE = { built: 'green', partial: 'orange', planned: 'gray' };
@@ -67,6 +69,8 @@ function RunQA() {
 
 function LastRun() {
   const { lastRun } = useWorkspace();
+  const stepPage = usePaged(lastRun?.engine_steps, 10);
+  const eventPage = usePaged(lastRun?.events, 10);
   if (!lastRun) return null;
   const steps = lastRun.engine_steps || [];
   return (
@@ -84,7 +88,7 @@ function LastRun() {
               <table className="table">
                 <thead><tr><th>Step</th><th>Status</th><th>Locator</th><th>ms</th></tr></thead>
                 <tbody>
-                  {steps.map((s) => (
+                  {stepPage.items.map((s) => (
                     <tr key={s.step_id}>
                       <td className="small">{s.step_id}</td>
                       <td><span className={`status ${STEP_STATUS[s.status] || ''}`}>{s.status}</span></td>
@@ -96,13 +100,14 @@ function LastRun() {
               </table>
             </div>
           )}
+          <Pager paged={stepPage} label="steps" />
         </div>
         <div>
           <h4 className="section-title">Agent events</h4>
           {(lastRun.events || []).length === 0 ? <div className="empty">No agent events.</div> : (
             <ul className="timeline">
-              {lastRun.events.map((ev, i) => (
-                <li key={i}>
+              {eventPage.items.map((ev, i) => (
+                <li key={`${eventPage.from}-${i}`}>
                   <span className="when">{toDate(ev.timestamp).toLocaleTimeString()}</span>
                   <span className="mark info" />
                   <span><span className="kind">{ev.event_type}</span>{ev.message}</span>
@@ -110,6 +115,7 @@ function LastRun() {
               ))}
             </ul>
           )}
+          <Pager paged={eventPage} label="events" />
         </div>
       </div>
     </section>
@@ -122,6 +128,7 @@ function Targets() {
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const projectName = (id) => projects.find((p) => p.id === id)?.name || `#${id}`;
+  const paged = usePaged(applications, 8);
 
   async function onAdd(e) {
     e.preventDefault();
@@ -146,13 +153,14 @@ function Targets() {
           <table className="table">
             <thead><tr><th>Application</th><th>URL</th><th>Project</th></tr></thead>
             <tbody>
-              {applications.map((a) => (
+              {paged.items.map((a) => (
                 <tr key={a.id}><td>{a.name}</td><td className="mono small cell-wrap">{a.base_url}</td><td className="small">{projectName(a.project_id)}</td></tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+      <Pager paged={paged} label="targets" />
       <form className="form-row" onSubmit={onAdd}>
         <input className="input" value={form.projectName} onChange={(e) => setForm({ ...form, projectName: e.target.value })} placeholder="Project" required aria-label="Project name" />
         <input className="input" value={form.appName} onChange={(e) => setForm({ ...form, appName: e.target.value })} placeholder="Application name" required aria-label="Application name" />
@@ -167,6 +175,8 @@ function Targets() {
 function TestCases() {
   const { testCases, executions, runPipeline, running } = useWorkspace();
   const latest = (id) => executions.filter((e) => e.test_case_id === id).at(-1);
+  const newestFirst = useMemo(() => [...testCases].reverse(), [testCases]);
+  const paged = usePaged(newestFirst, 10);
   return (
     <section className="card">
       <div className="card-head"><h3>Test cases</h3><span className="muted small">{testCases.length}</span></div>
@@ -175,7 +185,7 @@ function TestCases() {
           <table className="table">
             <thead><tr><th>Name</th><th>Last result</th><th /></tr></thead>
             <tbody>
-              {[...testCases].reverse().map((tc) => {
+              {paged.items.map((tc) => {
                 const ex = latest(tc.id);
                 return (
                   <tr key={tc.id}>
@@ -194,6 +204,7 @@ function TestCases() {
           </table>
         </div>
       )}
+      <Pager paged={paged} label="test cases" />
     </section>
   );
 }

@@ -3,6 +3,8 @@ import { Search } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { toDate } from '../lib/derive';
 import usePersistentState from '../lib/usePersistentState';
+import { usePaged } from '../lib/usePaged';
+import Pager from '../components/Pager';
 
 // Shown first when present; any other kind the server records follows
 const COMMON_KINDS = ['scan', 'approval', 'retest', 'qa', 'pipeline', 'deploy', 'execution'];
@@ -46,6 +48,8 @@ export default function AuditLogs({ params }) {
   const q = query.trim().toLowerCase();
   const shown = entries.filter((e) => (kind === 'all' || e.kind === kind)
     && (!q || `${e.actor || ''} ${e.message}`.toLowerCase().includes(q)));
+  // A page at a time (it used to stop silently after 300 entries)
+  const paged = usePaged(shown, 25);
 
   function exportJson() {
     const blob = new Blob([JSON.stringify(shown, null, 2)], { type: 'application/json' });
@@ -81,7 +85,7 @@ export default function AuditLogs({ params }) {
         <div className="muted small">{shown.length} of {entries.length} entries</div>
         {shown.length === 0 ? <div className="empty">Nothing matches.</div> : (
           <ul className="timeline">
-            {shown.slice(0, 300).map((e) => (
+            {paged.items.map((e) => (
               <li key={e.id}>
                 <span className="when" title={toDate(e.at).toLocaleString()}>
                   {toDate(e.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}<br />{toDate(e.at).toLocaleTimeString()}
@@ -92,6 +96,7 @@ export default function AuditLogs({ params }) {
             ))}
           </ul>
         )}
+        <Pager paged={paged} label="entries" />
       </section>
     </div>
   );

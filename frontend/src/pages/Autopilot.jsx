@@ -22,6 +22,8 @@ import {
 import { ResultBadges, ResultDetail, RunSummary } from '../components/TestResult';
 import { timeAgo, timeUntil, urlError } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
+import { usePaged } from '../lib/usePaged';
+import Pager from '../components/Pager';
 
 const SCHEDULES = [
   [null, 'Off'], [15, 'Every 15 min'], [30, 'Every 30 min'], [60, 'Hourly'], [180, 'Every 3 hours'],
@@ -96,6 +98,7 @@ function QuickRun({ onStarted }) {
 }
 
 function RunDetail({ run, onOpen, onClear, onCancelled }) {
+  const testPage = usePaged(run?.tests, 10);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState(null);
 
@@ -200,7 +203,7 @@ function RunDetail({ run, onOpen, onClear, onCancelled }) {
           <table className="table">
             <thead><tr><th>Test</th><th>Result</th><th>Details</th></tr></thead>
             <tbody>
-              {run.tests.map((t) => (
+              {testPage.items.map((t) => (
                 <tr key={t.execution_id} className="selectable" {...selectableRow(() => onOpen(run.id, t.execution_id), false)}>
                   <td className="cell-name">{t.name}<div className="small muted">{t.category || 'saved'} · execution #{t.execution_id}</div></td>
                   <td><ResultBadges test={t} /></td>
@@ -209,6 +212,7 @@ function RunDetail({ run, onOpen, onClear, onCancelled }) {
               ))}
             </tbody>
           </table>
+          <Pager paged={testPage} label="tests" />
         </div>
       )}
     </section>
@@ -588,6 +592,8 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
 export default function Autopilot({ onNavigate }) {
   const { projects, refresh, system, pipelineRuns, refreshRuns, refreshDeployments } = useWorkspace();
   const runs = pipelineRuns || [];
+  const projectPage = usePaged(projects, 8);
+  const runPage = usePaged(runs, 10);
   const [selectedId, setSelectedId] = useState(null);
   const [older, setOlder] = useState(null); // a run past the list's newest 40
 
@@ -639,7 +645,7 @@ export default function Autopilot({ onNavigate }) {
             <table className="table">
               <thead><tr><th>Project</th><th>Schedule</th><th>Last run</th><th /></tr></thead>
               <tbody>
-                {projects.map((p) => (
+                {projectPage.items.map((p) => (
                   <ProjectRow key={p.id} project={p} latest={latestByProject[p.id]} onRun={started} onChanged={refresh}
                     onDeployed={() => { refreshDeployments(); onNavigate('validation'); }} />
                 ))}
@@ -647,6 +653,7 @@ export default function Autopilot({ onNavigate }) {
             </table>
           </div>
         )}
+        <Pager paged={projectPage} label="projects" />
       </section>
 
       <section className="card">
@@ -656,7 +663,7 @@ export default function Autopilot({ onNavigate }) {
             <table className="table">
               <thead><tr><th>Run</th><th>Project</th><th>Trigger</th><th>Status</th><th>Result</th><th>When</th></tr></thead>
               <tbody>
-                {runs.map((r) => (
+                {runPage.items.map((r) => (
                   <tr key={r.id} className={`selectable ${r.id === shownId ? 'selected' : ''}`} {...selectableRow(() => setSelectedId(r.id), r.id === shownId)}>
                     <td>#{r.id}</td>
                     <td className="cell-wrap">{r.project_name}</td>
@@ -670,6 +677,7 @@ export default function Autopilot({ onNavigate }) {
             </table>
           </div>
         )}
+        <Pager paged={runPage} label="runs" />
       </section>
     </div>
   );

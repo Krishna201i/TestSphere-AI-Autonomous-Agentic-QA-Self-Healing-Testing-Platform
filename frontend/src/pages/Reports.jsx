@@ -6,6 +6,8 @@ import { ResultBadges, ResultDetail, RunSummary } from '../components/TestResult
 import { SEVERITY_ORDER, formatDuration, groupedResults, resultLabel, testDetail, timeAgo, toDate } from '../lib/derive';
 import { RunStatus } from './Autopilot';
 import usePersistentState from '../lib/usePersistentState';
+import { usePaged } from '../lib/usePaged';
+import Pager from '../components/Pager';
 
 const PERIODS = [['7', 'Last 7 days'], ['30', 'Last 30 days'], ['all', 'All time']];
 const FINISHED = ['passed', 'failed'];
@@ -292,6 +294,9 @@ export default function Reports({ onNavigate }) {
   }, [runs, project, period, findings]);
 
   const open = data.scopedFindings.filter((f) => f.status === 'open');
+  // On screen a page at a time; printed (and in the PDF) every row
+  const regressionPage = usePaged(data.regressions, 10);
+  const findingPage = usePaged(open, 10);
   const bySeverity = SEVERITY_ORDER.map((s) => [s, open.filter((f) => f.severity === s).length]).filter(([, n]) => n);
   const awaitingRetest = open.filter((f) => f.approved_by && f.retest_result !== 'pass').length;
   const resolved = data.scopedFindings.filter((f) => f.status === 'resolved').length;
@@ -403,8 +408,8 @@ export default function Reports({ onNavigate }) {
               <div className="card-head"><h3>Regressions</h3><span className="muted small">{data.regressions.length}</span></div>
               {data.regressions.length === 0 ? <div className="empty">Nothing got worse between runs.</div> : (
                 <ul className="timeline">
-                  {data.regressions.slice(0, 50).map((g, i) => (
-                    <li key={i}>
+                  {data.regressions.map((g, i) => (
+                    <li key={i} className={regressionPage.isShown(i) ? '' : 'print-only-row'}>
                       <span className="when">Run #{g.run.id}<br />{timeAgo(g.run.finished_at)}</span>
                       <span className="mark error" />
                       <span className="cell-wrap"><span className="kind">{g.kind} · {g.run.project_name}</span>{g.name}: {g.was} → <b>{g.now}</b>{g.error ? <div className="small muted">{g.error.split('\n')[0]}</div> : null}</span>
@@ -412,6 +417,7 @@ export default function Reports({ onNavigate }) {
                   ))}
                 </ul>
               )}
+              <Pager paged={regressionPage} label="regressions" />
             </section>
 
             <section className="card">
@@ -425,8 +431,8 @@ export default function Reports({ onNavigate }) {
                   <table className="table">
                     <thead><tr><th>Severity</th><th>Finding</th><th>Target</th><th>Seen</th></tr></thead>
                     <tbody>
-                      {open.slice(0, 12).map((f) => (
-                        <tr key={f.key}>
+                      {open.map((f, i) => (
+                        <tr key={f.key} className={findingPage.isShown(i) ? '' : 'print-only-row'}>
                           <td><span className={`sev ${f.severity}`}>{f.severity}</span></td>
                           <td className="cell-wrap">{f.title}</td>
                           <td className="mono small cell-wrap">{hostOf(f.target_url) || f.target_url}</td>
@@ -435,6 +441,7 @@ export default function Reports({ onNavigate }) {
                       ))}
                     </tbody>
                   </table>
+                  <Pager paged={findingPage} label="open findings" />
                 </div>
               )}
               <button type="button" className="btn btn-sm no-print self-start" onClick={() => onNavigate('security')}>Open Security</button>

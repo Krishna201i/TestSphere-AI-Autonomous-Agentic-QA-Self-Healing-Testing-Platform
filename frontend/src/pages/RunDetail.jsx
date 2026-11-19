@@ -18,6 +18,8 @@ import { selectableRow } from '../lib/a11y';
 import { Skeleton } from '../components/charts';
 import { Diagnosis, RunSummary } from '../components/TestResult';
 import ShareReport from '../components/ShareReport';
+import Pager from '../components/Pager';
+import { usePaged } from '../lib/usePaged';
 import { RunStatus, StageIcon } from './Autopilot';
 
 const ACTIVE = ['queued', 'running'];
@@ -283,6 +285,13 @@ export default function RunDetail({ params, onNavigate }) {
   }
   const [notice, setNotice] = useState(null); // e.g. a download that failed
   const selectedExec = Number(execParam) || null;
+  const testPage = usePaged(run?.tests, 15);
+  const selectedIndex = (run?.tests || []).findIndex((t) => t.execution_id === selectedExec);
+  const { setPage: setTestPage } = testPage;
+  // An opened test (a link, a run card) is always on the page shown
+  useEffect(() => {
+    if (selectedIndex >= 0) setTestPage(Math.floor(selectedIndex / 15) + 1);
+  }, [selectedIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let alive = true;
@@ -422,7 +431,7 @@ export default function RunDetail({ params, onNavigate }) {
               <table className="table">
                 <thead><tr><th>Test</th><th>Result</th>{!selected && <th>Details</th>}</tr></thead>
                 <tbody>
-                  {withState.map((t) => (
+                  {withState.slice(testPage.from - 1, testPage.to).map((t) => (
                     <tr key={t.execution_id} className={`selectable ${t.execution_id === selectedExec ? 'selected' : ''}`}
                       {...selectableRow(() => open(t.execution_id === selectedExec ? null : t.execution_id), t.execution_id === selectedExec)}>
                       <td className="cell-wrap">{t.name}<div className="small muted">{t.category || 'saved'} · #{t.execution_id}</div></td>
@@ -439,6 +448,7 @@ export default function RunDetail({ params, onNavigate }) {
                   ))}
                 </tbody>
               </table>
+              <Pager paged={testPage} label="tests" />
             </div>
           )}
         </section>

@@ -204,6 +204,7 @@ h1, h2, h3, h4 { line-height: var(--lh-tight); }
 .mt-2 { margin-top: var(--s-2); }
 .mt-3 { margin-top: var(--s-3); }
 .ml-2 { margin-left: var(--s-2); }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); flex-wrap: wrap; margin-top: var(--s-3); padding-top: var(--s-2); border-top: 1px solid var(--border); }
 fieldset { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--s-3) var(--s-4); }
 legend { padding: 0 var(--s-1); }
 .stack { display: flex; flex-direction: column; gap: var(--s-3); min-width: 0; }
@@ -911,6 +912,7 @@ details > ul { margin-top: var(--s-2); }
 .area-pass { fill: var(--success); opacity: 0.1; }
 .dot-pass { fill: var(--success); stroke: var(--surface); stroke-width: 2; }
 .print-only { display: none; }
+.print-only-row { display: none; }
 
 /* ── Skeletons & motion ──────────────────────────────────── */
 .skeleton {
@@ -958,6 +960,9 @@ details > ul { margin-top: var(--s-2); }
   .cell-clamp { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
   /* The PDF has every filtered run (not only those shown), each from a new page */
   .print-only-block { display: flex; }
+  /* Paged lists print whole: every row, no pager */
+  .print-only-row { display: revert; }
+  .pager { display: none; }
   .report-run { break-before: page; }
   .table tr { break-inside: avoid; }
   .report-group-title { break-after: avoid; }

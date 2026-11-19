@@ -4,6 +4,8 @@ import { useWorkspace } from '../state/Workspace';
 import { RadarChart } from '../components/charts';
 import { RADAR_AXES, SEVERITY_ORDER, confidenceLabel, radarValues, timeAgo, urlError } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
+import Pager from '../components/Pager';
+import { usePaged } from '../lib/usePaged';
 
 export default function AttackerAgent({ onNavigate }) {
   const ws = useWorkspace();
@@ -15,6 +17,7 @@ export default function AttackerAgent({ onNavigate }) {
 
   const findings = lastScan?.findings || [];
   const selected = findings.find((f) => f.key === selectedKey) || findings[0] || null;
+  const findingPage = usePaged(findings, 10);
 
   async function onScan(e) {
     e.preventDefault();
@@ -91,7 +94,7 @@ export default function AttackerAgent({ onNavigate }) {
               <table className="table">
                 <thead><tr><th>Severity</th><th>Check</th><th>Finding</th><th>Retest</th></tr></thead>
                 <tbody>
-                  {findings.map((f) => (
+                  {findingPage.items.map((f) => (
                     <tr key={f.key} className={`selectable ${selected?.key === f.key ? 'selected' : ''}`} {...selectableRow(() => setSelectedKey(f.key), selected?.key === f.key)}>
                       <td><span className={`sev ${f.severity}`}>{f.severity}</span></td>
                       <td className="mono small">{f.check_id}</td>
@@ -101,6 +104,7 @@ export default function AttackerAgent({ onNavigate }) {
                   ))}
                 </tbody>
               </table>
+              <Pager paged={findingPage} label="findings" />
             </div>
           )}
         </section>
