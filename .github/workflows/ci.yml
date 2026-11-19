@@ -85,7 +85,9 @@ jobs:
   engine-browsers:
     name: Engine (${{ matrix.browser }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Installing WebKit's ~190 system packages has taken 17 minutes on a slow
+    # Ubuntu mirror; the tests themselves take about 5
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
