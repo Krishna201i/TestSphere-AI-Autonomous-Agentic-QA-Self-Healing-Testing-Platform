@@ -53,7 +53,7 @@ and a dashboard that shows the loop live.
 | **Security and robustness** — SSRF, access control, input limits, webhook signatures, rate limits | 52 of 52 checks pass |
 | **Load** — one API worker, [details](docs/load-test.md) | ~600–700 requests/s from 1 to 100 concurrent clients (p95 250 ms, no errors); 8 pipeline runs at once finish in 27 s at ~460 MB |
 | **Accessibility** | WCAG 2.1 AA (axe) on every dashboard page, light and dark |
-| **Automated tests** | 1,550+ backend, engine and end-to-end tests, plus frontend unit tests, in CI |
+| **Automated tests** | 1,900+ backend, engine and end-to-end tests, plus frontend unit tests, in CI; the healing benchmark gates every change (any false heal fails the build), and the AI layer is covered end to end: no false heal through the AI healer, no harm from a page's injected instructions |
 
 ---
 
