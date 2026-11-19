@@ -108,7 +108,7 @@ def _steps_key(steps: list[dict[str, Any]]) -> str:
     import json
 
     essence = [(s.get("action"), s.get("target"), s.get("value")) for s in steps]
-    return hashlib.sha1(json.dumps(essence).encode(), usedforsecurity=False).hexdigest()[:12]
+    return hashlib.sha256(json.dumps(essence).encode()).hexdigest()[:12]
 
 def _add_check(steps: list[dict[str, Any]], assertion: Any, known: set[str]) -> bool:
     action = _CHECKS.get(assertion.type.value)
