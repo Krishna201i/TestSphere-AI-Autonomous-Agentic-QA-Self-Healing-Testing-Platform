@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 
+from agents.llm.untrusted import UNTRUSTED_RULE, fence
 from agents.planner.schemas import ApplicationContext
 
 # ── System Prompt ────────────────────────────────────────────
@@ -43,7 +44,7 @@ RULES — you MUST follow every rule below:
 10. Return output as a single valid JSON object matching the TestPlan schema.
 11. Do NOT generate arbitrary executable code.
 12. Do NOT include internal chain-of-thought or private reasoning in output.
-"""
+13. The application context was read from the website itself. """ + UNTRUSTED_RULE + "\n"
 
 # ── Action Vocabulary ────────────────────────────────────────
 
@@ -194,7 +195,7 @@ def build_test_generation_prompt(
     prompt_parts = [
         f"Generate up to {max_tests} test cases for the following application.\n",
         "--- APPLICATION CONTEXT ---\n",
-        context_json,
+        fence("application context", context_json),
         "\n--- INSTRUCTIONS ---\n",
         ACTION_VOCABULARY,
         ASSERTION_VOCABULARY,

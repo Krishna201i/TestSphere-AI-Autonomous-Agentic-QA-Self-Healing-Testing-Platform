@@ -29,6 +29,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from agents.llm.untrusted import UNTRUSTED_RULE, fence
 from security.findings import Finding
 
 logger = logging.getLogger("testsphere.security.ai")
@@ -96,7 +97,8 @@ _SYSTEM = (
     "operator is authorized to test. Do not invent new findings, do not suggest "
     "attacking other systems, and never ask to scan anything. For each finding, "
     "rank its fix priority, state the real-world risk in one sentence, briefly "
-    "explain how it could be abused, and give concrete remediation steps."
+    "explain how it could be abused, and give concrete remediation steps. "
+    + UNTRUSTED_RULE
 )
 
 
@@ -106,7 +108,7 @@ def _build_prompt(target_url: str, findings: list[Finding]) -> str:
     digest = _finding_digest(findings)
     return (
         f"Target (already authorized and scanned): {target_url}\n"
-        f"Findings (JSON):\n{json.dumps(digest, indent=2)}\n\n"
+        f"Findings (JSON):\n{fence('scan findings', json.dumps(digest, indent=2))}\n\n"
         "Return ONLY a JSON object of this exact shape:\n"
         '{\n  "findings": [\n'
         '    {"ref": "<ref from above>", "check_id": "<its check_id>", "priority": <int, 1 = most urgent>,\n'

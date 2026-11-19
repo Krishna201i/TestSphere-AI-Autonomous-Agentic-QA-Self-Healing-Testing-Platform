@@ -189,6 +189,7 @@ Every setting, the Dockerfile, the worker, Firestore rules and indexes, and CI a
 - Scanning is scope-limited to an allowlist; testing a site needs its owner's permission. The scanner is passive by default, with opt-in active (DAST) probes behind a server switch.
 - Every outbound request, including everything the test browser loads, goes through an SSRF guard that resolves
   each host once, refuses internal addresses and connects only to the address it checked (no DNS rebinding).
+- Text from the site under test reaches the AI only as fenced, untrusted data, and every action the AI proposes is checked in code (guardrails, selector whitelist, the engine's heal checks, scan scope), so a page that tries to instruct the AI cannot make a run click, type or navigate somewhere harmful.
 - Each user sees only their own data. The privacy notice in the dashboard explains what is stored, and
   *Delete account* erases it together with the sign-in account.
 

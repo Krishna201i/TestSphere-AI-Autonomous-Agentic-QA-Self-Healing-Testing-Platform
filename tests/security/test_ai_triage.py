@@ -128,7 +128,8 @@ async def test_the_most_severe_findings_reach_the_model_when_there_are_too_many(
             return {"findings": []}
 
     await triage("https://app.test/", [*noise, sqli], client=Spy())
-    digest = json.loads(seen["prompt"].split("Findings (JSON):\n", 1)[1].split("\n\nReturn ONLY", 1)[0])
+    fenced = seen["prompt"].split("<<<UNTRUSTED scan findings>>>\n", 1)[1].split("\n<<<END UNTRUSTED>>>", 1)[0]
+    digest = json.loads(fenced)
     assert len(digest) == MAX_FINDINGS
     assert digest[0]["check_id"] == "SEC-SQLI-ERROR"
 

@@ -27,6 +27,7 @@ from agents.explorer import guardrails
 from agents.explorer.page_view import PageView, read_page
 from agents.llm.exceptions import LLMError, LLMResponseError
 from agents.llm.schemas import LLMRequest
+from agents.llm.untrusted import UNTRUSTED_RULE, fence
 
 logger = logging.getLogger("testsphere.explorer")
 
@@ -48,7 +49,8 @@ Rules:
 - When the goal is reached, answer "done" with a "check" that proves it on the current page:
   url_contains with part of the current URL, or text_visible with a short phrase from the visible text.
   Pick something the start page did not already show (not the site's name): it must prove the goal's result.
-- If the goal cannot be reached, answer "give_up" and say why."""
+- If the goal cannot be reached, answer "give_up" and say why.
+- """ + UNTRUSTED_RULE
 
 
 @dataclass
@@ -124,7 +126,7 @@ class GoalExplorer:
         history = "\n".join(notes[-10:]) or "(none yet)"
         values = ", ".join(repr(v) for v in sorted(allowed)) or "(none: do not type anything)"
         prompt = (f"Goal: {goal}\nValues you may type: {values}\n\nActions so far:\n{history}\n\n"
-                  f"Current page:\n{view.describe()}\n\nYour next action (JSON):")
+                  f"Current page:\n{fence('page', view.describe())}\n\nYour next action (JSON):")
         request = LLMRequest(prompt=prompt, system_instruction=SYSTEM, temperature=0.1, max_tokens=400,
                              response_format="json")
         return await asyncio.wait_for(self.llm.generate_json(request), timeout=self.step_timeout)
