@@ -8,8 +8,8 @@ x-testsphere: &testsphere
     context: ../..
     args:
       GIT_COMMIT: ${GIT_COMMIT:-}   # GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
-  # Built here by default; CD (.github/workflows/deploy.yml) sets an ECR image
-  # in this folder's .env and pulls it instead, so nothing builds on the instance
+  # Built here by default; continuous deployment (cd/pull-deploy.sh) sets the
+  # published ghcr.io image in this folder's .env, so nothing builds on the instance
   image: ${TESTSPHERE_IMAGE:-testsphere:latest}
   restart: unless-stopped
   logging: &logging

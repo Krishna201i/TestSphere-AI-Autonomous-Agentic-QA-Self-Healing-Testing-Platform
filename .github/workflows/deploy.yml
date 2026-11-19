@@ -1,11 +1,17 @@
-# Deploys main to the EC2 instance after CI passes: builds the image here,
-# pushes it to ECR, and has the instance pull it over SSM Run Command, so the
-# 2 GB instance never builds. Rollback: run this workflow by hand with an
-# earlier commit; its image is already in ECR.
+# Continuous deployment, pull-based: after CI passes on main this builds the
+# image and publishes it to GitHub's container registry (ghcr.io) as
+# :<commit> and :main.  The EC2 instance pulls it: a systemd timer there
+# (deploy/aws-ec2/cd/pull-deploy.sh) sees the new :main, starts it, waits for
+# /api/health and rolls back to the previous image if it is not healthy.
 #
-# Off until the repository variable DEPLOY_ENABLED is "true". One-time AWS
-# setup (OIDC role, ECR repository, instance permissions):
-# deploy/aws-ec2/README.md, "Continuous deployment".
+# No AWS credentials are stored here or needed: the AWS project's managed
+# policies do not allow GitHub to federate into the account (OIDC), and a
+# long-lived access key would be the weaker alternative.  The repository is
+# public, so the instance pulls without a token.
+#
+# Off until the repository variable DEPLOY_ENABLED is "true".  Rollback: run
+# this workflow by hand with an earlier commit; it re-tags that commit's image
+# as :main and the instance rolls to it.
 name: Deploy
 
 on:
@@ -21,15 +27,15 @@ on:
 
 permissions:
   contents: read
-  id-token: write # GitHub OIDC -> the deploy role; no AWS keys stored here
+  packages: write # publish the image to ghcr.io with the workflow's own token
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: false # never cut a deploy off halfway
+  cancel-in-progress: false # never cut a publish off halfway
 
 jobs:
-  deploy:
-    name: Build, push and roll out
+  publish:
+    name: Build and publish the image
     if: >
       vars.DEPLOY_ENABLED == 'true' &&
       (github.event_name == 'workflow_dispatch' ||
@@ -37,11 +43,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: production
-    env:
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-      INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
-      DOMAIN: ${{ vars.DOMAIN }}
     steps:
       - name: Commit to deploy
         id: commit
@@ -57,83 +58,26 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ steps.commit.outputs.sha }}
-          fetch-depth: 0
 
-      - name: Full and short commit
-        id: rev
-        run: |
-          echo "full=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Build and push the image (skipped when this commit's image exists)
-        id: image
+      - name: Build (or reuse) the commit's image and publish it as :main
         env:
-          SHA: ${{ steps.rev.outputs.full }}
-          SHORT: ${{ steps.rev.outputs.short }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
         run: |
           set -eu
-          registry="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$AWS_REGION.amazonaws.com"
-          image="$registry/$ECR_REPOSITORY:$SHA"
-          echo "image=$image" >> "$GITHUB_OUTPUT"
-          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$SHA" >/dev/null 2>&1; then
-            echo "Image for $SHA already in ECR (rollback or rerun): not rebuilding"
-            exit 0
+          sha=$(git rev-parse HEAD)
+          short=$(git rev-parse --short HEAD)
+          repo="ghcr.io/$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/testsphere"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          if docker pull -q "$repo:$sha" >/dev/null 2>&1; then
+            echo "Image for $sha already published (rollback or rerun): not rebuilding"
+          else
+            docker build --build-arg GIT_COMMIT="$short" \
+              --label org.opencontainers.image.revision="$sha" \
+              --label org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY}" \
+              -t "$repo:$sha" .
+            docker push -q "$repo:$sha"
           fi
-          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
-          docker build --build-arg GIT_COMMIT="$SHORT" -t "$image" .
-          docker push "$image"
-
-      - name: Roll out on the instance (SSM Run Command)
-        env:
-          SHA: ${{ steps.rev.outputs.full }}
-          SHORT: ${{ steps.rev.outputs.short }}
-          IMAGE: ${{ steps.image.outputs.image }}
-        run: |
-          set -eu
-          registry="${IMAGE%%/*}"
-          # The checkout brings the compose file and Caddyfile of the same commit;
-          # TESTSPHERE_IMAGE in the folder's .env keeps manual compose commands on this image
-          script=$(cat <<SCRIPT
-          set -eu
-          cd /opt/testsphere/app
-          git fetch -q origin
-          git checkout -q --detach $SHA
-          cd deploy/aws-ec2
-          touch .env
-          sed -i '/^TESTSPHERE_IMAGE=/d;/^GIT_COMMIT=/d' .env
-          printf 'TESTSPHERE_IMAGE=%s\nGIT_COMMIT=%s\n' '$IMAGE' '$SHORT' >> .env
-          ./fetch-env.sh
-          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $registry
-          docker compose pull api worker
-          docker compose up -d --no-build --remove-orphans
-          docker compose ps
-          SCRIPT
-          )
-          params=$(jq -n --arg s "$script" '{commands: ($s | split("\n")), executionTimeout: ["1200"]}')
-          id=$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name AWS-RunShellScript \
-                 --comment "deploy ${SHA:0:12}" --parameters "$params" --query Command.CommandId --output text)
-          echo "SSM command $id"
-          for i in $(seq 1 120); do
-            status=$(aws ssm get-command-invocation --command-id "$id" --instance-id "$INSTANCE_ID" \
-                       --query Status --output text 2>/dev/null || echo Pending)
-            case "$status" in Pending|InProgress|Delayed) sleep 10 ;; *) break ;; esac
-          done
-          aws ssm get-command-invocation --command-id "$id" --instance-id "$INSTANCE_ID" \
-            --query '[StandardOutputContent, StandardErrorContent]' --output text | tail -40
-          test "$status" = Success || { echo "rollout $status"; exit 1; }
-
-      - name: The new version is healthy
-        run: |
-          set -eu
-          for i in $(seq 1 30); do
-            if curl -sf "https://$DOMAIN/api/health" | grep -q '"status":"ok"'; then echo "healthy"; exit 0; fi
-            sleep 10
-          done
-          echo "https://$DOMAIN/api/health is not ok after 5 minutes."
-          echo "Roll back: run this workflow with the previous commit (its image is in ECR)."
-          exit 1
+          docker tag "$repo:$sha" "$repo:main"
+          docker push -q "$repo:main"
+          echo "Published $repo:main = $sha; the instance picks it up within a few minutes." >> "$GITHUB_STEP_SUMMARY"

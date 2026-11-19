@@ -94,35 +94,29 @@ get-account-plan-state` shows whether the project is on the free or paid plan.
 
 ## Continuous deployment
 
-[`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) deploys `main` after CI passes: it builds the
-image on GitHub's runner, pushes it to ECR tagged with the commit, and has the instance pull and start it over SSM
-Run Command, then waits for `/api/health`. Nothing builds on the instance. It stays off until the repository
-variable `DEPLOY_ENABLED` is `true`. One-time setup (replace `ACCOUNT_ID`, `REGION` and `INSTANCE_ID` in the
-files under [`cd/`](cd/) first):
+Pull-based, so no AWS credentials leave AWS (this AWS project's managed policies do not allow GitHub to
+federate into the account with OIDC, and a long-lived access key in GitHub would be the weaker option):
+
+1. [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) runs after CI passes on `main`. It builds
+   the image and publishes it to GitHub's container registry as `ghcr.io/krishna201i/testsphere:<commit>` and
+   `:main`, with the workflow's own token. Nothing builds on the instance.
+2. On the instance, `testsphere-deploy.timer` runs [`cd/pull-deploy.sh`](cd/pull-deploy.sh) every 2 minutes. When
+   `:main` points at a new image it checks out that commit (for its compose file and Caddyfile), starts it, and waits
+   for `https://$DOMAIN/api/health`. If the new version is not healthy within 5 minutes, it puts the previous image
+   and commit back. Log: `journalctl -u testsphere-deploy`.
+
+It stays off until the repository variable `DEPLOY_ENABLED` is `true`. One-time setup on the instance (as root,
+for example through SSM Run Command):
 
 ```sh
-# Image registry: immutable tags (one per commit), scanned on push, the 20 newest kept
-aws ecr create-repository --repository-name testsphere --image-tag-mutability IMMUTABLE     --image-scanning-configuration scanOnPush=true
-aws ecr put-lifecycle-policy --repository-name testsphere --lifecycle-policy-text file://cd/ecr-lifecycle.json
-
-# GitHub's OIDC provider (once per account) and a deploy role only this repository's
-# "production" environment can assume
-aws iam create-open-id-connect-provider --url https://token.actions.githubusercontent.com     --client-id-list sts.amazonaws.com
-aws iam create-role --role-name testsphere-github-deploy     --assume-role-policy-document file://cd/github-deploy-trust.json
-aws iam put-role-policy --role-name testsphere-github-deploy --policy-name deploy     --policy-document file://cd/github-deploy-policy.json
-
-# The instance role may pull that one repository (ROLE = the instance role's name)
-aws iam put-role-policy --role-name ROLE --policy-name testsphere-ecr-pull     --policy-document file://cd/instance-ecr-pull-policy.json
+git config --global --add safe.directory /opt/testsphere/app
+cd /opt/testsphere/app && git fetch -q origin && git checkout -q --detach origin/main
+install -m 644 deploy/aws-ec2/cd/testsphere-deploy.service deploy/aws-ec2/cd/testsphere-deploy.timer /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now testsphere-deploy.timer
 ```
 
-In GitHub, Settings → Environments, create `production` and limit its deployment branches to `main` (the trust
-policy only accepts that environment). Then add these repository variables (Settings → Secrets and variables →
-Actions → Variables; none is secret): `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, `ECR_REPOSITORY=testsphere`,
-`EC2_INSTANCE_ID`, `DOMAIN`, and last `DEPLOY_ENABLED=true`. Run Command acts as root: if git on the instance
-reports "dubious ownership", run `sudo git config --global --add safe.directory /opt/testsphere/app` once.
-
-**Rollback:** Actions → Deploy → Run workflow with the earlier commit. Its image is still in ECR, so it is only
-pulled, not rebuilt.
+**Rollback:** Actions → Deploy → Run workflow with the earlier commit. Its image is republished as `:main` (not
+rebuilt) and the instance rolls to it within a few minutes.
 
 ## Updating by hand
 
