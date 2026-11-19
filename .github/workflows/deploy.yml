@@ -49,10 +49,13 @@ jobs:
         env:
           INPUT: ${{ inputs.commit }}
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
           sha="${INPUT:-${RUN_SHA:-$GITHUB_SHA}}"
           echo "$sha" | grep -Eq '^[0-9a-f]{7,40}$' || { echo "not a commit: $sha"; exit 1; }
+          # checkout needs the full SHA (a short one is taken for a branch name)
+          sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/$sha" --jq .sha)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
