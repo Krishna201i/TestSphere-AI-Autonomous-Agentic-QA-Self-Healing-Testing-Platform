@@ -462,38 +462,24 @@ class LLMClientSession:
         LLMResponseError
             If the response content is not valid JSON.
         """
-        import json
 
         # Ensure response_format is json
         if request.response_format != "json":
             request = request.model_copy(update={"response_format": "json"})
 
         response = await self.generate(request)
-
-        text = response.content.strip()
-        if not text:
-            raise LLMResponseError(
-                "Cannot parse JSON from empty response.",
-                provider=response.provider,
-            )
-
-        from agents.llm.parser import loads_json_object
-
         try:
-            data = loads_json_object(text)
-        except json.JSONDecodeError as exc:
-            raise LLMResponseError(
-                f"Response is not valid JSON: {exc}",
-                provider=response.provider,
-            ) from exc
-
-        if not isinstance(data, dict):
-            raise LLMResponseError(
-                f"Expected a JSON object, got {type(data).__name__}.",
-                provider=response.provider,
-            )
-
-        return data
+            return _json_object(response)
+        except LLMResponseError as exc:
+            # One more try, telling the model what was wrong: a cut-off answer
+            # (max_tokens) or stray prose often succeeds when asked again
+            why = ("Your answer was cut off before the JSON ended" if response.finish_reason == "length"
+                   else f"Your answer was not one valid JSON object ({str(exc)[:200]})")
+            logger.info("Asking the model again for valid JSON: %s", why)
+            retry = request.model_copy(update={
+                "prompt": f"{request.prompt}\n\n{why}. Answer again with ONLY one complete, valid JSON "
+                          "object (shorter if needed), nothing else."})
+            return _json_object(await self.generate(retry))
 
     async def complete(
         self,
@@ -529,3 +515,21 @@ class LLMClientSession:
         )
         response = await self.generate(request)
         return response.content
+
+
+def _json_object(response) -> dict:
+    """The JSON object in *response* (raises ``LLMResponseError`` otherwise)."""
+    import json
+
+    from agents.llm.parser import loads_json_object
+
+    text = response.content.strip()
+    if not text:
+        raise LLMResponseError("Cannot parse JSON from empty response.", provider=response.provider)
+    try:
+        data = loads_json_object(text)
+    except json.JSONDecodeError as exc:
+        raise LLMResponseError(f"Response is not valid JSON: {exc}", provider=response.provider) from exc
+    if not isinstance(data, dict):
+        raise LLMResponseError(f"Expected a JSON object, got {type(data).__name__}.", provider=response.provider)
+    return data

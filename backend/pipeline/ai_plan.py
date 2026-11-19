@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -95,10 +94,21 @@ def to_suite_tests(cases: list[Any], analysis: dict[str, Any]) -> tuple[list[dic
         if not ok or len(steps) < 2:
             dropped += 1
             continue
-        slug = re.sub(r"[^a-z0-9]+", "-", tc.test_id.lower()).strip("-")[:40] or str(len(kept) + 1)
-        kept.append({"slug": f"ai-{slug}", "name": f"AI: {tc.name}"[:120], "category": "ai", "steps": steps})
+        kept.append({"slug": f"ai-{_steps_key(steps)}", "name": f"AI: {tc.name}"[:120], "category": "ai",
+                     "steps": steps})
     return kept, dropped
 
+
+
+def _steps_key(steps: list[dict[str, Any]]) -> str:
+    """A test's identity: its steps, not the id the model gave it.  The model's
+    ids change from run to run (a new row each time) and get reused for other
+    steps (overwriting a test someone had trusted); the same steps keep one row."""
+    import hashlib
+    import json
+
+    essence = [(s.get("action"), s.get("target"), s.get("value")) for s in steps]
+    return hashlib.sha1(json.dumps(essence).encode(), usedforsecurity=False).hexdigest()[:12]
 
 def _add_check(steps: list[dict[str, Any]], assertion: Any, known: set[str]) -> bool:
     action = _CHECKS.get(assertion.type.value)

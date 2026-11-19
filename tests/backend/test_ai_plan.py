@@ -118,3 +118,17 @@ def test_the_mock_planner_answers_with_its_scenarios(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     tests, note = asyncio.run(ai_plan.ai_tests(ANALYSIS, "log in"))
     assert "skipped" not in (note or ""), note
+
+
+def test_an_ai_test_is_identified_by_its_steps_not_the_models_id():
+    """The model's test ids change between runs (a new row each time) and get reused
+    for other steps (overwriting a test someone had trusted)."""
+    renamed = case("TC_LOGIN_RENAMED", [(TestAction.NAVIGATE, None, URL), (TestAction.FILL, "#user", "ann"),
+                                        (TestAction.FILL, "#pass", "pw"), (TestAction.CLICK, "#go", None)],
+                   LOGIN.assertions)
+    reused = case("TC_LOGIN", [(TestAction.NAVIGATE, None, URL), (TestAction.CLICK, "#go", None)])
+    first, _ = asyncio.run(ai_plan.ai_tests(ANALYSIS, "log in", planner=FakePlanner([LOGIN])))
+    again, _ = asyncio.run(ai_plan.ai_tests(ANALYSIS, "log in", planner=FakePlanner([renamed])))
+    other, _ = asyncio.run(ai_plan.ai_tests(ANALYSIS, "log in", planner=FakePlanner([reused])))
+    assert first[0]["slug"] == again[0]["slug"]   # same steps, new id: same test
+    assert other[0]["slug"] != first[0]["slug"]   # same id, other steps: another test

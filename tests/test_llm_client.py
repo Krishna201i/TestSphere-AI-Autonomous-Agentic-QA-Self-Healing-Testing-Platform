@@ -572,3 +572,48 @@ class TestSecuritySafeguards:
         config = LLMConfig(provider="mock")
         assert config.api_key == ""
         config.validate()  # Should not raise
+
+
+# ── A cut-off or garbled JSON answer is asked for once more ─────
+
+
+class _Scripted:
+    """A session over a provider whose answers are scripted (content, finish_reason)."""
+
+    def __new__(cls, answers):
+        from agents.llm.client import LLMClient, LLMClientSession
+        from agents.llm.config import LLMConfig
+        from agents.llm.schemas import LLMResponse
+
+        prompts = []
+
+        class Provider(LLMClient):
+            async def generate(self, request):
+                prompts.append(request.prompt)
+                content, finish = answers.pop(0)
+                return LLMResponse(content=content, model="m", provider="mock", finish_reason=finish)
+
+        config = LLMConfig(provider="mock", model="m", max_retries=0)
+        session = LLMClientSession(Provider(config), config)
+        session.prompts = prompts
+        return session
+
+
+@pytest.mark.asyncio
+async def test_a_cut_off_json_answer_is_asked_for_again_once():
+    from agents.llm.schemas import LLMRequest
+
+    client = _Scripted([('{"tests": [{"name": "lo', "length"), ('{"tests": []}', "stop")])
+    assert await client.generate_json(LLMRequest(prompt="plan")) == {"tests": []}
+    assert len(client.prompts) == 2 and "cut off before the JSON ended" in client.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_a_second_bad_answer_still_raises():
+    from agents.llm.exceptions import LLMResponseError
+    from agents.llm.schemas import LLMRequest
+
+    client = _Scripted([("not json", "stop"), ("still not json", "stop")])
+    with pytest.raises(LLMResponseError):
+        await client.generate_json(LLMRequest(prompt="plan"))
+    assert len(client.prompts) == 2 and "not one valid JSON object" in client.prompts[1]
