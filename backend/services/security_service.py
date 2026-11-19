@@ -38,7 +38,20 @@ def serialize(row: Record) -> dict[str, Any]:
         "approved_at": row.get("approved_at"),
         "first_seen": row["first_seen"],
         "last_seen": row["last_seen"],
-    }
+    } | ({"ai": row["ai"]} if row.get("ai") else {})
+
+
+def save_ai_insights(db: Store, insights: dict[str, dict[str, Any]], owner_uid: str | None = None) -> int:
+    """Keep the AI triage on each finding (by key), so the findings list and
+    reports show it later; returns how many findings got one."""
+    owner = {"owner_uid": owner_uid} if owner_uid else {}
+    saved = 0
+    for key, insight in insights.items():
+        row = get_finding(db, key, **owner)
+        if row is not None and row.get("ai") != insight:
+            db.update(SECURITY_FINDINGS, row["id"], ai=insight)
+            saved += 1
+    return saved
 
 
 def get_finding(db: Store, key: str, **filters: Any) -> Record | None:

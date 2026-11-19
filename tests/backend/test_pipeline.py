@@ -698,3 +698,19 @@ def test_the_security_stage_scans_the_pages_the_run_reached(fresh_store, stub_ne
     assert targets == {URL, "http://app.test/about"}  # each page's findings are tracked on their own
     stage = next(s for s in fresh_store.find(PIPELINE_RUNS)[0]["stages"] if s["key"] == "security")
     assert stage["detail"].startswith("2 pages scanned")
+
+
+def test_the_pipeline_adds_ai_triage_to_its_findings(fresh_store, stub_network, monkeypatch):
+    from backend.models import PIPELINE_RUNS, SECURITY_FINDINGS
+    from security import ai as security_ai
+    from tests.backend.test_security_api import _fake_triage
+
+    monkeypatch.setattr(security_ai, "enabled", lambda: True)
+    monkeypatch.setattr(security_ai, "triage", _fake_triage)
+    project = make_project(fresh_store)
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+
+    rows = fresh_store.find(SECURITY_FINDINGS)
+    assert rows and all(r.get("ai", {}).get("summary", "").startswith("note:") for r in rows)
+    stage = next(s for s in fresh_store.find(PIPELINE_RUNS)[0]["stages"] if s["key"] == "security")
+    assert "AI triage added" in stage["detail"]

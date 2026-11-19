@@ -672,12 +672,14 @@ def _tested_pages(test_cases: list[Record], app_url: str) -> list[str]:
 async def _stage_security(state: _RunState, app_url: str, owner: str | None, scanner: Any,
                           *, active: bool = False, pages: list[str] | None = None) -> dict[str, Any] | None:
     from backend.api.security import (
+        _attach_ai,
         active_scan_refusal,
         get_active_scanner,
         get_scanner,
         scan_result,
     )
     from security import ActiveScanError, OutOfScopeError, ScanError
+    from security import ai as security_ai
 
     scanner = scanner or get_scanner()
     # Active scanning only when the project asked for it and the server allows it for the owner
@@ -688,6 +690,7 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
     active_scanner = get_active_scanner() if run_active else None
     urls = list(dict.fromkeys([app_url, *(pages or [])]))[: 1 + settings.SECURITY_MAX_PAGES]
     result: dict[str, Any] = {"findings": [], "reopened": [], "resolved": [], "pages": []}
+    found: list[Any] = []  # every page's findings, for AI triage
     skipped = 0
     for url in urls:
         try:
@@ -710,10 +713,16 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
         for key in ("findings", "reopened", "resolved"):
             result[key] += page[key]
         result["pages"].append(url)
+        found += scanner.analyze(snap) + active_findings
     counts = Counter(f["severity"] for f in result["findings"])
     detail = ", ".join(f"{counts[s]} {s}" for s in ("critical", "high", "medium", "low", "info") if counts[s]) or "no findings"
     if len(result["pages"]) > 1:
         detail = f"{len(result['pages'])} pages scanned · {detail}"
+    if found and security_ai.enabled():
+        # Best effort, as in the API: reasons over these findings only, never contacts the site
+        await _attach_ai(result, app_url, found, db=state.db, owner_uid=owner)
+        if result.get("ai_triage"):
+            detail += " · AI triage added"
     if skipped:
         detail += f" · {skipped} page(s) could not be scanned"
     if result["reopened"]:

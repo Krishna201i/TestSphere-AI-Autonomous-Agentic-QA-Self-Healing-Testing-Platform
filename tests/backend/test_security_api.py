@@ -421,3 +421,22 @@ def test_a_hosted_server_never_scans_its_own_internal_ports(monkeypatch) -> None
 def test_a_malformed_port_is_refused_not_a_server_error(client) -> None:
     resp = client.post("/api/security/scan", json={"url": "http://app.test:99999/"})
     assert resp.status_code == 403 and "invalid port" in resp.json()["detail"]
+
+
+async def _fake_triage(url, findings, **kw):
+    from security.ai import AIInsight
+
+    return {f.key: AIInsight(priority=1, summary=f"note:{f.check_id}", explanation="why", remediation="do X")
+            for f in findings}
+
+
+def test_the_ai_triage_is_kept_on_the_findings(client, monkeypatch) -> None:
+    """It was only in the scan's answer: the findings list (and reports) never showed it."""
+    from backend.api import security as sec
+
+    monkeypatch.setattr(sec.security_ai, "enabled", lambda: True)
+    monkeypatch.setattr(sec.security_ai, "triage", _fake_triage)
+    _scan(client)
+
+    listed = client.get("/api/security/findings").json()
+    assert listed and all(f["ai"]["summary"] == f"note:{f['check_id']}" for f in listed)

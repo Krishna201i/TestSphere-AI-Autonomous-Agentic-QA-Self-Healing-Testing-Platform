@@ -167,15 +167,21 @@ async def scan(
     # scope, never contacts the target, and leaves the result untouched on any
     # failure.  analyze() re-runs on the already-fetched snapshot (cheap, no I/O).
     if security_ai.enabled():
-        await _attach_ai(result, req.url, scanner.analyze(snap) + active_findings)
+        await _attach_ai(result, req.url, scanner.analyze(snap) + active_findings,
+                         db=db, owner_uid=None if user.local else user.uid)
     return result
 
 
-async def _attach_ai(result: dict[str, Any], url: str, findings: list[Finding]) -> None:
-    """Annotate each returned finding with the model's triage, in place."""
+async def _attach_ai(result: dict[str, Any], url: str, findings: list[Finding], *,
+                     db: Store | None = None, owner_uid: str | None = None) -> None:
+    """Annotate each returned finding with the model's triage, in place, and
+    keep it on the stored finding (with *db*)."""
     insights = await security_ai.triage(url, findings)
     if not insights:
         return
+    if db is not None:
+        await asyncio.to_thread(store.save_ai_insights, db,
+                                {key: insight.model_dump() for key, insight in insights.items()}, owner_uid)
     for row in result["findings"]:
         insight = insights.get(row.get("key"))
         if insight:
