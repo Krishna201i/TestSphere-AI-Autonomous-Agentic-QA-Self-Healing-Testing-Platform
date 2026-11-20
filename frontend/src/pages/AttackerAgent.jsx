@@ -4,6 +4,7 @@ import { useWorkspace } from '../state/Workspace';
 import { RadarChart } from '../components/charts';
 import { RADAR_AXES, SEVERITY_ORDER, byTier, confidenceLabel, radarValues, tierCounts, timeAgo, urlError } from '../lib/derive';
 import FindingEvidence, { TierPill } from '../components/FindingEvidence';
+import ActiveTargets from '../components/ActiveTargets';
 import { selectableRow } from '../lib/a11y';
 import Pager from '../components/Pager';
 import { usePaged } from '../lib/usePaged';
@@ -34,8 +35,8 @@ export default function AttackerAgent({ onNavigate }) {
     try {
       await runScan(target, active && activeAvailable);
     } catch (err) {
-      setError(err.status === 403
-        ? `${err.message}. Add the host to SECURITY_SCAN_ALLOWED_HOSTS on the backend if you own it.`
+      setError(err.status === 403 && active
+        ? `${err.message} Add and verify the site under Sites for active testing.`
         : err.message);
     }
   }
@@ -79,8 +80,11 @@ export default function AttackerAgent({ onNavigate }) {
         )}
         {error && <div className="error-text">{error}</div>}
         <div className="hint">
-          In scope on this backend: <b>{ws.system?.scan_scope ? ws.system.scan_scope.join(', ') : 'unknown (backend offline or outdated)'}</b>.
-          To scan a site you own or are authorized to test, add its host to <code>SECURITY_SCAN_ALLOWED_HOSTS</code> on the backend and restart it.
+          {ws.system?.passive_any_host
+            ? <>Passive scans work on <b>any public website</b> (one normal page request, no attacks). Active scans run only on sites
+              you own: add and verify them under <b>Sites for active testing</b> below.</>
+            : <>In scope on this backend: <b>{ws.system?.scan_scope ? ws.system.scan_scope.join(', ') : 'unknown (backend offline or outdated)'}</b>.
+              To scan another site you own, add it under <b>Sites for active testing</b> below.</>}
         </div>
       </section>
 
@@ -182,6 +186,12 @@ export default function AttackerAgent({ onNavigate }) {
           </div>
         </section>
       )}
+
+      <ActiveTargets onPick={(site) => {
+        setUrl(`${site}/`);
+        if (activeAvailable) setActive(true);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }} />
     </div>
   );
 }

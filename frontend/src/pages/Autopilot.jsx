@@ -45,7 +45,11 @@ export function RunStatus({ status }) {
 }
 
 function QuickRun({ onStarted }) {
+  const { system } = useWorkspace();
   const [form, setForm] = useState({ url: '', prompt: '', repo_url: '' });
+  // Settings for the project this run creates, so the first run already uses them
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [options, setOptions] = useState({ sign_in_first: false, active_scan: false });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -61,6 +65,7 @@ function QuickRun({ onStarted }) {
     try {
       const run = await quickPipeline({
         url: form.url.trim(), prompt: form.prompt.trim() || null, repo_url: form.repo_url.trim() || null,
+        generation_profile: cleanProfile(profile), sign_in_first: options.sign_in_first, active_scan: options.active_scan,
       });
       onStarted(run);
     } catch (err) {
@@ -90,8 +95,33 @@ function QuickRun({ onStarted }) {
           Git repository (optional)
           <input className="input" value={form.repo_url} onChange={(e) => setForm({ ...form, repo_url: e.target.value })} placeholder="https://github.com/you/app" />
         </label>
-        <button className="btn btn-primary" type="submit" disabled={busy}><Play size={16} /> {busy ? 'Starting…' : 'Run pipeline'}</button>
+        <button className="btn btn-primary" type="submit" disabled={busy || profile.test_types.length === 0}>
+          <Play size={16} /> {busy ? 'Starting…' : 'Run pipeline'}
+        </button>
       </form>
+      <details className="run-settings">
+        <summary>Settings for this run <span className="muted small">(kinds of tests, test data, sign-in, active scan; saved on the project)</span></summary>
+        <div className="grid-2 mt-2">
+          <div className="form-stack">
+            <ProfileFields profile={profile} onChange={setProfile} />
+          </div>
+          <div className="form-stack">
+            <label className="check">
+              <input type="checkbox" checked={options.sign_in_first} onChange={(e) => setOptions({ ...options, sign_in_first: e.target.checked })} />
+              Sign in first: run the goal&apos;s login test, then test linked pages signed in (for example &quot;log in with demo / secret&quot;)
+            </label>
+            {system?.active_scan && (
+              <label className="check">
+                <input type="checkbox" checked={options.active_scan} onChange={(e) => setOptions({ ...options, active_scan: e.target.checked })} />
+                Active security scan: also send test attacks, only to a site you verified under Security → Sites for active testing
+              </label>
+            )}
+            <p className="small muted m-0">
+              These become the project&apos;s settings. Change them later under the project&apos;s Settings below.
+            </p>
+          </div>
+        </div>
+      </details>
       {error && <div className="error-text">{error}</div>}
     </section>
   );
@@ -248,41 +278,15 @@ const DATA_KEYS = [['text', 'Text to type (search term, item)'], ['email', 'Emai
   ['username', 'User name'], ['password', 'Password (never sent to the AI)']];
 const DEFAULT_PROFILE = { test_types: TEST_TYPES.map((t) => t[0]), test_data: {}, max_ai_tests: 5, strict: false, acceptance: true };
 
-/** What the pipeline generates for this project: test types, test data, AI tests, strictness, broken-page check. */
-function GenerationProfile({ project, onChanged }) {
-  const [profile, setProfile] = useState({ ...DEFAULT_PROFILE, ...(project.generation_profile || {}) });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => { setProfile({ ...DEFAULT_PROFILE, ...(project.generation_profile || {}) }); }, [project.id, project.generation_profile]);
-
-  const toggle = (type) => setProfile((p) => ({
-    ...p,
-    test_types: p.test_types.includes(type) ? p.test_types.filter((t) => t !== type) : [...p.test_types, type],
-  }));
-  const setData = (key, value) => setProfile((p) => ({ ...p, test_data: { ...p.test_data, [key]: value } }));
-
-  async function save(e) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const testData = Object.fromEntries(Object.entries(profile.test_data).filter(([, v]) => String(v).trim()));
-      await updateProject(project.id, { generation_profile: { ...profile, test_data: testData } });
-      setSaved(true);
-      onChanged();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
+/** The generation settings as form fields (controlled): kinds of tests, test data, AI tests, strict, broken-page check. */
+function ProfileFields({ profile, onChange }) {
+  const toggle = (type) => onChange({
+    ...profile,
+    test_types: profile.test_types.includes(type) ? profile.test_types.filter((t) => t !== type) : [...profile.test_types, type],
+  });
+  const setData = (key, value) => onChange({ ...profile, test_data: { ...profile.test_data, [key]: value } });
   return (
-    <form className="form-stack" onSubmit={save}>
-      <h4 className="section-title"><ListChecks size={14} className="icon-inline" /> Test generation</h4>
+    <>
       <fieldset className="form-stack m-0">
         <legend className="small"><b>Kinds of tests</b></legend>
         {TEST_TYPES.map(([id, label, hint]) => (
@@ -305,16 +309,55 @@ function GenerationProfile({ project, onChanged }) {
       <label className="field">
         AI-written tests per run (0 = none; used when an AI model is configured)
         <input className="input" type="number" min={0} max={20} value={profile.max_ai_tests}
-          onChange={(e) => setProfile({ ...profile, max_ai_tests: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })} />
+          onChange={(e) => onChange({ ...profile, max_ai_tests: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })} />
       </label>
       <label className="check">
-        <input type="checkbox" checked={profile.strict} onChange={(e) => setProfile({ ...profile, strict: e.target.checked })} />
+        <input type="checkbox" checked={profile.strict} onChange={(e) => onChange({ ...profile, strict: e.target.checked })} />
         Strict: leave out tests that only check a page renders
       </label>
       <label className="check">
-        <input type="checkbox" checked={profile.acceptance} onChange={(e) => setProfile({ ...profile, acceptance: e.target.checked })} />
+        <input type="checkbox" checked={profile.acceptance} onChange={(e) => onChange({ ...profile, acceptance: e.target.checked })} />
         Broken-page check: run each new test once on a copy of the page with what it checks removed, to prove it can fail
       </label>
+    </>
+  );
+}
+
+/** The profile as the API takes it: empty test-data values left out. */
+function cleanProfile(profile) {
+  return { ...profile, test_data: Object.fromEntries(Object.entries(profile.test_data).filter(([, v]) => String(v).trim())) };
+}
+
+/** What the pipeline generates for this project: test types, test data, AI tests, strictness, broken-page check. */
+function GenerationProfile({ project, onChanged }) {
+  const [profile, setProfile] = useState({ ...DEFAULT_PROFILE, ...(project.generation_profile || {}) });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => { setProfile({ ...DEFAULT_PROFILE, ...(project.generation_profile || {}) }); }, [project.id, project.generation_profile]);
+
+
+  async function save(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await updateProject(project.id, { generation_profile: cleanProfile(profile) });
+      setSaved(true);
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="form-stack" onSubmit={save}>
+      <h4 className="section-title"><ListChecks size={14} className="icon-inline" /> Test generation</h4>
+      <ProfileFields profile={profile} onChange={setProfile} />
       <div><button type="submit" className="btn btn-sm" disabled={busy || profile.test_types.length === 0}>{busy ? 'Saving…' : 'Save'}</button></div>
       {saved && <div className="small" role="status">Saved. The next run generates tests this way.</div>}
       {error && <div className="error-text" role="alert">{error}</div>}

@@ -181,13 +181,19 @@ class Settings(BaseSettings):
     SECURITY_SCAN_ALLOWED_HOSTS: str = Field(
         default_factory=lambda: os.getenv("SECURITY_SCAN_ALLOWED_HOSTS", "")
     )
+    # Passive scans (one GET per page, as a browser visit) may target any public
+    # website; private and internal addresses stay blocked on a hosted server.
+    # Active scans and the /.git and /.env probes still need the list above.
+    SECURITY_PASSIVE_ANY_HOST: bool = Field(
+        default_factory=lambda: os.getenv("SECURITY_PASSIVE_ANY_HOST", "true").lower() in ("true", "1"))
     # Active (DAST) scanning sends crafted inputs, so it is off unless turned on
     # here, and even then only ever touches SECURITY_SCAN_ALLOWED_HOSTS.
     SECURITY_ACTIVE_SCAN: bool = Field(
         default_factory=lambda: os.getenv("SECURITY_ACTIVE_SCAN", "false").lower() in ("true", "1"))
-    # With sign-in on, only these Firebase uids (comma-separated) may run active
-    # scans; empty means nobody, so a hosted server never lets any signed-in
-    # (or guest) user send attack payloads. Ignored when sign-in is off.
+    # With sign-in on, active scans need proof of site ownership (Security →
+    # Sites for active testing): any account may attack the sites it verified.
+    # A comma-separated list of Firebase uids here narrows that to those
+    # accounts; empty is accepted only while proof is required (hosted).
     SECURITY_ACTIVE_SCAN_USERS: str = Field(
         default_factory=lambda: os.getenv("SECURITY_ACTIVE_SCAN_USERS", ""))
     # Besides the app URL, how many of the pages the pipeline reached (linked

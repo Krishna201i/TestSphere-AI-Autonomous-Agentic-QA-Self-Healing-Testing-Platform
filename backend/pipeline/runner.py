@@ -768,7 +768,9 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
         get_active_scanner,
         get_scanner,
         scan_result,
+        widen_active_scope,
     )
+    from backend.services import domain_verify
     from security import ActiveScanError, OutOfScopeError, ScanError
     from security import ai as security_ai
 
@@ -779,14 +781,21 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
     state.stage("security", "running")
     # One active scanner for every page: its request budget covers the whole run
     active_scanner = get_active_scanner() if run_active else None
+    if active_scanner is not None:  # plus the owner's verified sites
+        widen_active_scope(active_scanner, domain_verify.active_hosts(state.db, owner))
     urls = list(dict.fromkeys([app_url, *(pages or [])]))[: 1 + settings.SECURITY_MAX_PAGES]
     result: dict[str, Any] = {"findings": [], "reopened": [], "resolved": [], "pages": []}
     found: list[Any] = []  # every page's findings, for AI triage
     skipped = 0
+    active_out_of_scope = 0
     for url in urls:
         try:
             snap = await scanner.fetch(url, probe_files=url == app_url)
-            active_findings = await active_scanner.scan(url) if active_scanner else []
+            # Passive may visit any public site; the active scanner only its own scope
+            attack = active_scanner is not None and active_scanner.scope.allows(url)
+            if active_scanner is not None and not attack:
+                active_out_of_scope += 1
+            active_findings = await active_scanner.scan(url) if attack else []
         except OutOfScopeError as exc:
             if url == app_url:
                 state.stage("security", "skipped", f"{exc}. Add the host to SECURITY_SCAN_ALLOWED_HOSTS (only hosts you own) to scan it.")
@@ -800,7 +809,8 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
             skipped += 1  # another page that did not answer: the rest still count
             continue
         page = scan_result(state.db, scanner, snap, url, actor=state.doc["actor"], owner_uid=owner,
-                           extra_findings=active_findings, active=run_active, probed=url == app_url, routes=routes)
+                           extra_findings=active_findings, active=attack,
+                           probed=url == app_url and scanner.can_probe(url), routes=routes)
         for key in ("findings", "reopened", "resolved"):
             result[key] += page[key]
         result["pages"].append(url)
@@ -819,6 +829,8 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
         detail += f" · {len(result['reopened'])} reappeared"
     if refusal:
         detail += f" · active scan skipped: {refusal}"
+    elif active_out_of_scope:
+        detail += " · active scan skipped: the host is not in SECURITY_SCAN_ALLOWED_HOSTS (passive checks ran)"
     state.stage("security", "done", detail)
     return result
 

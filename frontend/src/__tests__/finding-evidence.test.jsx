@@ -60,3 +60,25 @@ describe('FindingEvidence', () => {
     expect(screen.getByText('Hardening').getAttribute('title')).toMatch(/nothing was shown/);
   });
 });
+
+describe('ActiveTargets', () => {
+  it('lists sites with what to publish, and says why active scans are blocked', async () => {
+    const { vi } = await import('vitest');
+    const api = await import('../services/api');
+    vi.spyOn(api, 'getScanTargets').mockResolvedValue({
+      targets: [{ id: 1, url: 'https://shop.example', host: 'shop.example', token: 'testsphere-verify=abc',
+        file_url: 'https://shop.example/.well-known/testsphere-verify.txt', state: 'pending', needs_proof: true }],
+      active_scan: { server: true, allowed: false, reason: 'Active scanning is not enabled for this account', uid: 'u-123', proof_required: true },
+    });
+    const { default: ActiveTargets } = await import('../components/ActiveTargets');
+    render(<ActiveTargets onPick={() => {}} />);
+    expect(await screen.findByText('shop.example')).toBeTruthy();
+    expect(screen.getByText('Waiting for proof')).toBeTruthy();
+    expect(screen.getByText('https://shop.example/.well-known/testsphere-verify.txt')).toBeTruthy();
+    expect(screen.getByText('testsphere-verify=abc')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Verify' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Scan it' })).toBeNull(); // not until verified
+    expect(screen.getByText(/not enabled for this account/)).toBeTruthy();
+    expect(screen.getByText('u-123')).toBeTruthy();
+  });
+});

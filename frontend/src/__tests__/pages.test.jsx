@@ -70,7 +70,12 @@ describe('Autopilot', () => {
     fireEvent.change(screen.getByLabelText('What to test (optional)'), { target: { value: ' log in ' } });
     submit();
     await waitFor(() => expect(ws.current.refreshRuns).toHaveBeenCalled());
-    expect(api.quickPipeline).toHaveBeenCalledWith({ url: 'https://shop.example/', prompt: 'log in', repo_url: null });
+    expect(api.quickPipeline).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://shop.example/', prompt: 'log in', repo_url: null }));
+    // The settings for this run go with the first run (defaults unless changed)
+    const sent = api.quickPipeline.mock.calls[0][0];
+    expect(sent.generation_profile.test_types).toEqual(['smoke', 'functional', 'negative', 'content', 'pages']);
+    expect(sent.generation_profile.acceptance).toBe(true);
+    expect(sent.sign_in_first).toBe(false);
     expect(ws.current.refresh).toHaveBeenCalled();
   });
 

@@ -88,6 +88,7 @@ def system_info(authorization: str | None = Header(None)) -> dict[str, Any]:
         "database": settings.DATABASE_BACKEND,
         "llm": {"provider": llm.provider, "model": llm.model, "configured": llm.is_configured},
         "scan_scope": sorted(LOOPBACK_HOSTS) + extra,
+        "passive_any_host": settings.SECURITY_PASSIVE_ANY_HOST,
         "active_scan": settings.SECURITY_ACTIVE_SCAN,
         "memory_backend": settings.AGENT_MEMORY_BACKEND,
         "ingestion": {

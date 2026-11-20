@@ -573,14 +573,16 @@ def test_active_scan_runs_in_the_pipeline_only_when_project_and_server_both_allo
     calls = {"n": 0}
 
     class SpyActive:
-        def __init__(self, *a, **k):
-            pass
+        def __init__(self, scope=None, *a, **k):
+            self.scope = scope
 
         async def scan(self, url):
             calls["n"] += 1
             return []
 
     monkeypatch.setattr(sec_api, "ActiveScanner", SpyActive)
+    # The active scanner only attacks listed (or verified) hosts
+    monkeypatch.setattr(settings, "SECURITY_SCAN_ALLOWED_HOSTS", "app.test")
 
     # Project flag on but server off → not run
     monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", False)

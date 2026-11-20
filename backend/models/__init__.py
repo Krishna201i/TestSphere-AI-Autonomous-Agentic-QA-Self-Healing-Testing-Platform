@@ -42,6 +42,7 @@ AGENT_MEMORY = "agent_memory"  # agents.memory.persistent_store.COLLECTION
 API_TOKENS = "api_tokens"
 RATE_LIMITS = "rate_limits"  # RATE_LIMIT_BACKEND=database: recent run starts per user
 REPORT_SHARES = "report_shares"  # read-only links to one run's report (token stored hashed)
+SCAN_TARGETS = "scan_targets"  # sites an account added for active scanning, with their ownership proof
 
 __all__ = [
     "TestExecutionStatus", "PROJECTS", "APPLICATIONS", "TEST_CASES", "TEST_EXECUTIONS",

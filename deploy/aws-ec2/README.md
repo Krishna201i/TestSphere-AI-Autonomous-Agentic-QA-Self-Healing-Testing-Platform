@@ -27,7 +27,7 @@ To add a secret, add its name to `KEYS` in `store-secrets.py`, run it, then reru
 - Instance role: `AmazonSSMManagedInstanceCore`, plus read access to `parameter/testsphere/*` only.
 - IMDSv2 required; t3 CPU credits on *standard*, so bursts throttle instead of billing extra.
 - `deploy/aws-ec2/.env` on the instance holds `DOMAIN=<elastic-ip-with-dashes>.sslip.io`, or your own domain once DNS points at the Elastic IP.
-  It may also hold `SECURITY_ACTIVE_SCAN_USERS=<firebase-uid>,…`: the only accounts that may run active (DAST) scans. Without it nobody can.
+  It may also hold `SECURITY_ACTIVE_SCAN_USERS=<firebase-uid>,…` to narrow active (DAST) scans to those accounts. Without it, any account may actively scan the sites whose ownership it verified (Security → Sites for active testing).
 
 ## Artifacts in S3 (optional)
 

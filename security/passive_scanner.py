@@ -561,6 +561,10 @@ class PassiveScanner:
         Redirect hops to follow (each one scope-checked).
     transport:
         Optional ``httpx`` transport, used by tests to stub the network.
+    probe_scope:
+        Hosts whose /.git and /.env may be probed for (defaults to *scope*).
+        Requesting a site's secret files goes beyond a visit, so a scanner
+        allowed to visit any site still probes only hosts its owner listed.
     """
 
     def __init__(
@@ -570,7 +574,9 @@ class PassiveScanner:
         timeout: float = 10.0,
         max_redirects: int = 5,
         transport: httpx.AsyncBaseTransport | None = None,
+        probe_scope: ScopePolicy | None = None,
     ) -> None:
+        self._probe_scope = probe_scope
         self.scope = scope or ScopePolicy()
         self._timeout = timeout
         self._max_redirects = max_redirects
@@ -581,6 +587,7 @@ class PassiveScanner:
         With *probe_files*, also look for an exposed /.git and /.env at the
         site's root (two more GETs; done for the app URL, not every page)."""
         self.scope.check(url)
+        probe_files = probe_files and self.can_probe(url)
         headers = {"User-Agent": USER_AGENT, "Origin": PROBE_ORIGIN}
         current = url
 
@@ -607,6 +614,10 @@ class PassiveScanner:
                 return snap
 
         raise ScanError(f"Too many redirects (>{self._max_redirects}) starting at {url}")
+
+    def can_probe(self, url: str) -> bool:
+        """Whether the /.git and /.env probes may run against *url*'s site."""
+        return (self._probe_scope or self.scope).allows(url)
 
     async def _probe_files(self, http: httpx.AsyncClient, snap: PageSnapshot) -> list[Finding]:
         """Findings for files that must never be served (no redirects followed)."""

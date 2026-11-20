@@ -24,6 +24,7 @@ from backend.database.session import get_db
 from backend.database.store import Record, Store
 from backend.models import DEPLOYMENTS, PIPELINE_RUNS, PROJECTS
 from backend.pipeline import deploy, scheduler
+from backend.pipeline.profile import GenerationProfile
 from backend.pipeline.runner import active_run, cancel_run, start_run
 from backend.ratelimit import limit_runs
 from backend.reporting.document import build_report, render_html
@@ -42,6 +43,11 @@ class QuickRunRequest(BaseModel):
     url: str = Field(..., min_length=1, max_length=1024)
     prompt: str | None = Field(None, max_length=500)
     repo_url: str | None = Field(None, max_length=1024)
+    # Settings for the project this run creates or updates, so the very first
+    # run already generates and scans the way the user chose (None: unchanged)
+    generation_profile: GenerationProfile | None = None
+    sign_in_first: bool | None = None
+    active_scan: bool | None = None
 
 
 def _ensure_startable(db: Store, project: Record) -> None:
@@ -77,22 +83,25 @@ async def quick_run(req: QuickRunRequest, db: Store = Depends(get_db), user: Use
         repo = _check_http_url(req.repo_url, "Repository URL") or None
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    project = await asyncio.to_thread(_quick_project, db, user, url, repo, req.prompt)
+    chosen = req.model_dump(include={"generation_profile", "sign_in_first", "active_scan"}, exclude_none=True)
+    project = await asyncio.to_thread(_quick_project, db, user, url, repo, req.prompt, chosen)
     return await _start(db, user, project)
 
 
-def _quick_project(db: Store, user: User, url: str, repo: str | None, prompt: str | None) -> Record:
-    """The caller's project for *url*, created or updated with this run's goal and repository."""
+def _quick_project(db: Store, user: User, url: str, repo: str | None, prompt: str | None,
+                   chosen: dict[str, Any] | None = None) -> Record:
+    """The caller's project for *url*, created or updated with this run's goal,
+    repository and chosen settings (test generation, sign in first, active scan)."""
+    chosen = chosen or {}
     project = db.find_one(PROJECTS, app_url=url, **scope(user))
     if project is None:
         return ProjectService.create_project(
             db, name=urlparse(url).netloc or url, description="Created from a one-click pipeline run",
-            owner_uid=user.uid, app_url=url, repo_url=repo, prompt=prompt,
+            owner_uid=user.uid, app_url=url, repo_url=repo, prompt=prompt, **chosen,
         )
-    if (prompt and prompt != project.get("prompt")) or (repo and repo != project.get("repo_url")):
-        changes = {k: v for k, v in {"prompt": prompt, "repo_url": repo}.items() if v}
-        return ProjectService.update_project(db, project["id"], **changes)
-    return project
+    changes = {k: v for k, v in {"prompt": prompt, "repo_url": repo, **chosen}.items()
+               if v is not None and v != "" and v != project.get(k)}
+    return ProjectService.update_project(db, project["id"], **changes) if changes else project
 
 
 @router.get("/runs")

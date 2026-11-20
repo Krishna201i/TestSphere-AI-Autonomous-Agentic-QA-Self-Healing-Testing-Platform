@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.security import get_scanner
+from backend.api.security import get_active_scanner, get_scanner
 from backend.config import settings
 from backend.main import app
 from security import PassiveScanner, ScopePolicy
@@ -201,10 +201,17 @@ def test_stateless_retest_still_works(client, state) -> None:
 
 def test_default_scanner_scope_is_config_driven(monkeypatch) -> None:
     monkeypatch.setattr(settings, "SECURITY_SCAN_ALLOWED_HOSTS", "staging.test, ")
-    scope = get_scanner().scope
-    assert scope.allows("https://staging.test/")
-    assert scope.allows("http://127.0.0.1:8000/")
-    assert not scope.allows("https://example.com/")
+    scanner = get_scanner()
+    # Passive visits may go to any public site; the /.git and /.env probes only to listed hosts
+    assert scanner.scope.allows("https://example.com/")
+    assert scanner.can_probe("https://staging.test/") and scanner.can_probe("http://127.0.0.1:8000/")
+    assert not scanner.can_probe("https://example.com/")
+    # The active scanner keeps the configured list
+    active = get_active_scanner().scope
+    assert active.allows("https://staging.test/") and not active.allows("https://example.com/")
+    # With SECURITY_PASSIVE_ANY_HOST off, passive scans are back to the list too
+    monkeypatch.setattr(settings, "SECURITY_PASSIVE_ANY_HOST", False)
+    assert not get_scanner().scope.allows("https://example.com/")
 
 
 def test_timestamps_are_utc_aware(client) -> None:
@@ -268,9 +275,14 @@ def test_an_active_finding_can_be_retested(active_client) -> None:
     assert resp.status_code == 200 and resp.json()["retest_result"] == "fail"  # still vulnerable
 
 
-def test_signed_in_users_need_to_be_listed_to_run_active_scans(active_client, monkeypatch) -> None:
-    """With sign-in on, only SECURITY_ACTIVE_SCAN_USERS may send attack payloads (guests included)."""
+def test_signed_in_users_attack_only_sites_they_verified(active_client, monkeypatch, fresh_store) -> None:
+    """With sign-in on, proof of ownership is the gate (guests included); a
+    SECURITY_ACTIVE_SCAN_USERS list narrows it, and an empty list is never
+    "anyone may attack anything"."""
+    from datetime import UTC, datetime
+
     from backend import auth
+    from backend.models import SCAN_TARGETS
 
     monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
     tokens = {"guest": {"uid": "anon1", "firebase": {"sign_in_provider": "anonymous"}},
@@ -279,10 +291,25 @@ def test_signed_in_users_need_to_be_listed_to_run_active_scans(active_client, mo
     monkeypatch.setattr(auth, "verify_token", lambda t: tokens[t])
     body = {"url": "http://app.test/search?q=hi", "active": True}
 
-    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "")  # nobody by default
+    # Empty list while the server does not require proof: nobody
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "")
+    monkeypatch.setattr(settings, "REQUIRE_DOMAIN_VERIFICATION", "off")
     resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": "Bearer ann"})
-    assert resp.status_code == 403 and "not enabled for this account" in resp.json()["detail"]
+    assert resp.status_code == 403 and "needs proof of site ownership" in resp.json()["detail"]
 
+    # Proof required: any account, but only for a site it verified
+    monkeypatch.setattr(settings, "REQUIRE_DOMAIN_VERIFICATION", "on")
+    for who in ("guest", "ann"):
+        resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": f"Bearer {who}"})
+        assert resp.status_code == 403 and "not verified" in resp.json()["detail"], who
+    fresh_store.insert(SCAN_TARGETS, owner_uid="ann", host="app.test", url="http://app.test", token="t",
+                       verified_at=datetime.now(UTC).isoformat())
+    resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": "Bearer ann"})
+    assert resp.status_code == 200
+    resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": "Bearer bob"})
+    assert resp.status_code == 403  # ann's proof is not bob's
+
+    # A list narrows it to the listed accounts
     monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "ann, carol")
     for who in ("guest", "bob"):
         resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": f"Bearer {who}"})

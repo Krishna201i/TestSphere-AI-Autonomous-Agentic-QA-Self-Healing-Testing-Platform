@@ -122,6 +122,12 @@ export const planAndExecute = (payload) =>
 
 export const securityScan = (url, actor, active = false) => request('/api/security/scan', { method: 'POST', body: { url, actor, active } });
 export const getFindings = () => request('/api/security/findings');
+/** Sites this account may scan actively once it proves ownership (Attacker page). */
+export const getScanTargets = () => request('/api/security/targets');
+export const addScanTarget = (url) => request('/api/security/targets', { method: 'POST', body: { url } });
+/** Fetch the site's /.well-known/testsphere-verify.txt now; verified sites join the active-scan scope for 30 days. */
+export const verifyScanTarget = (id) => request(`/api/security/targets/${id}/verify`, { method: 'POST' });
+export const removeScanTarget = (id) => request(`/api/security/targets/${id}`, { method: 'DELETE' });
 export const approveFinding = (key, actor) =>
   request(`/api/security/findings/${encodeURIComponent(key)}/approve`, { method: 'POST', body: { actor } });
 export const retestFinding = (key, actor) =>

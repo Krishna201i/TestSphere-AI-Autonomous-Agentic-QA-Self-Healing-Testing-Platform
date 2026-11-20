@@ -24,7 +24,8 @@ from pydantic import BaseModel
 from backend.auth import User, actor_for, get_current_user, scope
 from backend.config import settings
 from backend.database.session import get_db
-from backend.database.store import Store
+from backend.database.store import Record, Store
+from backend.models import SCAN_TARGETS
 from backend.netguard import BlockedTargetError, PinnedTransport
 from backend.ratelimit import limit_runs
 from backend.services import domain_verify
@@ -46,6 +47,7 @@ from security.remediation import propose, redact_headers
 from security.scope import LOOPBACK_HOSTS
 
 router = APIRouter(prefix="/security", tags=["Security Testing"])
+MAX_SCAN_TARGETS = 20
 
 DEFAULT_ACTOR = "dev_active"
 
@@ -80,8 +82,19 @@ class _ScannerTransport(PinnedTransport):
 
 
 def get_scanner() -> PassiveScanner:
-    """Build a passive scanner limited to the configured scope (overridable in tests)."""
-    return PassiveScanner(_configured_scope(), transport=_ScannerTransport())
+    """Build a passive scanner (overridable in tests).  With
+    SECURITY_PASSIVE_ANY_HOST it may visit any public site; the /.git and /.env
+    probes stay limited to the configured scope."""
+    scope = _configured_scope()
+    visit = ScopePolicy(scope.allowed_hosts, any_public=settings.SECURITY_PASSIVE_ANY_HOST)
+    return PassiveScanner(visit, transport=_ScannerTransport(), probe_scope=scope)
+
+
+def widen_active_scope(scanner: Any, hosts: set[str]) -> Any:
+    """Let *scanner* also attack *hosts* (the account's verified sites)."""
+    if hosts and isinstance(getattr(scanner, "scope", None), ScopePolicy):
+        scanner.scope = ScopePolicy(scanner.scope.allowed_hosts | frozenset(hosts))
+    return scanner
 
 
 def get_active_scanner() -> ActiveScanner:
@@ -96,16 +109,23 @@ def get_active_scanner() -> ActiveScanner:
 def active_scan_refusal(uid: str | None, url: str | None = None, db: Store | None = None) -> str | None:
     """Why *uid* may not run the active scanner (against *url*), or None when it may.
 
-    The server must allow active scanning, the account must be listed, and
-    (with *url* and *db*) the account must have proven it owns the host.
+    The server must allow active scanning and (with *url* and *db*) the
+    account must have proven it owns the host.  Proof of ownership is the
+    gate: any account may attack the sites it verified.  A non-empty
+    SECURITY_ACTIVE_SCAN_USERS narrows that to the listed accounts; an empty
+    one is only accepted while the server requires proof, so it can never
+    mean "anyone may attack any site".
     """
     if not settings.SECURITY_ACTIVE_SCAN:
         return "Active scanning is turned off on this server"
     if not settings.AUTH_REQUIRED:
         return None
     allowed = {u.strip() for u in settings.SECURITY_ACTIVE_SCAN_USERS.split(",") if u.strip()}
-    if uid not in allowed:
+    if allowed and uid not in allowed:
         return "Active scanning is not enabled for this account (SECURITY_ACTIVE_SCAN_USERS)"
+    if not allowed and not domain_verify.required():
+        return ("Active scanning needs proof of site ownership on this server (REQUIRE_DOMAIN_VERIFICATION) "
+                "or a list of accounts (SECURITY_ACTIVE_SCAN_USERS)")
     if url is not None and db is not None:
         return domain_verify.refusal(db, uid, url)
     return None
@@ -162,7 +182,8 @@ async def scan(
         snap = await scanner.fetch(req.url, probe_files=True)
         active_findings: list[Finding] = []
         if req.active:
-            active_findings = await active_scanner.scan(req.url)
+            hosts = await asyncio.to_thread(domain_verify.active_hosts, db, user.uid)
+            active_findings = await widen_active_scope(active_scanner, hosts).scan(req.url)
     except (OutOfScopeError, ScanError, ActiveScanError) as exc:
         await asyncio.to_thread(store.record_audit, db, actor=actor, kind="scan", level="error",
                                 message=f"Scan refused/failed for {req.url}: {exc}", owner_uid=user.uid)
@@ -170,7 +191,7 @@ async def scan(
     # Saving reads and writes each finding: in a thread, so other requests are not held up
     result = await asyncio.to_thread(scan_result, db, scanner, snap, req.url, actor=actor,
                                      owner_uid=None if user.local else user.uid, extra_findings=active_findings,
-                                     active=bool(req.active))
+                                     active=bool(req.active), probed=scanner.can_probe(req.url))
     # Best-effort AI triage: reasons only over findings already produced in
     # scope, never contacts the target, and leaves the result untouched on any
     # failure.  analyze() re-runs on the already-fetched snapshot (cheap, no I/O).
@@ -347,3 +368,68 @@ async def retest(
     except (OutOfScopeError, ScanError, ActiveScanError) as exc:
         raise _translate(exc) from exc
     return result.model_dump(mode="json") | {"key": result.key}
+
+
+# ── Sites for active testing: add a site, prove you own it, then attack it ──
+
+class TargetRequest(BaseModel):
+    url: str
+
+
+def _active_status(uid: str | None) -> dict[str, Any]:
+    """Whether this account may run active scans at all, and why not."""
+    reason = active_scan_refusal(uid)
+    return {"server": settings.SECURITY_ACTIVE_SCAN, "allowed": reason is None, "reason": reason, "uid": uid,
+            "proof_required": domain_verify.required()}
+
+
+@router.get("/targets")
+def list_targets(db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """The account's sites for active testing, each with the file to publish and its state."""
+    rows = db.find(SCAN_TARGETS, owner_uid=user.uid, order_by="id")
+    return {"targets": [domain_verify.target_view(r) for r in rows], "active_scan": _active_status(user.uid)}
+
+
+@router.post("/targets", status_code=status.HTTP_201_CREATED)
+def add_target(req: TargetRequest, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """Add a site; active scans of it are allowed once its ownership is verified."""
+    if len(db.find(SCAN_TARGETS, owner_uid=user.uid)) >= MAX_SCAN_TARGETS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=f"At most {MAX_SCAN_TARGETS} sites per account; remove one first.")
+    try:
+        row = domain_verify.add_target(db, user.uid, req.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    store.record_audit(db, actor=actor_for(user, None), kind="scan", level="info", ref=str(row["id"]),
+                       message=f"Added {row['host']} for active testing (ownership not yet verified)",
+                       owner_uid=user.uid)
+    return domain_verify.target_view(row)
+
+
+def _owned_target(db: Store, user: User, target_id: int) -> Record:
+    row = db.get(SCAN_TARGETS, target_id)
+    if row is None or row.get("owner_uid") != user.uid:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    return row
+
+
+@router.post("/targets/{target_id}/verify")
+async def verify_target(target_id: int, db: Store = Depends(get_db), user: User = Depends(limit_runs)) -> dict[str, Any]:
+    """Fetch the site's /.well-known/testsphere-verify.txt; if it holds the token, allow active scans for 30 days."""
+    row = await asyncio.to_thread(_owned_target, db, user, target_id)
+    ok, message = await domain_verify.check_target(db, row)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
+    await asyncio.to_thread(store.record_audit, db, actor=actor_for(user, None), kind="scan", level="success",
+                            ref=str(target_id), message=f"Verified ownership of {row['host']} for active testing",
+                            owner_uid=user.uid)
+    return {**domain_verify.target_view(db.get(SCAN_TARGETS, target_id)), "message": message}
+
+
+@router.delete("/targets/{target_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_target(target_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    """Remove a site: active scans of it stop being allowed."""
+    row = _owned_target(db, user, target_id)
+    db.delete(SCAN_TARGETS, row["id"])
+    store.record_audit(db, actor=actor_for(user, None), kind="scan", level="info", ref=str(target_id),
+                       message=f"Removed {row['host']} from active testing", owner_uid=user.uid)

@@ -8,7 +8,8 @@ export function TierPill({ finding }) {
   return <span className={`pill ${tier.tone}`} title={tier.title}>{tier.text}</span>;
 }
 
-function CopyCommand({ command }) {
+/** A command or value with a Copy button. */
+export function CopyCommand({ command, label = 'Copy the command' }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
     try {
@@ -22,7 +23,7 @@ function CopyCommand({ command }) {
   return (
     <div className="command">
       <code className="mono small">{command}</code>
-      <button type="button" className="btn btn-sm btn-ghost" onClick={copy} aria-label="Copy the command">
+      <button type="button" className="btn btn-sm btn-ghost" onClick={copy} aria-label={label}>
         {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? 'Copied' : 'Copy'}
       </button>
     </div>

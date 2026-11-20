@@ -204,6 +204,13 @@ h1, h2, h3, h4 { line-height: var(--lh-tight); }
 .mt-2 { margin-top: var(--s-2); }
 .mt-3 { margin-top: var(--s-3); }
 .ml-2 { margin-left: var(--s-2); }
+.ml-auto { margin-left: auto; }
+/* Run form: optional settings, folded until opened */
+.run-settings { margin-top: var(--s-3); border-top: 1px solid var(--border); padding-top: var(--s-3); }
+.run-settings > summary { cursor: pointer; font-weight: 600; }
+/* Sites for active testing */
+.target-head { flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+.target-proof { display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-2); }
 .pager { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); flex-wrap: wrap; margin-top: var(--s-3); padding-top: var(--s-2); border-top: 1px solid var(--border); }
 fieldset { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--s-3) var(--s-4); }
 legend { padding: 0 var(--s-1); }

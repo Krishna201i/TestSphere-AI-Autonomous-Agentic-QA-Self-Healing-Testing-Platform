@@ -30,6 +30,10 @@ class ScopePolicy:
     """
 
     allowed_hosts: frozenset[str] = field(default_factory=lambda: LOOPBACK_HOSTS)
+    # Any http(s) host: for the passive scanner only, which does what a browser
+    # visit does.  Which addresses may be reached is then up to the transport
+    # (the server's SSRF guard refuses private and internal ones).
+    any_public: bool = False
 
     @classmethod
     def of(cls, *hosts: str) -> ScopePolicy:
@@ -49,7 +53,7 @@ class ScopePolicy:
             port = parts.port or (443 if parts.scheme == "https" else 80)
         except ValueError as exc:  # ":99999" or ":abc": a malformed URL, not a crash
             raise OutOfScopeError(f"URL has an invalid port: {url!r}") from exc
-        if host in self.allowed_hosts or f"{host}:{port}" in self.allowed_hosts:
+        if self.any_public or host in self.allowed_hosts or f"{host}:{port}" in self.allowed_hosts:
             return
         raise OutOfScopeError(
             f"{host}:{port} is not in the authorized scope "
