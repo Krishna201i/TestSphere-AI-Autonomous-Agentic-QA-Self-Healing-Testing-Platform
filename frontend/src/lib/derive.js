@@ -17,6 +17,54 @@ export const RADAR_AXES = [
   { id: 'injection', label: 'Injection', checks: ['SEC-XSS-REFLECTED', 'SEC-SQLI-ERROR', 'SEC-OPEN-REDIRECT'] },
 ];
 
+// What a finding proves (security/findings.py tier_of): only proven ones count as vulnerabilities
+const PROVEN_CHECKS = new Set(['SEC-SQLI-ERROR', 'SEC-OPEN-REDIRECT', 'SEC-EXPOSED-GIT', 'SEC-EXPOSED-ENV',
+  'SEC-ERROR-DISCLOSURE', 'SEC-DIR-LISTING', 'SEC-CORS', 'SEC-FORM-PASSWORD']);
+export const TIER_ORDER = ['proven', 'unconfirmed', 'hardening'];
+export const TIER_LABEL = {
+  proven: { text: 'Proven', tone: 'red', title: 'The scan showed the harm itself' },
+  unconfirmed: { text: 'Check by hand', tone: 'orange', title: 'A real signal the scan could not prove' },
+  hardening: { text: 'Hardening', tone: 'gray', title: 'A missing defence; nothing was shown to be exploitable' },
+};
+
+/** The tier of *finding*: the server's, or worked out the same way for one stored before tiers existed. */
+export function findingTier(finding) {
+  if (!finding) return 'hardening';
+  if (TIER_ORDER.includes(finding.tier)) return finding.tier;
+  if (finding.source === 'qa') return 'proven';
+  if (finding.check_id === 'SEC-XSS-REFLECTED') return finding.confidence >= 1 ? 'proven' : 'unconfirmed';
+  if (PROVEN_CHECKS.has(finding.check_id)) return 'proven';
+  return finding.check_id === 'SEC-CSRF' ? 'unconfirmed' : 'hardening';
+}
+
+/** Findings with proven ones first, then by severity (the order a reader should act in). */
+export function byTier(findings) {
+  return [...(findings || [])].sort((a, b) => TIER_ORDER.indexOf(findingTier(a)) - TIER_ORDER.indexOf(findingTier(b))
+    || SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
+}
+
+/** How many findings of each tier: { proven, unconfirmed, hardening }. */
+export function tierCounts(findings) {
+  const counts = { proven: 0, unconfirmed: 0, hardening: 0 };
+  for (const f of findings || []) counts[findingTier(f)] += 1;
+  return counts;
+}
+
+/** Whether a pipeline run's security stage actually scanned (not skipped: out of scope, failed, cancelled). */
+export function securityScanned(run) {
+  return (run?.stages || []).some((s) => s.key === 'security' && s.status === 'done');
+}
+
+/** Why the newest of *runs* that skipped its security scan did not scan, or null. */
+export function scanSkipReason(runs) {
+  const skipped = [...(runs || [])].reverse().map((r) => (r.stages || []).find((s) => s.key === 'security'))
+    .find((s) => s && ['skipped', 'failed'].includes(s.status));
+  if (!skipped) return null;
+  return /not in the authorized scope/i.test(skipped.detail || '')
+    ? 'the target is outside the authorized scan scope'
+    : (skipped.detail || 'the scan did not run');
+}
+
 /** How sure a finding is, as a reviewer reads it: proven in a real browser, or worth a manual look. */
 export function confidenceLabel(finding) {
   if (!finding) return null;

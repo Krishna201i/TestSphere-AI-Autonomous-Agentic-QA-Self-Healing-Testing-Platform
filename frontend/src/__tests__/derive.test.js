@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  RADAR_AXES, confidenceLabel, deployState, executionStats, groupedResults, loopModel, mergeStageStatus, pct, radarValues, testDetail,
+  RADAR_AXES, confidenceLabel, deployState, executionStats, groupedResults, loopModel, mergeStageStatus, pct, radarValues,
+  scanSkipReason, securityScanned, testDetail,
 } from '../lib/derive';
 
 const run = (status) => ({ status });
@@ -164,5 +165,22 @@ describe('security checks on the dashboard', () => {
     expect(confidenceLabel({ check_id: 'SEC-XSS-REFLECTED', confidence: 1 }).text).toMatch(/Confirmed/);
     expect(confidenceLabel({ check_id: 'SEC-XSS-REFLECTED', confidence: 0.5 }).text).toMatch(/Not confirmed/);
     expect(confidenceLabel({ check_id: 'SEC-HDR-CSP', confidence: 0.9 })).toBeNull();
+  });
+});
+
+describe('security scan state', () => {
+  const run = (status, detail) => ({ stages: [{ key: 'security', status, detail }] });
+
+  it('counts only a scan that ran', () => {
+    expect(securityScanned(run('done'))).toBe(true);
+    expect(securityScanned(run('skipped'))).toBe(false);
+    expect(securityScanned({})).toBe(false);
+  });
+
+  it('says in plain words why the newest skipped scan did not run', () => {
+    const outOfScope = run('skipped', 'app.example:443 is not in the authorized scope (127.0.0.1). Add the host to SECURITY_SCAN_ALLOWED_HOSTS');
+    expect(scanSkipReason([run('done'), outOfScope])).toBe('the target is outside the authorized scan scope');
+    expect(scanSkipReason([run('done')])).toBe(null);
+    expect(scanSkipReason([run('running')])).toBe(null);
   });
 });

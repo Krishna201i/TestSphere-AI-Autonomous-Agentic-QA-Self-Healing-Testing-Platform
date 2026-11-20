@@ -57,6 +57,22 @@ async def get_verifying_first(url: str, *, timeout: float, headers: dict[str, st
 
 # A bare boolean attribute (required, required="", required=required)
 _REQUIRED = re.compile(r"(?:^|\s)required(?=[\s=/>]|$)", re.IGNORECASE)
+# Set in the browser on every control, link and heading a visitor cannot see
+HIDDEN_MARK = "data-ts-hidden"
+_HIDDEN = re.compile(rf"(?:^|\s){HIDDEN_MARK}(?=[\s=/>]|$)", re.IGNORECASE)
+_MARK_HIDDEN_JS = """(mark) => {
+  let hidden = 0;
+  for (const el of document.querySelectorAll('input,button,select,textarea,a[href],h1,h2,h3')) {
+    const seen = el.checkVisibility
+      ? el.checkVisibility({checkOpacity: true, checkVisibilityCSS: true})
+      : Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    if (!seen) {
+      el.setAttribute(mark, '');
+      if (!/^(A|H1|H2|H3)$/.test(el.tagName) && el.type !== 'hidden') hidden += 1;
+    }
+  }
+  return hidden;
+}"""
 
 # Values a browser accepts for each input type (anything else is refused by fill)
 _TYPED_VALUES = {
@@ -147,17 +163,25 @@ class URLAnalyzerService:
         meta_desc = meta_desc_match.group(1).strip() if meta_desc_match else None
 
         # Client-rendered apps (React, Vue, ...) ship an almost empty HTML
-        # shell; read the DOM a real browser builds instead.
-        rendered = False
-        if not error_encountered and status_code < 400 and cls._looks_client_rendered(html):
-            dom = await cls._render_in_browser(normalized_url)
+        # shell; read the DOM a real browser builds instead.  With
+        # ANALYZE_VISIBILITY every page is read that way, with what a visitor
+        # cannot see marked, so no test is planned on a control in a closed
+        # dialog, tab or menu.
+        from backend.config import settings
+
+        rendered, hidden_controls = False, None
+        if not error_encountered and status_code < 400 and (
+                settings.ANALYZE_VISIBILITY or cls._looks_client_rendered(html)):
+            dom = await cls._render_in_browser(normalized_url, mark_hidden=settings.ANALYZE_VISIBILITY)
             if dom:
-                html, rendered = dom, True
+                (html, hidden_controls, rendered_url), rendered = dom, True
+                final_url = rendered_url or final_url
                 # The app's scripts often set the title ("Sign in · Patient portal"
                 # replacing the shell's "CareLink"); tests check the rendered one
                 rendered_title = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
                 if rendered_title and rendered_title.group(1).strip():
                     page_title = re.sub(r"\s+", " ", rendered_title.group(1).strip())
+        page_title = html_lib.unescape(page_title)  # "Cost &amp; Performance" is "Cost & Performance"
 
         # DOM Element Extraction
         inputs = cls._extract_inputs(html)
@@ -228,6 +252,8 @@ class URLAnalyzerService:
                 "forms_count": len(forms),
                 "links_count": len(links),
                 "headings_count": len(headings),
+                # Controls in the HTML a visitor cannot see on load (None: not checked)
+                "hidden_controls": hidden_controls,
                 "images_count": len(images),
                 "inputs": inputs[:8],  # preview top inputs
                 "buttons": buttons[:8],  # preview top buttons
@@ -272,9 +298,14 @@ class URLAnalyzerService:
         return len(text) < 400
 
     @classmethod
-    async def _render_in_browser(cls, url: str) -> str | None:
+    async def _render_in_browser(cls, url: str, *, mark_hidden: bool = False) -> tuple[str, int | None, str] | None:
         """The page's DOM after its scripts ran, from the engine's guarded
-        browser (same egress policy and browser slots as test runs)."""
+        browser (same egress policy and browser slots as test runs), and how
+        many controls are hidden.  With *mark_hidden* every control, link and
+        heading a visitor cannot see carries ``HIDDEN_MARK``; the extractors
+        skip those, while selectors stay unique among all of them.  Also
+        where the page ended up: an app's own router may send a signed-out
+        visitor from /app to / without any HTTP redirect."""
         try:
             from engine.browser import BrowserSession
             from engine.schemas import EngineConfig
@@ -286,7 +317,8 @@ class URLAnalyzerService:
                     await page.wait_for_load_state("networkidle", timeout=8_000)
                 except Exception:  # noqa: BLE001 - long-polling pages never go idle; use what rendered
                     pass
-                return await page.content()
+                hidden = await page.evaluate(_MARK_HIDDEN_JS, HIDDEN_MARK) if mark_hidden else None
+                return await page.content(), hidden, page.url
         except Exception as exc:  # noqa: BLE001 - fall back to the static HTML
             logger.warning("Could not render %s in a browser: %s", url, exc)
             return None
@@ -308,6 +340,8 @@ class URLAnalyzerService:
         universe = cls._element_universe(html)
         raw_inputs = [(m.start(), m.group(1)) for m in re.finditer(r"<input\s+([^>]+)>", html, re.IGNORECASE)]
         for pos, tag in raw_inputs:
+            if _HIDDEN.search(tag):
+                continue  # in a closed dialog, tab or menu: a test could not reach it
             attr_dict = cls._parse_tag_attrs(tag)
             itype = attr_dict.get("type", "text").lower()
             if itype in ("hidden", "image"):
@@ -338,6 +372,8 @@ class URLAnalyzerService:
                 "form": cls._form_at(spans, pos),
             }))
         for m in re.finditer(r"<textarea\b([^>]*)>", html, re.IGNORECASE):
+            if _HIDDEN.search(m.group(1)):
+                continue
             attr_dict = cls._parse_tag_attrs(m.group(1))
             name, elem_id = attr_dict.get("name"), attr_dict.get("id")
             selector = best_unique(stable_candidates("textarea", attr_dict), universe)
@@ -348,6 +384,8 @@ class URLAnalyzerService:
                                           "selector": selector, "required": bool(_REQUIRED.search(m.group(1))),
                                           "form": cls._form_at(spans, m.start())}))
         for m in re.finditer(r"<select\b([^>]*)>(.*?)</select>", html, re.IGNORECASE | re.DOTALL):
+            if _HIDDEN.search(m.group(1)):
+                continue
             attr_dict = cls._parse_tag_attrs(m.group(1))
             name, elem_id = attr_dict.get("name"), attr_dict.get("id")
             selector = best_unique(stable_candidates("select", attr_dict), universe)
@@ -372,6 +410,8 @@ class URLAnalyzerService:
         # <button> tags
         for match in re.finditer(r"<button\s*([^>]*)>(.*?)</button>", html, re.IGNORECASE | re.DOTALL):
             attrs_str = match.group(1)
+            if _HIDDEN.search(attrs_str):
+                continue
             raw_text = html_lib.unescape(re.sub(r"<[^>]+>", " ", match.group(2)))
             text = re.sub(r"\s+", " ", raw_text).strip() or "Button"
             attrs = cls._parse_tag_attrs(attrs_str)
@@ -398,6 +438,8 @@ class URLAnalyzerService:
 
         # <input type="submit"> tags
         for match in re.finditer(r"""<input\s+[^>]*type=["'](?:submit|button)["'][^>]*>""", html, re.IGNORECASE):
+            if _HIDDEN.search(match.group(0)):
+                continue
             attrs = cls._parse_tag_attrs(match.group(0))
             value = attrs.get("value") or "Submit"
             elem_id = attrs.get("id")
@@ -431,15 +473,18 @@ class URLAnalyzerService:
 
     @classmethod
     def _extract_links(cls, html: str, domain: str) -> list[str]:
-        links = re.findall(r"""<a\s+[^>]*href=["']([^"'#]+)["']""", html, re.IGNORECASE)
+        links = [m.group(2) for m in re.finditer(r"""<a(\s+[^>]*?)href=["']([^"'#]+)["'][^>]*>""", html, re.IGNORECASE)
+                 if not _HIDDEN.search(m.group(0))]
         return list(dict.fromkeys(links))[:50]
 
     @classmethod
     def _extract_headings(cls, html: str) -> list[str]:
         headings = []
-        for match in re.finditer(r"<h[1-3][^>]*>(.*?)</h[1-3]>", html, re.IGNORECASE | re.DOTALL):
+        for match in re.finditer(r"<h[1-3]([^>]*)>(.*?)</h[1-3]>", html, re.IGNORECASE | re.DOTALL):
+            if _HIDDEN.search(match.group(1)):
+                continue  # the heading of a closed dialog is not on the page a visitor sees
             # A <br> is a space to the reader ("Insights.<br>Healthier"); other tags join
-            text = re.sub(r"<[^>]+>", "", re.sub(r"(?i)<br\s*/?>", " ", match.group(1))).strip()
+            text = html_lib.unescape(re.sub(r"<[^>]+>", "", re.sub(r"(?i)<br\s*/?>", " ", match.group(2)))).strip()
             clean = re.sub(r"\s+", " ", text)
             if clean:
                 headings.append(clean[:60])

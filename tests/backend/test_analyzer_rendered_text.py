@@ -14,8 +14,8 @@ async def test_a_client_rendered_page_reports_its_rendered_title_and_headings(mo
     async def fetch(url, timeout, headers):
         return SimpleNamespace(status_code=200, url=url, text=SHELL, headers={"content-type": "text/html"}), True
 
-    async def render(cls, url):
-        return RENDERED
+    async def render(cls, url, *, mark_hidden=False):
+        return RENDERED, None, url
 
     monkeypatch.setattr(url_analyzer, "get_verifying_first", fetch)
     monkeypatch.setattr(URLAnalyzerService, "_render_in_browser", classmethod(render))

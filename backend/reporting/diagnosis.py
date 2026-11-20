@@ -11,7 +11,16 @@ sensible even when the explanation came from a small model.
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+# The engine's words for an element that is in the page but not shown (engine/runner.py)
+_HIDDEN = re.compile(r"is on the page but not visible", re.IGNORECASE)
+HIDDEN_LABEL = "Element hidden"
+HIDDEN_NEXT_STEP = ("The element is in the page but hidden, so a visitor cannot see it: it is probably inside a "
+                    "dialog, tab or menu the test never opened. Add the step that opens it first, or drop the "
+                    "check if it was planned on a hidden part of the page; if it should show here, the app is "
+                    "hiding it by mistake.")
 
 LABELS = {
     "SELECTOR_CHANGED": "Element changed",
@@ -48,8 +57,9 @@ def _value(field: Any) -> str:
     return str(getattr(field, "value", field) or "")
 
 
-def diagnosis_of(analysis: Any) -> dict[str, Any] | None:
-    """The diagnosis to store with a failed execution (*analysis* is a ``FailureAnalysis``)."""
+def diagnosis_of(analysis: Any, error: str | None = None) -> dict[str, Any] | None:
+    """The diagnosis to store with a failed execution (*analysis* is a
+    ``FailureAnalysis``, *error* the execution's error message)."""
     if analysis is None:
         return None
     kind = _value(analysis.failure_type) or "UNKNOWN"
@@ -71,4 +81,7 @@ def diagnosis_of(analysis: Any) -> dict[str, Any] | None:
     for key, value in found.items():
         if value:
             diagnosis[key] = str(value)[:300]
+    # A hidden element is not "wrong content": say what hides it and what to do
+    if _HIDDEN.search(f"{error or ''} {diagnosis['explanation']}"):
+        diagnosis.update(label=HIDDEN_LABEL, next_step=HIDDEN_NEXT_STEP)
     return diagnosis

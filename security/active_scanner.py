@@ -43,10 +43,35 @@ from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
 
 import httpx
 
-from .findings import Finding, FindingSource, FindingStatus, RetestResult, Severity
+from .findings import (
+    Finding,
+    FindingSource,
+    FindingStatus,
+    RetestResult,
+    Severity,
+    curl_command,
+)
 from .scope import OutOfScopeError, ScopePolicy
 
 log = logging.getLogger(__name__)
+
+
+def _excerpt(text: str, needle: str, width: int = 90) -> str:
+    """The part of *text* around *needle* (what a reader needs to see it), on one line."""
+    at = text.find(needle)
+    if at < 0:
+        return ""
+    start, end = max(0, at - width), min(len(text), at + len(needle) + width)
+    snippet = " ".join(text[start:end].split())
+    return ("…" if start else "") + snippet + ("…" if end < len(text) else "")
+
+
+def _reproduce(point: _Point, value: str) -> tuple[dict[str, str], str]:
+    """The location of *point* and a curl command sending *value* in its field."""
+    params = dict(point.params)
+    params[point.field] = value
+    location = {"method": point.method.upper(), "url": point.url, "parameter": point.field}
+    return location, curl_command(point.method, point.url, params, body=point.is_body)
 
 USER_AGENT = "TestSphere-ActiveScanner/0.1"
 # Unroutable (.invalid is reserved): an open redirect that sends us here is real
@@ -250,18 +275,27 @@ class ActiveScanner:
             # (escaped in the search box, raw in a heading); the raw one is the hole.
             confidence, proof = 0.9, []
             ran = await self._confirm_xss(point, token)
+            location, request = _reproduce(point, marker)
+            steps = [f"Send the {where} parameter {point.field!r} with an HTML tag in it: {request}",
+                     f"The response contains the tag unescaped: {marker!r}."]
             if ran is True:
                 confidence = 1.0
                 proof = ["Confirmed in a real browser: a script in the payload ran on the page."]
+                steps.append("Open the same URL in a browser with an event-handler payload "
+                             f"({point.field}=ts<img src=x onerror=\"window.x=1\">): the script runs.")
             elif ran is False:
                 # Reflected but inert: inside a <textarea>, <title>, a comment or a
                 # script string the marker never becomes markup.  Kept, but unproven.
                 confidence = 0.5
                 proof = ["Not confirmed: the payload did not run in a real browser (the value may land "
                          "inside a <textarea>, <title> or comment). Check this one by hand."]
+                steps.append("In a real browser the payload did not run: check where the value lands by hand.")
             findings.append(Finding(
                 check_id="SEC-XSS-REFLECTED", source=FindingSource.SECURITY,
-                title="Reflected cross-site scripting (XSS)", severity=Severity.HIGH, confidence=confidence,
+                title=f"Parameter {point.field!r} is written into the page unescaped (reflected XSS)"
+                      if ran is True else "Reflected cross-site scripting (XSS), not confirmed in a browser",
+                severity=Severity.HIGH, confidence=confidence,
+                location=location, request=request, steps=steps, response_excerpt=_excerpt(resp.text, marker),
                 component=component, target_url=point.source_url,
                 evidence=[f"The {where} parameter {point.field!r} was reflected into the HTML response "
                           f"without escaping (sent {marker!r}, found it verbatim in the page).", *proof],
@@ -276,10 +310,19 @@ class ActiveScanner:
         safe = await self._request(http, point, f"ts{token}")
         if quoted is not None and safe is not None:
             for pattern, engine in _SQL_ERRORS:
-                if pattern.search(quoted.text) and not pattern.search(safe.text):
+                if (error := pattern.search(quoted.text)) and not pattern.search(safe.text):
+                    location, request = _reproduce(point, f"ts{token}'")
+                    _, control = _reproduce(point, f"ts{token}")
                     findings.append(Finding(
                         check_id="SEC-SQLI-ERROR", source=FindingSource.SECURITY,
-                        title="SQL injection (database error exposed)", severity=Severity.CRITICAL, confidence=0.9,
+                        title=f"A quote in parameter {point.field!r} breaks the SQL query ({engine} error)",
+                        severity=Severity.CRITICAL, confidence=0.9,
+                        location=location, request=request,
+                        steps=[f"Send the {where} parameter {point.field!r} ending in a single quote: {request}",
+                               f"The response contains a {engine} error.",
+                               f"Send the same value without the quote: {control}",
+                               "No error: the quote alone reached the SQL query."],
+                        response_excerpt=_excerpt(quoted.text, error.group(0)),
                         component=component, target_url=point.source_url,
                         evidence=[f"A single quote in the {where} parameter {point.field!r} produced a {engine} "
                                   "error that a quote-free value did not."],
@@ -295,9 +338,15 @@ class ActiveScanner:
             resp = await self._request(http, point, REDIRECT_PROBE)
             location = resp.headers.get("location", "") if resp is not None and resp.is_redirect else ""
             if location and (urlsplit(location).hostname or "") == "open-redirect.invalid":
+                where_to, request = _reproduce(point, REDIRECT_PROBE)
                 findings.append(Finding(
                     check_id="SEC-OPEN-REDIRECT", source=FindingSource.SECURITY,
-                    title="Open redirect", severity=Severity.MEDIUM, confidence=0.9,
+                    title=f"Parameter {point.field!r} redirects to any external site (open redirect)",
+                    severity=Severity.MEDIUM, confidence=0.9,
+                    location=where_to, request=request.replace("curl -s", "curl -s -D - -o /dev/null", 1),
+                    steps=[f"Send the {where} parameter {point.field!r} set to an outside address: {request}",
+                           f"The response redirects there: Location: {location}"],
+                    response_excerpt=f"HTTP {resp.status_code} · Location: {location}",
                     component=component, target_url=point.source_url,
                     evidence=[f"The {where} parameter {point.field!r} set the redirect Location to the external "
                               f"host {location!r}."],

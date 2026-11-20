@@ -267,6 +267,7 @@ def test_real_world_route_and_dependency_styles(tmp_path):
 
 def test_nextjs_rails_laravel_and_go_routes(tmp_path):
     files = {
+        "web/package.json": '{"dependencies": {"next": "15.0.0"}}',
         "web/pages/index.tsx": "export default function Home() {}",
         "web/pages/blog/[slug].tsx": "export default function Post() {}",
         "web/pages/_app.tsx": "export default function App() {}",

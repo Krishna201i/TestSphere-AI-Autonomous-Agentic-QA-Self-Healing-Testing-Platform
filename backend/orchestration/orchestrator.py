@@ -642,7 +642,7 @@ class PlatformWorkflowOrchestrator:
         # Why it failed, for the run page and reports (the analyzer ran during the workflow)
         diagnosis = None
         if final_status == TestExecutionStatus.FAILED.value and state is not None:
-            diagnosis = diagnosis_of(state.failure_analysis)
+            diagnosis = diagnosis_of(state.failure_analysis, error_msg)
             if diagnosis:
                 execution = db.update(TEST_EXECUTIONS, execution.id, diagnosis=diagnosis)
         dashboard_summary = (

@@ -26,6 +26,8 @@ os.environ.setdefault("DEPENDENCY_SCAN", "false")
 os.environ.setdefault("VISUAL_REGRESSION", "false")
 # The broken-page acceptance check only where a test turns it on (it is one more real browser run)
 os.environ.setdefault("ACCEPTANCE_MAX_PER_RUN", "0")
+# Page analysis reads the given HTML, without a browser render, unless a test turns it on
+os.environ.setdefault("ANALYZE_VISIBILITY", "false")
 
 
 @pytest.fixture(autouse=True)

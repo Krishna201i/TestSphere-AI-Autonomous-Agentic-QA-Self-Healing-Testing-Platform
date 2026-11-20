@@ -85,6 +85,7 @@ SECRET_PATTERNS = [
     ("Hardcoded credential", re.compile(
         r"(?i)\b(?:api[_-]?key|secret|password|passwd|token|access[_-]?key)\b\s*[:=]\s*['\"]([^'\"\s]{8,})['\"]")),
 ]
+_FIREBASE_CONFIG = re.compile(r"authDomain|firebaseapp\.com|initializeApp\(", re.I)
 _PLACEHOLDER = re.compile(r"(?i)(example|changeme|your[_-]|xxx|<|\$\{|\{|placeholder|dummy|test|sample|\*\*\*)")
 
 # FastAPI:  router = APIRouter(prefix="/security", ...)
@@ -109,6 +110,11 @@ class Route(BaseModel):
     path: str
     file: str
     line: int
+    # A front-end router's page (React Router, Vue Router): the browser renders
+    # it from the app's one HTML page, so the server answers it with that page
+    client: bool = False
+    # Found from where its file is (Next.js pages/ and app/ folders)
+    from_file: bool = False
 
 
 class Risk(BaseModel):
@@ -184,6 +190,8 @@ def analyze_repo(root: Path, *, source: str | None = None, name: str | None = No
                 bp.routes += _routes(text, r, path.suffix.lower())
             bp.risks += _secrets(text, r, in_tests=bool(suite) or "/tests/" in f"/{r}" or r.startswith("test"))
             bp.risks += _debug_flags(text, r)
+            if not suite and "/tests/" not in f"/{r}" and not r.startswith("test"):
+                bp.risks += _auth_risks(text, r)
         elif text is not None and path.name.startswith(".env"):
             bp.risks += _secrets(text, r)
 
@@ -191,6 +199,16 @@ def analyze_repo(root: Path, *, source: str | None = None, name: str | None = No
     bp.test_suites = [TestSuite(framework=f, files=len(v), examples=v[:5]) for f, v in sorted(tests.items())]
     bp.dependencies = _dependencies(root)
     bp.frameworks = _frameworks(bp.dependencies, tests)
+    # A pages/ folder is a router only in a Next.js app (elsewhere,
+    # src/pages/AuthPage.tsx is just a component, not a /AuthPage URL);
+    # app/**/page.tsx and route.ts files are Next.js's own naming
+    is_next = "next" in bp.dependencies.get("npm", []) or any(f.name.startswith("next.config.") for f in files)
+    if not is_next:
+        bp.routes = [r for r in bp.routes if not (r.from_file and re.search(r"(?:^|/)pages/", r.file))]
+    unique: dict[tuple[str, str], Route] = {}
+    for route in bp.routes:
+        unique.setdefault((route.method, route.path), route)
+    bp.routes = list(unique.values())
     bp.entry_points = _entry_points(root, files, rel)
     bp.routes = bp.routes[:500]
     return bp
@@ -296,8 +314,30 @@ def _test_framework(path: Path, rel: str) -> str | None:
     return "Jest/Vitest"
 
 
+# React Router:  <Route path="/auth" ...>  (the attribute may be on a later line)
+_JSX_ROUTE = re.compile(r"<Route\b[^>]*?\bpath\s*=\s*\{?\s*[\"'`]([^\"'`]+)[\"'`]", re.S)
+# Router configs (createBrowserRouter, Vue Router): { path: '/auth', element|component: ... }
+_ROUTE_OBJECT = re.compile(r"\{\s*path\s*:\s*[\"'`]([^\"'`]+)[\"'`][^{}]*?\b(?:element|component|Component|lazy|"
+                           r"loader|redirect)\s*:", re.S)
+_CLIENT_SUFFIXES = (".js", ".jsx", ".ts", ".tsx", ".vue", ".mjs")
+
+
+def _client_routes(text: str, rel: str, suffix: str) -> list[Route]:
+    """Pages a front-end router serves; parameters (:id) become <id>, catch-alls are skipped."""
+    if suffix not in _CLIENT_SUFFIXES or not re.search(r"react-router|vue-router|createBrowserRouter|<Route\b", text):
+        return []
+    found = []
+    for m in (*_JSX_ROUTE.finditer(text), *_ROUTE_OBJECT.finditer(text)):
+        path = m.group(1).strip()
+        if not path.startswith("/") or "*" in path:
+            continue
+        path = re.sub(r":(\w+)\??", r"<\1>", path)
+        found.append(Route(method="GET", path=path, file=rel, line=text.count("\n", 0, m.start()) + 1, client=True))
+    return found
+
+
 def _routes(text: str, rel: str, suffix: str) -> list[Route]:
-    routes = []
+    routes = _client_routes(text, rel, suffix)
     prefixes = dict(ROUTER_PREFIX.findall(text)) if suffix == ".py" else {}
     for pattern, kind in ROUTE_PATTERNS:
         if kind == "python" and suffix != ".py":
@@ -366,7 +406,7 @@ def _file_routes(rel: str) -> list[Route]:
     # [slug], [...slug] and [[...slug]] -> <slug>
     path = "/" + "/".join(re.sub(r"^\[+(?:\.\.\.)?(\w+)\]+$", r"<\1>", p) for p in parts)
     api = parts[:1] == ["api"] or m.group(5) == "route"
-    return [Route(method="ANY" if api else "GET", path=path, file=rel, line=1)]
+    return [Route(method="ANY" if api else "GET", path=path, file=rel, line=1, from_file=True)]
 
 
 def _redact(value: str) -> str:
@@ -382,6 +422,8 @@ def _secrets(text: str, rel: str, in_tests: bool = False) -> list[Risk]:
             value = m.group(1) if pattern.groups else m.group(0)
             if label == "Hardcoded credential" and _PLACEHOLDER.search(value):
                 continue
+            if label == "Hardcoded credential" and value.startswith("AIza") and _FIREBASE_CONFIG.search(text):
+                continue  # a Firebase web app's apiKey is public by design (security rules protect the data)
             risks.append(Risk(
                 kind=label, file=rel, line=text.count("\n", 0, m.start()) + 1,
                 detail=f"Looks like a {label.lower()} ({_redact(value)}); move it to a secret store and rotate it.",
@@ -404,6 +446,71 @@ def _debug_flags(text: str, rel: str) -> list[Risk]:
         for m in _DEBUG.finditer(text)
         if not _in_docstring(text, m.start())
     ]
+
+
+# A route handler: its decorator or registration names an HTTP method and a path
+_PY_ROUTE = re.compile(r"^@\w+(?:\.\w+)*\.(get|post|put|patch|delete|route)\(\s*[\"']([^\"']*)", re.M | re.I)
+_JS_ROUTE = re.compile(r"\b(?:app|router|server)\.(get|post|put|patch|delete|all)\(\s*[\"'`]([^\"'`]*)", re.I)
+_LOGIN_PATH = re.compile(r"log-?in|sign-?in|/auth/?(?:token)?$|/token$|/session", re.I)
+# What real authentication looks like: a password hash check, a provider, a signed token
+_VERIFIES = re.compile(r"verify|check_?password|compare|bcrypt|argon|scrypt|pbkdf|hashpw|authenticate|"
+                       r"passlib|firebase|supabase|cognito|auth0|jwt\.|jose|itsdangerous|signin_?with|"
+                       r"signInWith|passport", re.I)
+# A password handed on to something that checks it (a service, a query); not len(), strip() ...
+_PASSES_PASSWORD = re.compile(r"\b(?!len\b|bool\b|str\b|print\b|if\b)\w+\s*\((?:[^()]*,\s*)?[\w.]*\bpassword\b\s*[,)]",
+                              re.I)
+_GUESSABLE_TOKEN = re.compile(r"[\"']?(?:access_)?token[\"']?\s*[:=]\s*f?[\"'`][^\"'`\n]*\{[^}\n]*(?:hash\(|email|user(?:name)?\b|id\b)",
+                              re.I)
+# Anything that authenticates a request
+_REQUEST_AUTH = re.compile(r"Depends\(\s*\w*(?:auth|user|token|login|session|current)|Security\(|HTTPBearer|"
+                           r"OAuth2PasswordBearer|APIKeyHeader|login_required|permission_classes|IsAuthenticated|"
+                           r"verify_id_token|jwt\.decode|jwtVerify|requireAuth|isAuthenticated|authMiddleware|"
+                           r"passport\.authenticate|getServerSession|@auth|authorize", re.I)
+_STATE_CHANGING = ("post", "put", "patch", "delete")
+
+
+def _code_only(code: str) -> str:
+    """*code* without comments, docstrings and string literals ("Authenticate the
+    user" in a docstring is not authentication)."""
+    code = re.sub(r'(?s)""".*?"""|\'\'\'.*?\'\'\'', " ", code)
+    code = re.sub(r"(?m)(?:#|//).*$", " ", code)
+    return re.sub(r"\"[^\"\n]*\"|'[^'\n]*'|`[^`]*`", '""', code)
+
+
+def _handler_body(text: str, start: int) -> str:
+    """The code after a route decorator up to the next top-level decorator or definition."""
+    nxt = re.search(r"^(?:@|def |async def |class )", text[start:], re.M)
+    first = nxt.end() if nxt else 0  # skip the handler's own def line
+    end = re.search(r"^(?:@|class )", text[start + first:], re.M)
+    return text[start: start + first + end.start()] if end else text[start:]
+
+
+def _auth_risks(text: str, rel: str) -> list[Risk]:
+    """Authentication that only looks like it: a login that never checks the
+    password, a session token built from the user's own data, and a file of
+    state-changing routes with no authentication anywhere."""
+    risks: list[Risk] = []
+    line = lambda pos: text.count("\n", 0, pos) + 1  # noqa: E731
+    syntax = _PY_ROUTE if rel.endswith(".py") else _JS_ROUTE  # one route syntax per language
+    routes = [(m.start(), m.group(1).lower(), m.group(2)) for m in syntax.finditer(text)]
+    for pos, method, path in routes:
+        if method not in ("post", "route", "all") or not _LOGIN_PATH.search(path):
+            continue
+        body = _code_only(_handler_body(text, pos))
+        if re.search(r"\bpassword\b", body, re.I) and not _VERIFIES.search(body) and not _PASSES_PASSWORD.search(body):
+            risks.append(Risk(kind="Login does not check the password", file=rel, line=line(pos),
+                              detail=f"The {path} handler reads a password but never verifies it against a stored "
+                                     "hash or an identity provider: any password signs in."))
+    for m in _GUESSABLE_TOKEN.finditer(text):
+        risks.append(Risk(kind="Guessable session token", file=rel, line=line(m.start()),
+                          detail="The token is built from the user's own data (email, id or its hash): anyone can "
+                                 "compute it. Use a random or signed token (secrets.token_urlsafe, a JWT)."))
+    changing = [r for r in routes if r[1] in _STATE_CHANGING]
+    if len(changing) >= 3 and not _REQUEST_AUTH.search(text):
+        risks.append(Risk(kind="State-changing routes without authentication", file=rel, line=line(changing[0][0]),
+                          detail=f"{len(changing)} POST/PUT/PATCH/DELETE routes and no authentication check in this "
+                                 "file: anyone who can reach the API can call them."))
+    return risks[:20]
 
 
 def _dependencies(root: Path) -> dict[str, list[str]]:

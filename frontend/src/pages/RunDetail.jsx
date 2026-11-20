@@ -404,11 +404,14 @@ export default function RunDetail({ params, onNavigate }) {
       {s && (
         <div className="stat-tiles">
           <div className="stat-tile"><div className="v">{s.passed}/{s.total}</div><div className="l">Tests passed</div></div>
+          <div className="stat-tile" title="Passing tests that failed on a deliberately broken copy of their page: the ones a pass actually means something for">
+            <div className="v">{s.verified ?? '—'}</div><div className="l">Proven to catch a break</div>
+          </div>
           <div className="stat-tile"><div className={`v ${s.failed ? 'bad' : ''}`}>{s.failed}</div><div className="l">Failed{s.quarantined_failed ? ` (+${s.quarantined_failed} quarantined)` : ''}</div></div>
           <div className="stat-tile"><div className="v">{s.healed}</div><div className="l">Self-healed</div></div>
           <div className="stat-tile"><div className="v">{s.flaky ?? 0}</div><div className="l">Flaky</div></div>
           <div className="stat-tile"><div className="v">{(run.regressions || []).length}</div><div className="l">Regressions</div></div>
-          <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Security findings</div></div>
+          <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Proven security issues{s.hardening ? <span className="muted"> · {s.hardening} hardening</span> : null}</div></div>
           {run.llm_usage && (
             <div className="stat-tile" title={`${run.llm_usage.input_tokens.toLocaleString()} in, ${run.llm_usage.output_tokens.toLocaleString()} out`}>
               <div className={`v ${run.llm_usage.budget_exhausted ? 'bad' : ''}`}>{aiTokens(run.llm_usage)}</div>

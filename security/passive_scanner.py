@@ -58,6 +58,7 @@ from .findings import (
     FindingStatus,
     RetestResult,
     Severity,
+    curl_command,
     dedupe,
 )
 from .scope import ScopePolicy, is_loopback
@@ -128,8 +129,34 @@ class _PageParser(HTMLParser):
 # ---------------------------------------------------------------------------
 
 
+# Response headers worth showing next to a header finding (what is there, and what is not)
+_SHOWN_HEADERS = ("content-security-policy", "strict-transport-security", "x-frame-options", "x-content-type-options",
+                  "referrer-policy", "server", "x-powered-by", "access-control-allow-origin",
+                  "access-control-allow-credentials", "set-cookie", "location")
+
+
+def _headers_excerpt(snap: PageSnapshot) -> str:
+    """The status and the security-relevant headers of the response, cookie values hidden."""
+    lines = [f"HTTP {snap.status}"]
+    for name in _SHOWN_HEADERS:
+        for value in snap.headers.get_list(name):
+            if name == "set-cookie":  # the cookie's name and flags, never its value
+                cookie, _, flags = value.partition(";")
+                value = f"{cookie.split('=', 1)[0]}=…;{flags}" if flags else f"{cookie.split('=', 1)[0]}=…"
+            lines.append(f"{name}: {value[:160]}")
+    return "\n".join(lines)
+
+
 def _finding(snap: PageSnapshot, check_id: str, **kwargs) -> Finding:
     kwargs.setdefault("component", snap.url)
+    # Reproduce it: the request a browser makes, and the headers that show it
+    url = kwargs["component"] if str(kwargs["component"]).startswith("http") else snap.url
+    request = curl_command("GET", url.split(" ")[0], headers_only=True)
+    kwargs.setdefault("location", {"method": "GET", "url": url.split(" ")[0], "parameter": ""})
+    kwargs.setdefault("request", request)
+    kwargs.setdefault("steps", [f"Request the page and look at its response headers: {request}",
+                                "Compare them with the evidence above."])
+    kwargs.setdefault("response_excerpt", _headers_excerpt(snap))
     return Finding(check_id=check_id, source=FindingSource.SECURITY, target_url=snap.requested_url, **kwargs)
 
 
@@ -474,8 +501,12 @@ def _env_finding(snap: PageSnapshot, url: str, body: str) -> Finding | None:
     secret = [n for n in names if re.search(r"PASS|SECRET|KEY|TOKEN|DATABASE_URL|DSN|PRIVATE", n)]
     if len(names) < 2 or not secret:
         return None
+    request = curl_command("GET", url)
     return _finding(snap, "SEC-EXPOSED-ENV", component=url, title="Environment file (.env) is downloadable",
-                    severity=Severity.CRITICAL,
+                    severity=Severity.CRITICAL, request=request,
+                    steps=[f"Download it: {request}", f"It lists {len(names)} settings, including "
+                           f"{', '.join(secret[:5])} (TestSphere does not record the values)."],
+                    response_excerpt="\n".join(f"{n}=…" for n in names[:8]),
                     evidence=[f"{url} returns {len(names)} settings, including {', '.join(secret[:5])} "
                               "(values not recorded)"],
                     root_cause="The project's .env file is served as a static file.",
@@ -486,7 +517,11 @@ def _env_finding(snap: PageSnapshot, url: str, body: str) -> Finding | None:
 def _git_finding(snap: PageSnapshot, url: str, body: str) -> Finding | None:
     if not re.match(r"\s*(?:ref: refs/[\w./-]+|[0-9a-f]{40})\s*$", body):
         return None
+    request = curl_command("GET", url)
     return _finding(snap, "SEC-EXPOSED-GIT", component=url, title="Git repository (.git) is downloadable",
+                    request=request, response_excerpt=body.strip()[:80],
+                    steps=[f"Download the repository's HEAD: {request}",
+                           "It answers with a Git reference: the rest of .git (objects, history) is reachable too."],
                     severity=Severity.HIGH, evidence=[f"{url} returns a Git HEAD: {body.strip()[:60]}"],
                     root_cause="The .git folder is served, so the source code and its history can be downloaded.",
                     recommendation="Block /.git in the web server and deploy without the .git folder.")

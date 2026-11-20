@@ -24,12 +24,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import re
 from collections import Counter
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -424,7 +426,8 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
 
     # ── security ──
     security = await _stage_security(state, app_url, owner, scanner, active=bool(project.get("active_scan")),
-                                     pages=_tested_pages(test_cases, app_url))
+                                     pages=_tested_pages(test_cases, app_url),
+                                     routes=(blueprint or {}).get("routes"))
 
     # ── report ──
     _report(state, project, results, security)
@@ -461,24 +464,60 @@ async def _stage_codebase(state: _RunState, project: Record) -> dict[str, Any] |
                 f" · {deps['vulnerable']} of {deps['checked']} pinned packages have known vulnerabilities"
                 if deps.get("vulnerable") else f" · {deps['checked']} pinned packages, none known vulnerable" if deps else "")
     state.stage("codebase", "done", f"{blueprint.get('files_total', 0)} files, {primary}, "
-                                    f"{len(blueprint.get('routes', []))} routes, {len(blueprint.get('risks', []))} risks{dep_note}")
+                                    f"{_count(len(blueprint.get('routes', [])), 'route')}, "
+                                    f"{_count(len(blueprint.get('risks', [])), 'risk')}{dep_note}")
     return blueprint
 
 
-async def _reachable(urls: list[str]) -> dict[str, int | None]:
-    """HTTP status per URL (None when unreachable), checked concurrently."""
+def _count(n: int, word: str) -> str:
+    """'1 risk', '3 risks'."""
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+# Answers a browser shows as a page; anything else (a CSV, a spreadsheet, JSON) is a file
+_PAGE_TYPES = ("text/html", "application/xhtml+xml", "text/plain", "")
+# A path no site has: what a single-page-app host answers for every unknown URL
+FALLBACK_PROBE_PATH = "/__testsphere-probe-not-a-page"
+
+
+async def _reachable(urls: list[str]) -> dict[str, dict[str, Any] | None]:
+    """What each URL answers (None when unreachable), checked concurrently:
+    ``status``, whether it is a ``file`` (a download, not a page) and a
+    ``digest`` of the body (to recognise a catch-all answer)."""
     from backend.netguard import BlockedTargetError
 
-    async def one(url: str) -> int | None:
+    async def one(url: str) -> dict[str, Any] | None:
         try:
             response, _ = await get_verifying_first(url, timeout=8.0,
                                                     headers={"User-Agent": URLAnalyzerService.USER_AGENT})
-            return response.status_code
         except (httpx.HTTPError, BlockedTargetError):
             return None
+        kind = response.headers.get("content-type", "").split(";")[0].strip().lower()
+        attachment = "attachment" in response.headers.get("content-disposition", "").lower()
+        return {"status": response.status_code, "file": attachment or kind not in _PAGE_TYPES,
+                "digest": hashlib.sha256(response.content).hexdigest()}
 
-    codes = await asyncio.gather(*(one(u) for u in urls))
-    return dict(zip(urls, codes, strict=True))
+    found = await asyncio.gather(*(one(u) for u in urls))
+    return dict(zip(urls, found, strict=True))
+
+
+async def _fallback_digests(base_url: str) -> set[str]:
+    """Bodies that mean "not this route": what the site sends for a path that
+    cannot exist, when it answers that with a page (a single-page app's host
+    sends its index for every URL), and the start page itself.  A code route
+    answering one of them is not served there.  The probe is tried twice: a
+    slow host's first answer can take longer than a check waits."""
+    root = urlparse(base_url)
+    probe_url = f"{root.scheme}://{root.netloc}{FALLBACK_PROBE_PATH}"
+    digests: set[str] = set()
+    for _ in range(2):
+        answers = await _reachable([probe_url, base_url])
+        for answer in answers.values():
+            if answer and answer["status"] < 400 and not answer["file"]:
+                digests.add(answer["digest"])
+        if answers[probe_url]:
+            break
+    return digests
 
 
 async def _analyze_pages(urls: list[str]) -> dict[str, dict[str, Any]]:
@@ -512,10 +551,20 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
     planned += extra
     candidates = suite.candidate_pages(analysis, blueprint, link_limit=settings.PIPELINE_LINK_PAGES,
                                        route_limit=settings.PIPELINE_ROUTE_PAGES)
-    codes = await _reachable([c["url"] for c in candidates]) if candidates else {}
-    left_out = [f"{c['label']} ({codes[c['url']] or 'unreachable'})" for c in candidates
-                if not codes.get(c["url"]) or codes[c["url"]] >= 400]
-    reachable = [c for c in candidates if codes.get(c["url"]) and codes[c["url"]] < 400]
+    answers = await _reachable([c["url"] for c in candidates]) if candidates else {}
+    left_out = [f"{c['label']} ({(answers.get(c['url']) or {}).get('status') or 'unreachable'})" for c in candidates
+                if not answers.get(c["url"]) or answers[c["url"]]["status"] >= 400]
+    reachable = [c for c in candidates if answers.get(c["url"]) and answers[c["url"]]["status"] < 400]
+    # A linked file downloads (a browser cannot open it as a page): the request above checked it
+    files = [c for c in reachable if answers[c["url"]].get("file")]
+    # A code route answered with the site's catch-all page is not served there
+    # (a front end deployed without its API): no test can pass or mean anything
+    fallback = await _fallback_digests(analysis["url"]) if any(c["kind"] == "route" for c in reachable) else set()
+    # (not a front-end router's page: the app's one HTML page is how those are served)
+    unserved = [c for c in reachable if c["kind"] == "route" and not c.get("client")
+                and answers[c["url"]].get("digest") in fallback]
+    left_out += [f"{c['label']} (answers with the site's catch-all page: not served here)" for c in unserved]
+    reachable = [c for c in reachable if c not in files and c not in unserved]
     if project.get("sign_in_first"):
         # These pages run signed in, but analysis sees them signed out (often a
         # redirect to sign in): check they stay put instead of checking content
@@ -523,9 +572,13 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
     else:
         pages = await _analyze_pages([c["url"] for c in reachable[:settings.PIPELINE_DEEP_PAGES]])
         # A page that redirected was analyzed as the page it led to: no content checks from that
-        planned += [suite.page_check_test(c, pages[c["url"]])
-                    if pages.get(c["url"]) and not suite.redirected(c, pages[c["url"]]) else suite.render_test(c)
-                    for c in reachable]
+        for c in reachable:
+            page = pages.get(c["url"])
+            if page and not suite.redirected(c, page):
+                planned.append(suite.page_check_test(c, page))
+            else:
+                # Sent elsewhere signed out (a protected page): check it stays that way
+                planned.append((page and suite.redirect_test(c, page)) or suite.render_test(c))
 
     planned = select_by_profile(planned, profile)
     generated, created = [], 0
@@ -568,6 +621,12 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
         detail += f" · retired {retired} generated test(s) no longer planned"
     if left_out:
         detail += f" · left out {len(left_out)} page(s) that did not load: " + ", ".join(left_out[:4])
+    if files:
+        detail += (f" · {len(files)} file or data URL(s) answered fine (checked by request, not opened as pages): "
+                   + ", ".join(c["label"] for c in files[:4]))
+    hidden = (analysis.get("elements_inventory") or {}).get("hidden_controls")
+    if hidden:
+        detail += f" · {hidden} control(s) hidden on load (in a dialog, tab or menu) were not tested"
     if ai_note:
         detail += f" · {ai_note}"
     if explore_note:
@@ -701,7 +760,8 @@ def _tested_pages(test_cases: list[Record], app_url: str) -> list[str]:
 
 
 async def _stage_security(state: _RunState, app_url: str, owner: str | None, scanner: Any,
-                          *, active: bool = False, pages: list[str] | None = None) -> dict[str, Any] | None:
+                          *, active: bool = False, pages: list[str] | None = None,
+                          routes: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
     from backend.api.security import (
         _attach_ai,
         active_scan_refusal,
@@ -740,13 +800,12 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
             skipped += 1  # another page that did not answer: the rest still count
             continue
         page = scan_result(state.db, scanner, snap, url, actor=state.doc["actor"], owner_uid=owner,
-                           extra_findings=active_findings, active=run_active, probed=url == app_url)
+                           extra_findings=active_findings, active=run_active, probed=url == app_url, routes=routes)
         for key in ("findings", "reopened", "resolved"):
             result[key] += page[key]
         result["pages"].append(url)
         found += scanner.analyze(snap) + active_findings
-    counts = Counter(f["severity"] for f in result["findings"])
-    detail = ", ".join(f"{counts[s]} {s}" for s in ("critical", "high", "medium", "low", "info") if counts[s]) or "no findings"
+    detail = tier_detail(result["findings"])
     if len(result["pages"]) > 1:
         detail = f"{len(result['pages'])} pages scanned · {detail}"
     if found and security_ai.enabled():
@@ -762,6 +821,20 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
         detail += f" · active scan skipped: {refusal}"
     state.stage("security", "done", detail)
     return result
+
+
+def tier_detail(findings: list[dict[str, Any]]) -> str:
+    """'1 proven (1 critical) · 2 to check by hand · 6 hardening suggestions', or 'no findings'."""
+    proven = Counter(f["severity"] for f in findings if f.get("tier") == "proven")
+    parts = []
+    if proven:
+        by = ", ".join(f"{proven[s]} {s}" for s in ("critical", "high", "medium", "low", "info") if proven[s])
+        parts.append(f"{sum(proven.values())} proven ({by})")
+    if n := sum(1 for f in findings if f.get("tier") == "unconfirmed"):
+        parts.append(f"{n} to check by hand")
+    if n := sum(1 for f in findings if f.get("tier") == "hardening"):
+        parts.append(_count(n, "hardening suggestion"))
+    return " · ".join(parts) or "no findings"
 
 
 FLAKY_WINDOW = 10  # recent finished runs looked at
@@ -811,7 +884,15 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
         "healed": sum(1 for r in results if r["healed"]),
         "flaky": len(flaky & {r["test_case_id"] for r in results}),
         "quarantined_failed": counts.get(TestExecutionStatus.FAILED.value, 0) - failed,
-        "findings": dict(Counter(f["severity"] for f in (security or {}).get("findings", []))) if security else None,
+        # Only proven findings count in severity totals and the verdict; the rest are listed, not counted
+        "findings": dict(Counter(f["severity"] for f in (security or {}).get("findings", [])
+                                 if f.get("tier") == "proven")) if security else None,
+        "unconfirmed": sum(1 for f in (security or {}).get("findings", []) if f.get("tier") == "unconfirmed"),
+        "hardening": sum(1 for f in (security or {}).get("findings", []) if f.get("tier") == "hardening"),
+        # Passing tests the broken-page check showed fail when their page breaks
+        "verified": sum(1 for r in results if r.get("acceptance") == "verified"
+                        and r["status"] in (TestExecutionStatus.PASSED.value, TestExecutionStatus.HEALED.value)),
+        "render_only": sum(1 for r in results if r.get("acceptance") in ("unverifiable", "asserts_nothing")),
         "previous_run_id": previous["id"] if previous else None,
         "visual_changes": sum(1 for r in results if r.get("visual_changed")),
         "database": state.doc.get("database"),

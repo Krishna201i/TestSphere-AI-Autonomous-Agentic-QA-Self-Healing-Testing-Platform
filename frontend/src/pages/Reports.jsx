@@ -3,7 +3,11 @@ import { Download, FileJson, FileText, Printer, Search } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { getPipelineRuns, getRunReportPdf } from '../services/api';
 import { ResultBadges, ResultDetail, RunSummary } from '../components/TestResult';
-import { SEVERITY_ORDER, formatDuration, groupedResults, resultLabel, testDetail, timeAgo, toDate } from '../lib/derive';
+import {
+  SEVERITY_ORDER, byTier, findingTier, formatDuration, groupedResults, resultLabel, scanSkipReason, securityScanned,
+  testDetail, tierCounts, timeAgo, toDate,
+} from '../lib/derive';
+import { TierPill } from '../components/FindingEvidence';
 import { RunStatus } from './Autopilot';
 import usePersistentState from '../lib/usePersistentState';
 import { usePaged } from '../lib/usePaged';
@@ -293,13 +297,20 @@ export default function Reports({ onNavigate }) {
     return { inScope, finished, totals, regressions, results, scopedFindings };
   }, [runs, project, period, findings]);
 
-  const open = data.scopedFindings.filter((f) => f.status === 'open');
+  // Proven first; only proven findings count in totals (the rest are listed for what they are)
+  const open = byTier(data.scopedFindings.filter((f) => f.status === 'open'));
+  const openTiers = tierCounts(open);
+  const proven = open.filter((f) => findingTier(f) === 'proven');
   // On screen a page at a time; printed (and in the PDF) every row
   const regressionPage = usePaged(data.regressions, 10);
   const findingPage = usePaged(open, 10);
-  const bySeverity = SEVERITY_ORDER.map((s) => [s, open.filter((f) => f.severity === s).length]).filter(([, n]) => n);
+  const bySeverity = SEVERITY_ORDER.map((s) => [s, proven.filter((f) => f.severity === s).length]).filter(([, n]) => n);
   const awaitingRetest = open.filter((f) => f.approved_by && f.retest_result !== 'pass').length;
   const resolved = data.scopedFindings.filter((f) => f.status === 'resolved').length;
+  // "0 open findings" only means something once a run really scanned: a
+  // skipped scan (out of scope) is shown as not scanned, never as clean
+  const scanned = data.inScope.some(securityScanned) || data.scopedFindings.length > 0;
+  const skipReason = scanned ? null : scanSkipReason(data.inScope);
 
   const q = query.trim().toLowerCase();
   const matches = (t, run) => {
@@ -325,7 +336,9 @@ export default function Reports({ onNavigate }) {
         p, runs: pr.length, lastRun,
         rate: t.total ? t.passed / t.total : null,
         regressions: data.regressions.filter((g) => g.run.project_id === p.id).length,
-        openFindings: findings.filter((f) => f.status === 'open' && host && hostOf(f.target_url) === host).length,
+        openFindings: findings.filter((f) => f.status === 'open' && host && hostOf(f.target_url) === host
+          && findingTier(f) === 'proven').length,
+        scanned: pr.some(securityScanned) || findings.some((f) => host && hostOf(f.target_url) === host),
       };
     });
 
@@ -383,7 +396,7 @@ export default function Reports({ onNavigate }) {
             <div className="stat-tile"><div className="v">{data.totals.total}</div><div className="l">Tests executed</div></div>
             <div className="stat-tile"><div className="v">{data.totals.healed}</div><div className="l">Self-healed</div></div>
             <div className="stat-tile"><div className="v">{data.regressions.length}</div><div className="l">Regressions</div></div>
-            <div className="stat-tile"><div className="v">{open.length}</div><div className="l">Open findings</div></div>
+            <div className="stat-tile"><div className="v">{scanned ? proven.length : '—'}</div><div className="l">{scanned ? 'Proven security issues' : 'Not scanned'}</div></div>
           </div>
 
           {data.finished.length === 0 ? (
@@ -393,7 +406,7 @@ export default function Reports({ onNavigate }) {
           ) : (
             <div className="grid-2">
               <section className="card">
-                <div className="card-head"><h3>Pass rate per run</h3><span className="muted small">{data.finished.length} runs</span></div>
+                <div className="card-head"><h3>Pass rate per run</h3><span className="muted small">{data.finished.length} run{data.finished.length === 1 ? '' : 's'}</span></div>
                 <PassRateChart runs={data.finished.slice(-40)} />
               </section>
               <section className="card">
@@ -421,18 +434,28 @@ export default function Reports({ onNavigate }) {
             </section>
 
             <section className="card">
-              <div className="card-head"><h3>Security summary</h3><span className="muted small">{open.length} open · {resolved} resolved</span></div>
+              <div className="card-head"><h3>Security summary</h3><span className="muted small">{openTiers.proven} proven open · {resolved} resolved</span></div>
+              {(openTiers.unconfirmed > 0 || openTiers.hardening > 0) && (
+                <div className="small muted">
+                  {openTiers.unconfirmed > 0 && `${openTiers.unconfirmed} to check by hand`}
+                  {openTiers.unconfirmed > 0 && openTiers.hardening > 0 && ' · '}
+                  {openTiers.hardening > 0 && `${openTiers.hardening} hardening suggestion${openTiers.hardening === 1 ? '' : 's'} (not counted)`}
+                </div>
+              )}
               {bySeverity.length > 0 ? (
                 <div className="pill-row">{bySeverity.map(([s, n]) => <span key={s} className={`sev ${s}`}>{n} {s}</span>)}</div>
-              ) : <div className="empty">No open findings{data.scopedFindings.length ? '' : ' — targets in the authorized scan scope are scanned on every run'}.</div>}
+              ) : scanned ? <div className="empty">No open findings.</div> : (
+                <div className="empty">Not scanned{skipReason ? `: ${skipReason}` : ' yet'}. No findings here does not mean the target is safe.</div>
+              )}
               {awaitingRetest > 0 && <div className="hint">{awaitingRetest} approved fix(es) waiting for a passing retest.</div>}
               {open.length > 0 && (
                 <div className="table-wrap">
                   <table className="table">
-                    <thead><tr><th>Severity</th><th>Finding</th><th>Target</th><th>Seen</th></tr></thead>
+                    <thead><tr><th>Proof</th><th>Severity</th><th>Finding</th><th>Target</th><th>Seen</th></tr></thead>
                     <tbody>
                       {open.map((f, i) => (
                         <tr key={f.key} className={findingPage.isShown(i) ? '' : 'print-only-row'}>
+                          <td><TierPill finding={f} /></td>
                           <td><span className={`sev ${f.severity}`}>{f.severity}</span></td>
                           <td className="cell-wrap">{f.title}</td>
                           <td className="mono small cell-wrap">{hostOf(f.target_url) || f.target_url}</td>
@@ -453,7 +476,7 @@ export default function Reports({ onNavigate }) {
             {perProject.length === 0 ? <div className="empty">No projects yet.</div> : (
               <div className="table-wrap">
                 <table className="table">
-                  <thead><tr><th>Project</th><th>Runs</th><th>Pass rate</th><th>Last run</th><th>Regressions</th><th>Open findings</th></tr></thead>
+                  <thead><tr><th>Project</th><th>Runs</th><th>Pass rate</th><th>Last run</th><th>Regressions</th><th>Proven issues</th></tr></thead>
                   <tbody>
                     {perProject.map((row) => (
                       <tr key={row.p.id}>
@@ -462,7 +485,7 @@ export default function Reports({ onNavigate }) {
                         <td>{pctText(row.rate)}</td>
                         <td>{row.lastRun ? <><RunStatus status={row.lastRun.status} /> <span className="small muted">#{row.lastRun.id} · {timeAgo(row.lastRun.finished_at)}</span></> : <span className="muted small">no runs</span>}</td>
                         <td>{row.regressions}</td>
-                        <td>{row.openFindings}</td>
+                        <td>{row.scanned ? row.openFindings : <span className="muted small">not scanned</span>}</td>
                       </tr>
                     ))}
                   </tbody>

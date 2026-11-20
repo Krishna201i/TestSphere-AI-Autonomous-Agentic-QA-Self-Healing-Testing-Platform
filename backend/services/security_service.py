@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.database.store import Record, Store, now_iso
 from backend.models import AUDIT_EVENTS, SECURITY_FINDINGS
+from security.findings import tier_of
 
 
 def record_audit(
@@ -28,8 +29,12 @@ def list_audit(db: Store, limit: int = 200, **filters: Any) -> list[dict[str, An
 
 
 def serialize(row: Record) -> dict[str, Any]:
-    """Stored finding JSON plus its tracked lifecycle fields."""
-    return json.loads(row["data"]) | {
+    """Stored finding JSON plus its tracked lifecycle fields (and its tier,
+    worked out for findings stored before tiers existed)."""
+    data = json.loads(row["data"])
+    data.setdefault("tier", tier_of(data.get("check_id", ""), float(data.get("confidence", 1.0)),
+                                    data.get("source", "security")).value)
+    return data | {
         "key": row["key"],
         "status": row["status"],
         "retest_result": row.get("retest_result"),

@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { RadarChart } from '../components/charts';
-import { RADAR_AXES, SEVERITY_ORDER, confidenceLabel, radarValues, timeAgo, urlError } from '../lib/derive';
+import { RADAR_AXES, SEVERITY_ORDER, byTier, confidenceLabel, radarValues, tierCounts, timeAgo, urlError } from '../lib/derive';
+import FindingEvidence, { TierPill } from '../components/FindingEvidence';
 import { selectableRow } from '../lib/a11y';
 import Pager from '../components/Pager';
 import { usePaged } from '../lib/usePaged';
@@ -15,7 +16,9 @@ export default function AttackerAgent({ onNavigate }) {
   const [error, setError] = useState(null);
   const activeAvailable = Boolean(ws.system?.active_scan);
 
-  const findings = lastScan?.findings || [];
+  // Proven first: the order a reader should act in
+  const findings = byTier(lastScan?.findings);
+  const tiers = tierCounts(findings);
   const selected = findings.find((f) => f.key === selectedKey) || findings[0] || null;
   const findingPage = usePaged(findings, 10);
 
@@ -90,15 +93,22 @@ export default function AttackerAgent({ onNavigate }) {
           {!lastScan && <div className="empty">Run a scan to see findings.</div>}
           {lastScan && findings.length === 0 && <div className="empty">No weaknesses found by passive checks.</div>}
           {findings.length > 0 && (
+            <p className="small">
+              <b>{tiers.proven} proven</b>
+              {tiers.unconfirmed > 0 && <> · {tiers.unconfirmed} to check by hand</>}
+              {tiers.hardening > 0 && <> · <span className="muted">{tiers.hardening} hardening suggestion{tiers.hardening === 1 ? '' : 's'} (missing defences, not counted as vulnerabilities)</span></>}
+            </p>
+          )}
+          {findings.length > 0 && (
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>Severity</th><th>Check</th><th>Finding</th><th>Retest</th></tr></thead>
+                <thead><tr><th>Proof</th><th>Severity</th><th>Finding</th><th>Retest</th></tr></thead>
                 <tbody>
                   {findingPage.items.map((f) => (
                     <tr key={f.key} className={`selectable ${selected?.key === f.key ? 'selected' : ''}`} {...selectableRow(() => setSelectedKey(f.key), selected?.key === f.key)}>
+                      <td><TierPill finding={f} /></td>
                       <td><span className={`sev ${f.severity}`}>{f.severity}</span></td>
-                      <td className="mono small">{f.check_id}</td>
-                      <td className="cell-wrap">{f.title}</td>
+                      <td className="cell-wrap">{f.title}<div className="mono small muted">{f.check_id}</div></td>
                       <td>{retests[f.key] ? <span className={`status ${retests[f.key].result}`}>{retests[f.key].result}</span> : <span className="muted small">—</span>}</td>
                     </tr>
                   ))}
@@ -126,7 +136,7 @@ export default function AttackerAgent({ onNavigate }) {
         <section className="card">
           <div className="card-head">
             <h3>{selected.title}</h3>
-            <span className={`sev ${selected.severity}`}>{selected.severity}</span>
+            <span className="row"><TierPill finding={selected} /> <span className={`sev ${selected.severity}`}>{selected.severity}</span></span>
           </div>
           {selected.ai && (
             <div className="ai-note">
@@ -149,6 +159,7 @@ export default function AttackerAgent({ onNavigate }) {
               )}
             </dd>
           </dl>
+          <FindingEvidence finding={selected} />
           <div className="row">
             <button type="button" className="btn btn-primary" onClick={() => { setSelectedKey(selected.key); onNavigate('remediation'); }}>
               Open fix proposal

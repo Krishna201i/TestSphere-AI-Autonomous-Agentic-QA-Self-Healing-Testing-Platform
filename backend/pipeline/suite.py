@@ -53,8 +53,20 @@ def _normalize(url: str) -> str:
     return urlunparse((p.scheme.lower(), p.netloc.lower(), path, "", p.query, ""))
 
 
+def _shorten(text: str, limit: int) -> str:
+    """*text* cut at a word boundary within *limit* characters ("Cost & Perfo" reads as broken)."""
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    head = text[:limit + 1]
+    cut = head.rsplit(" ", 1)[0].rstrip(" -—–|·,:;&") if " " in head else ""
+    return cut if len(cut) >= limit // 2 else text[:limit]
+
+
 def _clean_title(title: str) -> str:
-    return (title.split(" - ")[0].split("|")[0].strip() or title)[:30]
+    """The part of a page title a check looks for: before " - ", "|" or " — "
+    (the site name), cut at a word."""
+    return _shorten(re.split(r" - | — | \| |\|", title)[0].strip() or title, 30)
 
 
 def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict[str, Any]]:
@@ -69,11 +81,12 @@ def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict
         smoke.append(_step(2, "ASSERT_CONTAINS_TEXT", target="head > title", value=_clean_title(title),
                            description=f"Page title contains '{_clean_title(title)}'"))
     smoke.append(_step(len(smoke) + 1, "ASSERT_VISIBLE", target="body", description="Page body renders"))
-    tests.append({"slug": "smoke", "name": f"Smoke: {title[:50] or url}", "category": "smoke", "steps": smoke})
+    tests.append({"slug": "smoke", "name": f"Smoke: {_shorten(title, 50) or url}", "category": "smoke", "steps": smoke})
 
     synthesized = (analysis.get("synthesized_test_case") or {}).get("steps") or []
     if any(str(s.get("action", "")).upper() in ("FILL", "CLICK", "PRESS") for s in synthesized):
-        name = f"Scenario: {prompt.strip()[:60]}" if prompt and prompt.strip() else f"Interaction: {title[:50] or url}"
+        name = (f"Scenario: {_shorten(prompt, 60)}" if prompt and prompt.strip()
+                else f"Interaction: {_shorten(title, 50) or url}")
         tests.append({"slug": "interaction", "name": name, "category": "functional", "steps": synthesized})
 
     # A login or sign-up form's own tests (backend/services/auth_plan.py), and
@@ -83,7 +96,7 @@ def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict
 
     headings = inventory.get("headings") or []
     if headings:
-        heading = headings[0][:40]
+        heading = _shorten(headings[0], 40)
         tests.append({
             "slug": "content",
             "name": f"Content: heading '{heading}'",
@@ -108,7 +121,7 @@ def candidate_pages(analysis: dict[str, Any], blueprint: dict[str, Any] | None =
     seen = {_normalize(base)}
     out: list[dict[str, str]] = []
 
-    def add(kind: str, url: str, label: str, limit: int) -> None:
+    def add(kind: str, url: str, label: str, limit: int, client: bool = False) -> None:
         if sum(1 for c in out if c["kind"] == kind) >= limit:
             return
         p = urlparse(url)
@@ -118,7 +131,7 @@ def candidate_pages(analysis: dict[str, Any], blueprint: dict[str, Any] | None =
         if key in seen or _UNSAFE_LINK.search(p.path):
             return
         seen.add(key)
-        out.append({"kind": kind, "url": url, "label": label})
+        out.append({"kind": kind, "url": url, "label": label, "client": client})
 
     for href in (analysis.get("elements_inventory") or {}).get("links") or []:
         href = href.strip()
@@ -128,12 +141,13 @@ def candidate_pages(analysis: dict[str, Any], blueprint: dict[str, Any] | None =
         add("link", absolute, urlparse(absolute).path or "/", link_limit)
 
     root = f"{origin.scheme}://{origin.netloc}"
-    for route in _get_routes(blueprint):
-        add("route", root + route, f"GET {route}", route_limit)
+    for route, client in _get_routes(blueprint):
+        add("route", root + route, f"GET {route}", route_limit, client)
     return out
 
 
-def _get_routes(blueprint: dict[str, Any] | None) -> Iterable[str]:
+def _get_routes(blueprint: dict[str, Any] | None) -> Iterable[tuple[str, bool]]:
+    """GET paths worth opening, each with whether a front-end router serves it."""
     for route in (blueprint or {}).get("routes") or []:
         method = str(route.get("method", "")).upper()
         path = str(route.get("path", ""))
@@ -141,7 +155,7 @@ def _get_routes(blueprint: dict[str, Any] | None) -> Iterable[str]:
             continue
         if path == "/api" or path.startswith("/api/"):
             continue  # an API answers data, not a page to render
-        yield path
+        yield path, bool(route.get("client"))
 
 
 _NO_FIELD = ("hidden", "submit", "button", "image", "reset")
@@ -189,6 +203,25 @@ def page_check_test(candidate: dict[str, str], page: dict[str, Any]) -> dict[str
     if len(steps) == 1:
         steps.append(_step(2, "ASSERT_VISIBLE", target="body", description="Page body renders"))
     return {**test, "steps": steps}
+
+
+def redirect_test(candidate: dict[str, Any], page: dict[str, Any]) -> dict[str, Any] | None:
+    """A page that sends a signed-out visitor elsewhere (an app's protected
+    /app back to its landing page): opening it shows where it led, not its
+    own content.  If the page ever opens for a signed-out visitor, the check
+    fails.  None when the page it led to has no heading to recognise."""
+    headings = (page.get("elements_inventory") or {}).get("headings") or []
+    if not headings:
+        return None
+    url = candidate["url"]
+    landed = urlparse(page.get("final_url") or url).path or "/"
+    path = urlparse(url).path or "/"
+    test = render_test(candidate)
+    return {**test, "slug": f"{test['slug']}-redirect",
+            "name": f"{test['name']}: a signed-out visitor is sent to {landed}",
+            "steps": [_step(1, "NAVIGATE", value=url, description=f"Open {url} signed out"),
+                      _step(2, "ASSERT_CONTAINS_TEXT", target="body", value=_shorten(headings[0], 40),
+                            description=f"{path} shows {landed} ('{_shorten(headings[0], 40)}'), not its own content")]}
 
 
 def render_test(candidate: dict[str, str]) -> dict[str, Any]:

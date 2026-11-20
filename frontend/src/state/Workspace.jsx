@@ -32,7 +32,7 @@ import {
   retestFinding,
   securityScan,
 } from '../services/api';
-import { toDate } from '../lib/derive';
+import { byTier, toDate } from '../lib/derive';
 
 const STORAGE_PREFIX = 'testsphere.workspace';
 const STORAGE_VERSION = 'v2';
@@ -270,7 +270,8 @@ export function WorkspaceProvider({ uid, children }) {
         const fresh = new Map([...result.findings, ...result.resolved].map((f) => [f.key, f]));
         return [...fresh.values(), ...prev.filter((f) => !fresh.has(f.key))];
       });
-      setSelectedKey(result.findings.find((f) => f.remediation?.kind === 'header')?.key || result.findings[0]?.key || null);
+      // Open on the most serious proven issue (the Remediation page falls back to a fixable one itself)
+      setSelectedKey(byTier(result.findings)[0]?.key || null);
       return result;
     } catch (err) {
       if (!err.status) noteError('scan', `Scan of ${url} failed: ${err.message}`);

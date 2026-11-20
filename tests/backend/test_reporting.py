@@ -32,6 +32,23 @@ def test_a_failed_url_check_is_diagnosed_as_a_check_that_did_not_hold():
     assert diagnosis_of(None) is None
 
 
+def test_a_hidden_element_is_diagnosed_as_hidden_not_as_wrong_content():
+    # Measured on a real app: a sign-up check on a closed dialog's password field was
+    # told "wrong content is an app bug"; the field was there, just never opened
+    error = "assert_visible failed: '#auth-password[type=password]' is on the page but not visible"
+    failure = FailureContext(test_id="t", execution_id="e", failed_step=2, action="assert_visible",
+                             target_selector="#auth-password", error_message=error)
+    analysis = asyncio.run(FailureAnalyzerAgent(InMemoryStore()).analyze(failure))
+
+    d = diagnosis_of(analysis, error)
+    assert d["label"] == "Element hidden"
+    assert "dialog, tab or menu" in d["next_step"] and "wrong content" not in d["next_step"]
+    # Other failures keep their own advice
+    other = FailureContext(test_id="t", execution_id="e", failed_step=2, action="assert_url", target_selector="",
+                           error_message="assert_url failed: expected '/a' in 'https://x.net/b'")
+    assert diagnosis_of(asyncio.run(FailureAnalyzerAgent(InMemoryStore()).analyze(other)))["label"] == "Check did not hold"
+
+
 def _results(passed, failed, *, quarantined=True, label="Check did not hold"):
     return ([{"name": f"P{i}", "status": "PASSED", "category": "smoke"} for i in range(passed)]
             + [{"name": f"AI: Navigate {i}", "status": "FAILED", "category": "ai", "quarantined": quarantined,
@@ -242,3 +259,24 @@ def test_a_link_lasts_at_most_30_days_and_dies_with_its_run(monkeypatch):
     link = client.post(f"/api/pipelines/runs/{run['id']}/shares", json={"days": 30}, headers=alice).json()
     get_store().delete(PIPELINE_RUNS, run["id"])
     assert client.get(f"/api/shared/{link['url'].rsplit('/', 1)[1]}").status_code == 404
+
+
+def test_only_proven_findings_count_and_the_rest_are_named_for_what_they_are():
+    results = [{"name": "Smoke", "status": "PASSED", "category": "smoke"}]
+    base = {"total": 1, "passed": 1, "previous_run_id": None}
+
+    hardening_only = run_summary({**base, "findings": {}, "hardening": 6}, results, [])
+    assert any("6 hardening suggestions (missing defences, not counted)" in line for line in hardening_only)
+    assert hardening_only[-1] == "Verdict: the app looks healthy."
+
+    proven = run_summary({**base, "findings": {"critical": 1}, "unconfirmed": 2, "hardening": 3}, results, [])
+    text = " ".join(proven)
+    assert "1 proven critical or high security issue" in text and "2 security signals to check by hand" in text
+    assert proven[-1] == "Verdict: needs attention."
+
+
+def test_the_summary_says_how_many_passes_are_proven_to_catch_a_break():
+    results = [{"name": f"T{i}", "status": "PASSED", "category": "functional"} for i in range(8)]
+    lines = run_summary({"total": 8, "passed": 8, "previous_run_id": None, "verified": 3, "render_only": 4}, results, [])
+    assert lines[1] == ("3 of the passing tests are proven to catch a break (they failed on a deliberately broken "
+                        "copy of their page); 4 tests only check that a page opens.")

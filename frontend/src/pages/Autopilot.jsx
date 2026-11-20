@@ -178,9 +178,12 @@ function RunDetail({ run, onOpen, onClear, onCancelled }) {
       {s && (
         <div className="stat-tiles">
           <div className="stat-tile"><div className="v">{s.passed}/{s.total}</div><div className="l">Tests passed</div></div>
+          <div className="stat-tile" title="Passing tests that failed on a deliberately broken copy of their page: the ones a pass actually means something for">
+            <div className="v">{s.verified ?? '—'}</div><div className="l">Proven to catch a break</div>
+          </div>
           <div className="stat-tile"><div className="v">{s.failed}</div><div className="l">Failed</div></div>
           <div className="stat-tile"><div className="v">{s.healed}</div><div className="l">Self-healed</div></div>
-          <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Security findings</div></div>
+          <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Proven security issues{s.hardening ? <span className="muted"> · {s.hardening} hardening</span> : null}</div></div>
           <div className="stat-tile"><div className="v">{(run.regressions || []).length}</div><div className="l">Regressions</div></div>
         </div>
       )}

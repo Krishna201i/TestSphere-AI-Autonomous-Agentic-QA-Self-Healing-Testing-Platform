@@ -41,6 +41,7 @@ from security import (
     ScopePolicy,
 )
 from security import ai as security_ai
+from security.findings import Tier, code_location
 from security.remediation import propose, redact_headers
 from security.scope import LOOPBACK_HOSTS
 
@@ -203,7 +204,7 @@ async def _attach_ai(result: dict[str, Any], url: str, findings: list[Finding], 
 
 def scan_result(db: Store, scanner: PassiveScanner, snap, url: str, *, actor: str, owner_uid: str | None,
                 extra_findings: list[Finding] | None = None, active: bool = False,
-                probed: bool = True) -> dict[str, Any]:
+                probed: bool = True, routes: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Analyze a fetched page, persist the findings and audit the scan (also used by the pipeline).
 
     *extra_findings* are findings produced elsewhere (e.g. the active scanner)
@@ -212,6 +213,10 @@ def scan_result(db: Store, scanner: PassiveScanner, snap, url: str, *, actor: st
     their absence.
     """
     findings = scanner.analyze(snap) + list(extra_findings or [])
+    # Where in the code: the ingested route serving it (not for hardening, which is site-wide)
+    for f in findings:
+        if routes and not f.code_location and f.tier != Tier.HARDENING:
+            f.code_location = code_location(f.location.get("url") or f.component, routes)
     headers = [(k.decode("latin-1"), v.decode("latin-1")) for k, v in snap.headers.raw]
     payload = [
         f.model_dump(mode="json") | {"key": f.key, "remediation": propose(f, headers).model_dump()}

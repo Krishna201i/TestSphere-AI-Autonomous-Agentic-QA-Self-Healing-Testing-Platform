@@ -249,6 +249,10 @@ class Settings(BaseSettings):
     # deliberately broken copy of its page; at most this many per run (each is
     # one more browser run, and a test is checked once per version of its steps)
     ACCEPTANCE_MAX_PER_RUN: int = Field(default_factory=lambda: max(0, int(os.getenv("ACCEPTANCE_MAX_PER_RUN", "5"))))
+    # Page analysis renders the page in the engine's browser and plans tests
+    # only on controls a visitor can see (not those in a closed dialog, tab or
+    # menu); off, it plans from the raw HTML (client-rendered pages always render)
+    ANALYZE_VISIBILITY: bool = Field(default_factory=lambda: os.getenv("ANALYZE_VISIBILITY", "true").lower() in ("true", "1"))
     # Check pinned dependency versions against OSV.dev (sends package names and versions, never code)
     DEPENDENCY_SCAN: bool = Field(default_factory=lambda: os.getenv("DEPENDENCY_SCAN", "true").lower() in ("true", "1"))
 

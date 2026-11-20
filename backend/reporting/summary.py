@@ -42,6 +42,14 @@ def run_summary(summary: dict[str, Any], results: list[dict[str, Any]], regressi
     if summary.get("healed"):
         head += f" {_plural(summary['healed'], 'test')} passed only after self-healing repaired a broken locator."
     lines.append(head)
+    # What the passes prove: a pass only means something if the test fails when its page breaks
+    verified, render_only = summary.get("verified") or 0, summary.get("render_only") or 0
+    if verified or render_only:
+        proof = (f"{verified} of the passing tests {_verb(verified, 'is', 'are')} proven to catch a break "
+                 "(they failed on a deliberately broken copy of their page)")
+        if render_only:
+            proof += f"; {_plural(render_only, 'test')} only {_verb(render_only, 'checks', 'check')} that a page opens"
+        lines.append(proof + ".")
 
     previous = summary.get("previous_run_id")
     tests_regressed = [g for g in regressions if g.get("kind") == "test"]
@@ -76,10 +84,16 @@ def run_summary(summary: dict[str, Any], results: list[dict[str, Any]], regressi
                       "(results keep changing between runs)")
     if summary.get("visual_changes"):
         extras.append(f"{_plural(summary['visual_changes'], 'visual change')} to review")
-    findings = summary.get("findings") or {}
+    findings = summary.get("findings") or {}  # proven findings only
     serious = sum(findings.get(s, 0) for s in ("critical", "high"))
     if serious:
-        extras.append(f"{_plural(serious, 'critical or high security finding')}")
+        extras.append(f"{_plural(serious, 'proven critical or high security issue')}")
+    elif sum(findings.values()):
+        extras.append(_plural(sum(findings.values()), "proven security issue") + " of medium or low severity")
+    if summary.get("unconfirmed"):
+        extras.append(f"{_plural(summary['unconfirmed'], 'security signal')} to check by hand")
+    if summary.get("hardening"):
+        extras.append(f"{_plural(summary['hardening'], 'hardening suggestion')} (missing defences, not counted)")
     if summary.get("goal_untested"):
         extras.append("parts of the written goal could not be turned into steps")
     if extras:

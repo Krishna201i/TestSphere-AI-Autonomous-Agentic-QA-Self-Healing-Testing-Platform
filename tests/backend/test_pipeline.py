@@ -104,10 +104,15 @@ def stub_network(monkeypatch):
         return state["analysis"]
 
     async def reachable(urls):
-        return {u: state["codes"].get(u) for u in urls}
+        return {u: ({"status": code, "file": False, "digest": u} if (code := state["codes"].get(u)) else None)
+                for u in urls}
+
+    async def no_fallback(base_url):
+        return state.get("fallback", set())
 
     monkeypatch.setattr("backend.pipeline.runner.URLAnalyzerService.analyze_live_website", analyze)
     monkeypatch.setattr(runner, "_reachable", reachable)
+    monkeypatch.setattr(runner, "_fallback_digests", no_fallback)
     return state
 
 
@@ -143,7 +148,10 @@ def test_full_run_chains_every_stage(fresh_store, stub_network):
     assert orch.ran == ["Smoke: Shop Login", "Scenario: log in", "Content: heading 'Welcome back'", "Linked page: /about"]
     assert stage(run, "heal")["detail"].startswith("1 test(s) self-healed")
     assert stage(run, "security")["status"] == "done"
-    assert run["summary"]["total"] == 4 and run["summary"]["healed"] == 1 and run["summary"]["findings"]
+    assert run["summary"]["total"] == 4 and run["summary"]["healed"] == 1
+    # Missing headers are hardening suggestions: listed, never counted as security findings
+    assert run["summary"]["findings"] == {} and run["summary"]["hardening"] > 0
+    assert any("hardening suggestion" in line for line in run["summary"]["narrative"])
     assert all(s["status"] in ("done", "skipped") for s in run["stages"])
 
     refreshed = fresh_store.get(PROJECTS, project["id"])
