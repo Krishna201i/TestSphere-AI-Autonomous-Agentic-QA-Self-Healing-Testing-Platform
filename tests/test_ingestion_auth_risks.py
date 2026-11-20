@@ -104,7 +104,7 @@ def test_routes_are_counted_once():
 def test_a_firebase_web_key_is_not_a_leaked_secret():
     from ingestion.analyzer import _secrets
 
-    web = 'const firebaseConfig = { apiKey: "AIzaSyAZ2aPq_4edc02aRQFLRnsvihK5mnASrxc", authDomain: "x.firebaseapp.com" };'
+    web = 'const firebaseConfig = { apiKey: "AIzaSyQ1w2E3r4T5y6U7i8O9p0A1s2D3f4G5h7fake", authDomain: "x.firebaseapp.com" };'  # gitleaks:allow (fake key)
     assert _secrets(web, "index.html") == []
     # The same key outside a Firebase web config is still reported
-    assert _secrets('api_key = "AIzaSyAZ2aPq_4edc02aRQFLRnsvihK5mnASrxc"', "server.py")
+    assert _secrets('api_key = "AIzaSyQ1w2E3r4T5y6U7i8O9p0A1s2D3f4G5h7fake"', "server.py")  # gitleaks:allow (fake key)

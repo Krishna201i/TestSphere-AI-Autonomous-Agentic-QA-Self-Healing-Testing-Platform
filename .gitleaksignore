@@ -12,3 +12,8 @@ acfb308e9d6fac948b253d2080cddc806e237ab7:engine/heal_benchmark.py:generic-api-ke
 # Not a secret: an earlier version of the comment above quoted that same code
 e932dc0280c183975fd16a12a18703d663653d60:.gitleaksignore:generic-api-key:4
 8a4ace3f8e6e06b3d3fae008e71c7050798dc65e:.gitleaksignore:generic-api-key:4
+
+# A Firebase *web* apiKey (public by design: served in that site's own page) used in a test in 6e4b9a3;
+# replaced with a fake key in the next commit. History is not rewritten (main is never force-pushed).
+6e4b9a3eeb9a9b56493196b2a13dccea989fb43c:tests/test_ingestion_auth_risks.py:gcp-api-key:107
+6e4b9a3eeb9a9b56493196b2a13dccea989fb43c:tests/test_ingestion_auth_risks.py:gcp-api-key:110
