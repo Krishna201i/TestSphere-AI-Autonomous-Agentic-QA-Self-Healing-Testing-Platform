@@ -43,9 +43,14 @@ function PullRequestButton({ patch, onOpened }) {
   const [error, setError] = useState(null);
   if (patch.pull_request) {
     return (
-      <a className="btn btn-sm" href={patch.pull_request.url} target="_blank" rel="noreferrer">
-        <GitPullRequest size={14} /> Pull request #{patch.pull_request.number} <ExternalLink size={12} />
-      </a>
+      <span className="row">
+        <a className="btn btn-sm" href={patch.pull_request.url} target="_blank" rel="noreferrer">
+          <GitPullRequest size={14} /> Pull request #{patch.pull_request.number} <ExternalLink size={12} />
+        </a>
+        {patch.pull_request.fork && (
+          <span className="muted small">opened from your fork {patch.pull_request.fork} (you cannot push to this repository)</span>
+        )}
+      </span>
     );
   }
   if (!patch.github || patch.files.length === 0) return null;

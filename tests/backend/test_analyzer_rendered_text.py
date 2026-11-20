@@ -11,7 +11,7 @@ RENDERED = """<html><head><title>Sign in · Patient portal</title></head><body>
 
 
 async def test_a_client_rendered_page_reports_its_rendered_title_and_headings(monkeypatch):
-    async def fetch(url, timeout, headers):
+    async def fetch(url, timeout, headers, wake=False):
         return SimpleNamespace(status_code=200, url=url, text=SHELL, headers={"content-type": "text/html"}), True
 
     async def render(cls, url, *, mark_hidden=False):

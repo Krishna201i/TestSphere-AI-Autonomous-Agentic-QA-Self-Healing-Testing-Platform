@@ -79,6 +79,42 @@ def test_pull_request_is_one_commit_on_a_new_branch_from_the_patch_base():
     assert all(request_path.startswith("/") for _, request_path, _ in fake.calls)
 
 
+class ForkingGitHub(FakeGitHub):
+    """Another account's repository: no push, but the token owner (octo) can fork it."""
+
+    def __init__(self):
+        super().__init__(push=False)
+        self.fork_ready_after = 2  # a new fork has the base commit after a couple of checks
+
+    def __call__(self, request):
+        path = request.url.path
+        if path == "/repos/acme/shop/forks":
+            self.calls.append((request.method, path, json.loads(request.content or b"{}")))
+            return httpx.Response(202, json={"owner": {"login": "octo"}, "name": "shop", "full_name": "octo/shop"})
+        if path == f"/repos/octo/shop/git/commits/{BASE}":
+            self.calls.append((request.method, path, {}))
+            if self.fork_ready_after:
+                self.fork_ready_after -= 1
+                return httpx.Response(404, json={"message": "Not Found"})
+            return httpx.Response(200, json={"sha": BASE, "tree": {"sha": "basetree"}})
+        return super().__call__(request)
+
+
+def test_someone_elses_repository_gets_a_pull_request_from_a_fork():
+    # Measured: a token could not push to another account's repository and the
+    # pull request failed; the fix goes through the token owner's fork instead
+    fake = ForkingGitHub()
+    with GitHubClient(TOKEN, transport=httpx.MockTransport(fake), sleep=lambda s: None) as gh:
+        pr = gh.open_fix_pr("acme", "shop", BASE, [("app/main.py", "x = 1\n")],
+                            branch="testsphere/fix-3", title="Fix headers", body="Body")
+    assert pr["fork"] == "octo/shop" and pr["url"] == "https://github.com/acme/shop/pull/7"
+    # Every git object and the branch went to the fork; the pull request to the original
+    writes = [p for m, p, _ in fake.calls if m == "POST" and "/git/" in p]
+    assert writes and all(p.startswith("/repos/octo/shop/") for p in writes)
+    pull = next((p, b) for m, p, b in fake.calls if p.endswith("/pulls"))
+    assert pull[0] == "/repos/acme/shop/pulls" and pull[1]["head"] == "octo:testsphere/fix-3"
+
+
 def test_readable_errors_for_missing_access_and_bad_tokens():
     with GitHubClient(TOKEN, transport=httpx.MockTransport(FakeGitHub(push=False))) as gh, pytest.raises(GitHubError, match="cannot push"):
         gh.open_fix_pr("acme", "shop", BASE, [("a", "b")], "b", "t", "x")

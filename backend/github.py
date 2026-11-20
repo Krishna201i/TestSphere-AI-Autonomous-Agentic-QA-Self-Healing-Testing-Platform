@@ -6,6 +6,10 @@ TestSphere-AI — GitHub REST client for the integrations a team uses daily.
   commit (git data API: blobs -> tree -> commit -> ref), and the pull request
   targets the repository's default branch.  Nothing on an existing branch is
   rewritten; if the default branch moved on, GitHub shows any conflict.
+  When the token may not push to the repository (someone else's), the
+  branch goes to the token owner's fork instead and the pull request is
+  opened from the fork, the way anyone contributes to a repository they
+  do not own.
 * ``set_commit_status``: TestSphere's result on a pushed commit, shown on
   the commit and its pull requests.
 
@@ -15,6 +19,8 @@ Only https://api.github.com is ever called, with the user's own token.
 from __future__ import annotations
 
 import re
+import time
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -38,7 +44,9 @@ def parse_repo(url: str | None) -> tuple[str, str] | None:
 
 
 class GitHubClient:
-    def __init__(self, token: str, transport: httpx.BaseTransport | None = None) -> None:
+    def __init__(self, token: str, transport: httpx.BaseTransport | None = None,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
+        self._sleep = sleep  # waiting for a new fork to be ready (tests pass a no-op)
         self._http = httpx.Client(
             base_url=API, timeout=20, transport=transport, follow_redirects=False,
             headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
@@ -81,29 +89,61 @@ class GitHubClient:
     def open_fix_pr(self, owner: str, repo: str, base_sha: str, files: list[tuple[str, str]],
                     branch: str, title: str, body: str) -> dict[str, Any]:
         info = self._call("GET", f"/repos/{owner}/{repo}")
-        if not (info.get("permissions") or {}).get("push"):
-            raise GitHubError(f"The token cannot push to {owner}/{repo}. Give it Contents: Read and write.", 403)
-        base = self._call("GET", f"/repos/{owner}/{repo}/git/commits/{base_sha}")
+        # Where the branch goes: the repository itself, or (someone else's
+        # repository) the token owner's fork, with the pull request from there
+        forked = not (info.get("permissions") or {}).get("push")
+        head_owner, head_repo = self._fork(owner, repo) if forked else (owner, repo)
+        head = f"/repos/{head_owner}/{head_repo}"
+        base = self._wait_for_commit(head_owner, head_repo, base_sha)
         entries = []
         for path, content in files:
-            blob = self._call("POST", f"/repos/{owner}/{repo}/git/blobs", json={"content": content, "encoding": "utf-8"})
+            blob = self._call("POST", f"{head}/git/blobs", json={"content": content, "encoding": "utf-8"})
             entries.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
-        tree = self._call("POST", f"/repos/{owner}/{repo}/git/trees", json={"base_tree": base["tree"]["sha"], "tree": entries})
-        commit = self._call("POST", f"/repos/{owner}/{repo}/git/commits",
+        tree = self._call("POST", f"{head}/git/trees", json={"base_tree": base["tree"]["sha"], "tree": entries})
+        commit = self._call("POST", f"{head}/git/commits",
                             json={"message": title, "tree": tree["sha"], "parents": [base_sha]})
         name = branch
         for attempt in range(1, 6):
             try:
-                self._call("POST", f"/repos/{owner}/{repo}/git/refs", json={"ref": f"refs/heads/{name}", "sha": commit["sha"]})
+                self._call("POST", f"{head}/git/refs", json={"ref": f"refs/heads/{name}", "sha": commit["sha"]})
                 break
             except GitHubError as exc:
                 if exc.status != 422 or attempt == 5:  # 422 = branch exists already
                     raise
                 name = f"{branch}-{attempt + 1}"
         pr = self._call("POST", f"/repos/{owner}/{repo}/pulls", json={
-            "title": title, "head": name, "base": info["default_branch"], "body": body, "maintainer_can_modify": True,
+            "title": title, "head": f"{head_owner}:{name}" if forked else name, "base": info["default_branch"],
+            "body": body, "maintainer_can_modify": True,
         })
-        return {"url": pr["html_url"], "number": pr["number"], "branch": name, "base": info["default_branch"]}
+        result = {"url": pr["html_url"], "number": pr["number"], "branch": name, "base": info["default_branch"]}
+        if forked:
+            result["fork"] = f"{head_owner}/{head_repo}"
+        return result
+
+    def _fork(self, owner: str, repo: str) -> tuple[str, str]:
+        """The token owner's fork of *owner/repo* (made now, or the existing one)."""
+        try:
+            fork = self._call("POST", f"/repos/{owner}/{repo}/forks", json={"default_branch_only": False})
+        except GitHubError as exc:
+            if exc.status == 401:
+                raise
+            raise GitHubError(
+                f"The token cannot push to {owner}/{repo} (another account's repository), and could not fork it "
+                "to your account. Use a GitHub token that may create repositories in your account (a classic "
+                "token with the public_repo scope works for public repositories), or ask the owner to add you "
+                "as a collaborator.", exc.status) from exc
+        return fork["owner"]["login"], fork["name"]
+
+    def _wait_for_commit(self, owner: str, repo: str, sha: str, attempts: int = 15) -> dict[str, Any]:
+        """The base commit in *owner/repo*; a new fork can take a few seconds to have it."""
+        for attempt in range(attempts):
+            try:
+                return self._call("GET", f"/repos/{owner}/{repo}/git/commits/{sha}")
+            except GitHubError as exc:
+                if exc.status not in (404, 409) or attempt == attempts - 1:
+                    raise
+                self._sleep(2)
+        raise GitHubError(f"{owner}/{repo} is not ready yet; try again in a minute.")
 
     # ── Commit status ───────────────────────────────────────────────────
     def set_commit_status(self, owner: str, repo: str, sha: str, state: str, description: str,

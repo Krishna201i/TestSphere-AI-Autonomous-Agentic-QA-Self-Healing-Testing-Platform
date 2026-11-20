@@ -561,6 +561,9 @@ class PassiveScanner:
         Redirect hops to follow (each one scope-checked).
     transport:
         Optional ``httpx`` transport, used by tests to stub the network.
+    wake_timeout:
+        How long the first request is retried for when it times out: a site on
+        free hosting sleeps when idle and takes up to a minute to answer.
     probe_scope:
         Hosts whose /.git and /.env may be probed for (defaults to *scope*).
         Requesting a site's secret files goes beyond a visit, so a scanner
@@ -575,8 +578,11 @@ class PassiveScanner:
         max_redirects: int = 5,
         transport: httpx.AsyncBaseTransport | None = None,
         probe_scope: ScopePolicy | None = None,
+        wake_timeout: float = 60.0,
     ) -> None:
         self._probe_scope = probe_scope
+        # A first request that times out is tried once more, waiting this long (0: never)
+        self._wake_timeout = wake_timeout
         self.scope = scope or ScopePolicy()
         self._timeout = timeout
         self._max_redirects = max_redirects
@@ -594,9 +600,21 @@ class PassiveScanner:
         async with httpx.AsyncClient(
             timeout=self._timeout, follow_redirects=False, transport=self._transport
         ) as http:
-            for _ in range(self._max_redirects + 1):
+            for hop in range(self._max_redirects + 1):
                 try:
                     response = await http.get(current, headers=headers)
+                except httpx.TimeoutException as exc:
+                    if hop or not self._wake_timeout:
+                        raise ScanError(f"Could not fetch {current}: {type(exc).__name__}") from exc
+                    # A site on free hosting (Render, Railway, Heroku) sleeps when idle and
+                    # takes up to a minute to answer its first request: wait for it once
+                    try:
+                        response = await http.get(current, headers=headers, timeout=self._wake_timeout)
+                    except httpx.RequestError as again:
+                        raise ScanError(
+                            f"{current} did not answer within {self._wake_timeout:g} seconds. Sites on free "
+                            "hosting (Render, Railway, Heroku) sleep when idle and can take a minute to wake; "
+                            "try again shortly.") from again
                 except httpx.RequestError as exc:
                     raise ScanError(f"Could not fetch {current}: {type(exc).__name__}") from exc
 

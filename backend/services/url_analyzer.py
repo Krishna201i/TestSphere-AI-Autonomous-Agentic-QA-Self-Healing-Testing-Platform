@@ -36,8 +36,17 @@ def is_certificate_error(exc: BaseException) -> bool:
     return False
 
 
-async def get_verifying_first(url: str, *, timeout: float, headers: dict[str, str]) -> tuple[httpx.Response, bool]:
+# How long a site that sleeps when idle (free Render, Railway, Heroku) gets to wake up
+WAKE_TIMEOUT = 60.0
+
+
+async def get_verifying_first(url: str, *, timeout: float, headers: dict[str, str],
+                              wake: bool = False) -> tuple[httpx.Response, bool]:
     """GET *url* with certificate verification; returns ``(response, certificate_valid)``.
+
+    With *wake*, a request that times out is tried once more with
+    ``WAKE_TIMEOUT``: the first request to a sleeping free-tier site can take
+    most of a minute while it starts.
 
     A site whose certificate fails verification (expired, self-signed staging)
     is still fetched, without verification, so it can be tested; the caller
@@ -47,7 +56,13 @@ async def get_verifying_first(url: str, *, timeout: float, headers: dict[str, st
     options = dict(timeout=timeout, follow_redirects=True)
     try:
         async with httpx.AsyncClient(transport=PinnedTransport(), **options) as client:
-            return await client.get(url, headers=headers), True
+            try:
+                return await client.get(url, headers=headers), True
+            except httpx.TimeoutException:
+                if not wake:
+                    raise
+                logger.info("%s did not answer in %ss; waiting up to %ss for it to wake", url, timeout, WAKE_TIMEOUT)
+                return await client.get(url, headers=headers, timeout=WAKE_TIMEOUT), True
     except httpx.ConnectError as exc:
         if not is_certificate_error(exc):
             raise
@@ -135,7 +150,7 @@ class URLAnalyzerService:
 
         try:
             res, certificate_valid = await get_verifying_first(
-                normalized_url, timeout=12.0,
+                normalized_url, timeout=12.0, wake=True,
                 headers={"User-Agent": cls.USER_AGENT, "Accept": "text/html,*/*"},
             )
             latency_ms = int((time.perf_counter() - start_time) * 1000)
