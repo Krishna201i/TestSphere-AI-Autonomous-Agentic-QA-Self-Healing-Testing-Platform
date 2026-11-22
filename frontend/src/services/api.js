@@ -120,6 +120,20 @@ export const acceptVisual = (id) => request(`/api/test-executions/${id}/accept-v
 export const planAndExecute = (payload) =>
   request('/api/workflow/plan-and-execute', { method: 'POST', body: payload });
 
+/** Test Studio: a test described in plain English -> steps checked against the live page (nothing runs). */
+export const draftStudioTest = (projectId, payload) =>
+  request(`/api/projects/${projectId}/studio/draft`, { method: 'POST', body: payload });
+/** Re-check edited steps against the page. */
+export const verifyStudioSteps = (projectId, payload) =>
+  request(`/api/projects/${projectId}/studio/verify`, { method: 'POST', body: payload });
+export const getStudioTests = (projectId) => request(`/api/projects/${projectId}/studio/tests`);
+export const saveStudioTest = (projectId, payload) =>
+  request(`/api/projects/${projectId}/studio/tests`, { method: 'POST', body: payload });
+export const updateStudioTest = (projectId, testId, payload) =>
+  request(`/api/projects/${projectId}/studio/tests/${testId}`, { method: 'PUT', body: payload });
+/** Any saved test as a Playwright .spec.ts file, as a Blob. */
+export const exportPlaywright = (testId) => request(`/api/studio/tests/${testId}/playwright`, { raw: true });
+
 export const securityScan = (url, actor, active = false) => request('/api/security/scan', { method: 'POST', body: { url, actor, active } });
 export const getFindings = () => request('/api/security/findings');
 /** Sites this account may scan actively once it proves ownership (Attacker page). */

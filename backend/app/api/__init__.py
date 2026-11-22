@@ -14,6 +14,7 @@ from app.api.projects import router as projects_router
 from app.api.security import router as security_router
 from app.api.shares import public_router as shared_reports_router
 from app.api.shares import router as shares_router
+from app.api.studio import router as studio_router
 from app.api.system import router as system_router
 from app.api.test_cases import router as test_cases_router
 from app.api.test_executions import router as test_executions_router
@@ -29,6 +30,7 @@ __all__ = [
     "shares_router",
     "shared_reports_router",
     "ingest_router",
+    "studio_router",
     "system_router",
     "audit_router",
     "health_router",

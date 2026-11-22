@@ -129,6 +129,14 @@ The FastAPI application mounts routes defined in [`backend/app/api/`](../backend
 - `GET /api/test-executions`: Query execution history with pagination.
 - `GET /api/test-executions/{execution_id}`: Get execution details, step logs, and screenshots.
 
+### 4.4a Test Studio (`/api/projects/{id}/studio`, `/api/studio`)
+Plain-English tests ([`backend/app/api/studio.py`](../backend/app/api/studio.py), logic in [`backend/app/services/test_studio.py`](../backend/app/services/test_studio.py)):
+- `POST /api/projects/{id}/studio/draft`: `{instruction, start_path?}` → steps written by the configured model (rule-based planner without one, or when the model fails; `source` and `note` say which), each checked against the live page (`status`: `found`, `text`, `page`, `unverified`, `invalid`), plus `not_covered`, `problems` and `quarantine`. Rate-limited like runs.
+- `POST /api/projects/{id}/studio/verify`: re-check edited steps (the page analysis is reused for 5 minutes).
+- `GET|POST /api/projects/{id}/studio/tests`, `PUT /api/projects/{id}/studio/tests/{test_id}`: list, save, change. A saved test is a test case with `external_id` `studio-…`, so every pipeline run executes it and self-healing writes repaired locators back into it; one with an `unverified` step is saved quarantined. Steps with an `invalid` step, or without a check, are refused (422).
+- `GET /api/studio/tests/{test_id}/playwright`: any saved test as a Playwright `.spec.ts` download.
+- Run one test alone with `POST /api/workflow/plan-and-execute` and its `test_case_id`.
+
 ### 4.5 Orchestration & Workflow Stream (`/api/workflow`)
 - `POST /api/workflow/plan-and-execute`: High-level endpoint accepting application context, generating tests via AI agents, executing on Playwright, and applying self-healing if needed.
 - `GET /api/workflow/stream/{execution_id}`: **Server-Sent Events (SSE)** endpoint streaming real-time execution steps, locator healing events, and screenshot URLs to the frontend dashboard.

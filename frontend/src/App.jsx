@@ -11,6 +11,7 @@ import { AuthGate } from './pages/Login';
 // The home page and Privacy (also shown signed out) come with the app; the
 // other pages load when first opened, so the first visit downloads less
 const Autopilot = lazy(() => import('./pages/Autopilot'));
+const TestStudio = lazy(() => import('./pages/TestStudio'));
 const Reports = lazy(() => import('./pages/Reports'));
 const Security = lazy(() => import('./pages/Security'));
 const Profile = lazy(() => import('./pages/Profile'));
@@ -73,6 +74,7 @@ class PageErrorBoundary extends React.Component {
 const VIEWS = {
   home: CommandCenter,
   autopilot: Autopilot,
+  studio: TestStudio,
   reports: Reports,
   security: Security,
   visualizer: PipelineVisualizer,

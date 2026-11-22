@@ -29,6 +29,7 @@ from app.api import (
     security_router,
     shared_reports_router,
     shares_router,
+    studio_router,
     system_router,
     test_cases_router,
     test_executions_router,
@@ -150,6 +151,7 @@ api_routers = [
     shares_router,
     shared_reports_router,
     webhooks_router,
+    studio_router,
 ]
 for router in api_routers:
     app.include_router(router, prefix="/api")

@@ -9,6 +9,7 @@ import { healthStats, pct, timeAgo, toDate } from '../lib/derive';
 export const PAGES = [
   { id: 'home', label: 'Home' },
   { id: 'autopilot', label: 'Autopilot' },
+  { id: 'studio', label: 'Test Studio' },
   { id: 'reports', label: 'Reports' },
   { id: 'security', label: 'Security' },
   { id: 'visualizer', label: 'Visualizer' },

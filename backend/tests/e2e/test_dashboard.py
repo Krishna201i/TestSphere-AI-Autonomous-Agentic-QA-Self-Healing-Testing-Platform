@@ -29,6 +29,7 @@ pytestmark = pytest.mark.skipif(not DIST.exists(), reason="dashboard not built (
 PAGES = [
     ("", "#workflow-title"),
     ("autopilot", "h1:has-text('Autopilot')"),
+    ("studio", "h1:has-text('Test Studio')"),
     ("reports", "h1:has-text('Reports')"),
     ("security/attacker", "h1:has-text('AI Attacker Agent')"),
     ("security/remediation", "h1:has-text('Self-Healing Remediation Bridge')"),
@@ -153,6 +154,48 @@ def test_every_page_fits_a_phone(server, browser, route, selector):
     overflow = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
     page.close()
     assert overflow <= 0
+
+
+STUDIO_PROJECT = {"id": 1, "name": "Shop", "app_url": "https://shop.example/login", "created_at": "2026-10-24T10:00:00Z"}
+STUDIO_DRAFT = {
+    "name": "Sign in", "instruction": "log in as demo", "start_url": STUDIO_PROJECT["app_url"], "page_title": "Shop",
+    "source": "ai", "note": None, "not_covered": ["see the invoices"], "problems": [], "quarantine": True,
+    "steps": [
+        {"step_number": 1, "action": "FILL", "target": "#user", "value": "demo", "description": "type demo",
+         "status": "found", "note": None},
+        {"step_number": 2, "action": "CLICK", "target": ':is(button,a,[role=button]):has-text("Log in")', "value": None,
+         "description": "click Log in", "status": "text", "note": "Found by its visible text when the test runs."},
+        {"step_number": 3, "action": "ASSERT_VISIBLE", "target": "#inventory-list-with-a-long-selector", "value": None,
+         "description": "the products show", "status": "unverified",
+         "note": "Not seen on the analyzed page; the test is saved quarantined until you trust it."},
+    ],
+}
+
+
+@pytest.mark.skipif(not AXE.exists(), reason="axe-core not installed (cd frontend && npm ci)")
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_test_studio_review_is_accessible_and_fits_a_phone(server, browser, scheme):
+    """The drafted steps table (statuses, notes, inputs) meets WCAG 2.1 AA and does not push a phone page sideways."""
+    for width in (1280, 390):
+        page = browser.new_page(bypass_csp=True, viewport={"width": width, "height": 900}, color_scheme=scheme,
+                                reduced_motion="reduce")
+        page.route("**/api/projects", lambda r: r.fulfill(json=[STUDIO_PROJECT]))
+        page.route("**/api/projects/1/studio/tests", lambda r: r.fulfill(json=[]))
+        page.route("**/api/projects/1/studio/draft", lambda r: r.fulfill(json=STUDIO_DRAFT))
+        page.goto(f"{server}/#/studio")
+        page.get_by_label("What should the test do?").fill("log in as demo")
+        page.get_by_role("button", name="Write the steps").click()
+        page.wait_for_selector("h3:has-text('Review the steps')", timeout=15_000)
+        page.wait_for_timeout(300)
+        if width == 1280:
+            page.add_script_tag(path=str(AXE))
+            violations = page.evaluate(
+                "tags => axe.run(document, {runOnly: {type: 'tag', values: tags}}).then(r => r.violations)", WCAG_AA)
+            assert [f"{v['id']} ({len(v['nodes'])}): {v['help']} {[n['html'][:120] for n in v['nodes']]}"
+                    for v in violations] == []
+        else:
+            assert page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth") <= 0
+        page.close()
 
 
 STAGE_KEYS = ["codebase", "analyze", "plan", "execute", "heal", "security", "report"]
