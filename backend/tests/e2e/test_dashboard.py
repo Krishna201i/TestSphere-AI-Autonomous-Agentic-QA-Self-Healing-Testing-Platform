@@ -18,7 +18,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-ROOT = Path(__file__).resolve().parents[3]  # repository root
+ROOT = Path(__file__).resolve().parents[3]  # repository root (frontend/ lives there)
+BACKEND = ROOT / "backend"  # the server runs from here (app.main)
 DIST = ROOT / "frontend" / "dist" / "index.html"
 AXE = ROOT / "frontend" / "node_modules" / "axe-core" / "axe.min.js"
 WCAG_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]
@@ -51,7 +52,7 @@ def server(tmp_path_factory):
     env = {**os.environ, "DATABASE_BACKEND": "local", "AUTH_REQUIRED": "false", "SCHEDULER_ENABLED": "false",
            "LOCAL_DB_PATH": str(tmp_path_factory.mktemp("db") / "db.json"), "LOG_FORMAT": "text"}
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port)],
-                            cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            cwd=BACKEND, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     base = f"http://127.0.0.1:{port}"
     for _ in range(60):
         try:
