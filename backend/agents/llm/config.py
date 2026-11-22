@@ -18,7 +18,71 @@ from dotenv import load_dotenv
 from agents.llm.exceptions import LLMConfigurationError
 
 # Valid provider identifiers
-VALID_PROVIDERS = {"mock", "local", "api"}
+VALID_PROVIDERS = {"mock", "local", "api", "chain"}
+
+
+# ---------------------------------------------------------------------------
+# Fallback chain (LLM_PROVIDER=chain)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ChainLink:
+    """One provider in the fallback chain.  ``api_key`` is never shown in repr."""
+
+    name: str
+    base_url: str
+    model: str
+    api_key: str = ""
+    # Extra chat-completions fields this provider understands (e.g. NVIDIA's chat_template_kwargs)
+    extra_body: tuple[tuple[str, object], ...] = ()
+
+    def __repr__(self) -> str:
+        return f"ChainLink(name={self.name!r}, model={self.model!r}, key={'****' if self.api_key else '<not set>'})"
+
+
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+DEFAULT_CHAIN = "nvidia-gemma,nvidia-nemotron,groq,gemini"
+
+
+def _env(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return default
+
+
+def chain_link(name: str) -> ChainLink:
+    """The provider *name* as configured by its environment variables.
+
+    Raises ``LLMConfigurationError`` for an unknown name.
+    """
+    nvidia = _env("NVIDIA_BASE_URL", default=NVIDIA_BASE_URL)
+    if name == "nvidia-gemma":
+        return ChainLink(name, nvidia, _env("NVIDIA_GEMMA_MODEL", default="google/gemma-4-31b-it"),
+                         _env("NVIDIA_GEMMA_API_KEY", "NVIDIA_API_KEY"))
+    if name == "nvidia-nemotron":
+        thinking = _env("NVIDIA_NEMOTRON_THINKING", default="false").lower() in ("1", "true", "yes", "on")
+        return ChainLink(name, nvidia, _env("NVIDIA_NEMOTRON_MODEL", default="nvidia/nemotron-3-ultra-550b-a55b"),
+                         _env("NVIDIA_NEMOTRON_API_KEY", "NVIDIA_API_KEY"),
+                         (("chat_template_kwargs", {"enable_thinking": thinking}),))
+    if name == "groq":
+        return ChainLink(name, _env("GROQ_BASE_URL", default="https://api.groq.com/openai/v1"),
+                         _env("GROQ_MODEL", default="openai/gpt-oss-120b"), _env("GROQ_API_KEY"))
+    if name == "gemini":
+        return ChainLink(name, _env("GEMINI_BASE_URL", default="https://generativelanguage.googleapis.com/v1beta/openai"),
+                         _env("GEMINI_MODEL", default="gemini-3.8-flash"), _env("GEMINI_API_KEY"))
+    raise LLMConfigurationError(
+        f"Unknown provider '{name}' in LLM_CHAIN (use nvidia-gemma, nvidia-nemotron, groq, gemini).",
+        provider="config",
+    )
+
+
+def chain_links(*, configured_only: bool = True) -> list[ChainLink]:
+    """The providers of ``LLM_CHAIN`` in order; by default only those with an API key."""
+    names = [n.strip().lower() for n in _env("LLM_CHAIN", default=DEFAULT_CHAIN).split(",") if n.strip()]
+    links = [chain_link(n) for n in dict.fromkeys(names)]
+    return [link for link in links if link.api_key] if configured_only else links
 
 
 @dataclass(frozen=True)
@@ -89,6 +153,8 @@ class LLMConfig:
         """
         if self.provider in ("mock", "local"):
             return True
+        if self.provider == "chain":
+            return bool(chain_links())
         return bool(self.api_key)
 
     def validate(self) -> None:
@@ -109,6 +175,12 @@ class LLMConfig:
         if not self.model:
             raise LLMConfigurationError(
                 "LLM_MODEL is not set. Please set it in your .env file.",
+                provider="config",
+            )
+        if self.provider == "chain" and not chain_links():
+            raise LLMConfigurationError(
+                "LLM_PROVIDER=chain needs at least one provider key: NVIDIA_API_KEY (or NVIDIA_GEMMA_API_KEY / "
+                "NVIDIA_NEMOTRON_API_KEY), GROQ_API_KEY or GEMINI_API_KEY.",
                 provider="config",
             )
         if self.provider == "api" and not self.api_key:

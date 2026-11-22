@@ -74,7 +74,7 @@ class APIProvider(LLMClient):
     Parameters
     ----------
     config:
-        LLM configuration. For ``provider=self._config.provider`` an ``api_key`` is
+        LLM configuration. For ``provider="api"`` an ``api_key`` is
         required and ``base_url`` defaults to the OpenAI API; for
         ``provider="local"`` the key is optional and ``base_url`` defaults
         to a local Ollama server.
@@ -87,11 +87,16 @@ class APIProvider(LLMClient):
         config: LLMConfig,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        label: str | None = None,
+        extra_body: dict | None = None,
     ) -> None:
         super().__init__(config)
         default = DEFAULT_LOCAL_BASE_URL if config.provider == "local" else DEFAULT_BASE_URL
         self._base_url = (config.base_url or default).rstrip("/")
         self._transport = transport
+        # Name in errors and responses (a fallback chain's provider, e.g. "nvidia-gemma")
+        self._label = label or config.provider
+        self._extra_body = dict(extra_body or {})
 
         logger.info(
             "APIProvider initialized — provider=%s, model=%s, base_url=%s",
@@ -121,6 +126,7 @@ class APIProvider(LLMClient):
         }
         if request.response_format == "json":
             payload["response_format"] = {"type": "json_object"}
+        payload.update(self._extra_body)
         return payload
 
     # ── Error translation ─────────────────────────────────────
@@ -179,14 +185,21 @@ class APIProvider(LLMClient):
         message = f"API returned HTTP {status}: {detail}"
 
         if status in (401, 403):
-            raise LLMAuthenticationError(message, provider=self._config.provider)
+            raise LLMAuthenticationError(message, provider=self._label)
         if status == 429:
             retry_after, exhausted = self._rate_limit_hints(response)
-            raise LLMRateLimitError(message, provider=self._config.provider,
+            raise LLMRateLimitError(message, provider=self._label,
                                     retry_after=retry_after, quota_exhausted=exhausted)
         if status >= 500:
-            raise LLMProviderError(message, provider=self._config.provider)
-        raise LLMRequestValidationError(message, provider=self._config.provider)
+            raise LLMProviderError(message, provider=self._label)
+        raise LLMRequestValidationError(message, provider=self._label)
+
+    def _json_mode_refused(self, response: httpx.Response, payload: dict) -> bool:
+        """A 400 that blames JSON mode (``response_format``) on a request that used it."""
+        if response.status_code != 400 or "response_format" not in payload:
+            return False
+        detail = self._error_detail(response).lower()
+        return any(word in detail for word in ("response_format", "json_object", "json mode", "guided"))
 
     # ── Response parsing ──────────────────────────────────────
 
@@ -198,7 +211,7 @@ class APIProvider(LLMClient):
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMResponseError(
                 "API response is missing choices[0].message.content.",
-                provider=self._config.provider,
+                provider=self._label,
             ) from exc
 
         usage = body.get("usage") or {}
@@ -207,7 +220,7 @@ class APIProvider(LLMClient):
         return LLMResponse(
             content=content if content is not None else "",
             model=body.get("model") or self._config.model,
-            provider=self._config.provider,
+            provider=self._label,
             usage=LLMUsage(
                 prompt_tokens=usage.get("prompt_tokens", 0) or 0,
                 completion_tokens=usage.get("completion_tokens", 0) or 0,
@@ -232,26 +245,28 @@ class APIProvider(LLMClient):
         if self._config.api_key:  # local servers usually need none
             headers["Authorization"] = f"Bearer {self._config.api_key}"
 
+        payload = self._build_payload(request)
         try:
             async with httpx.AsyncClient(
                 base_url=self._base_url,
                 timeout=self._config.timeout,
                 transport=self._transport,
             ) as http:
-                response = await http.post(
-                    "/chat/completions",
-                    json=self._build_payload(request),
-                    headers=headers,
-                )
+                response = await http.post("/chat/completions", json=payload, headers=headers)
+                if self._json_mode_refused(response, payload):
+                    # Some models reject JSON mode; the prompt asks for JSON and the parser extracts it
+                    logger.info("%s refused JSON mode; asking again without it", self._label)
+                    payload.pop("response_format")
+                    response = await http.post("/chat/completions", json=payload, headers=headers)
         except httpx.TimeoutException as exc:
             raise LLMTimeoutError(
                 f"API request timed out after {self._config.timeout}s.",
-                provider=self._config.provider,
+                provider=self._label,
             ) from exc
         except httpx.RequestError as exc:
             raise LLMConnectionError(
                 f"Could not reach LLM API at {self._base_url}: {type(exc).__name__}",
-                provider=self._config.provider,
+                provider=self._label,
             ) from exc
 
         self._raise_for_status(response)
@@ -261,13 +276,14 @@ class APIProvider(LLMClient):
         except ValueError as exc:
             raise LLMResponseError(
                 "API returned a non-JSON response body.",
-                provider=self._config.provider,
+                provider=self._label,
             ) from exc
 
         result = self._parse_response(body)
 
         logger.info(  # nosemgrep: python-logger-credential-disclosure - token *counts*, no secrets
-            "APIProvider response — duration=%.2fs, tokens=%d+%d, finish=%s",
+            "APIProvider response (%s) — duration=%.2fs, tokens=%d+%d, finish=%s",
+            self._label,
             time.monotonic() - start_time,
             result.usage.prompt_tokens,
             result.usage.completion_tokens,

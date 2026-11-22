@@ -27,7 +27,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-KEYS = ["FIREBASE_CREDENTIALS", "FIREBASE_WEB_API_KEY", "LLM_PROVIDER", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"]
+KEYS = ["FIREBASE_CREDENTIALS", "FIREBASE_WEB_API_KEY", "LLM_PROVIDER", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL",
+        # LLM_PROVIDER=chain: the fallback chain's order and each provider's key
+        "LLM_CHAIN", "NVIDIA_API_KEY", "NVIDIA_GEMMA_API_KEY", "NVIDIA_NEMOTRON_API_KEY", "GROQ_API_KEY",
+        "GEMINI_API_KEY"]
 # Set by docker-compose.yml (or meaningless on EC2): never copied with --all
 SERVER_SET = {"APP_ENV", "PORT", "PIPELINE_EXECUTION", "ENGINE_MAX_BROWSERS", "CORS_ORIGINS", "DASHBOARD_URL",
               "LOG_FORMAT", "DATABASE_BACKEND", "LOCAL_DB_PATH", "ARTIFACTS_DIR", "PYTHON_VERSION", "NODE_VERSION",

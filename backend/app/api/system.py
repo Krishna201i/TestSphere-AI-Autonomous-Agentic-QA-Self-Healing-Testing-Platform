@@ -68,9 +68,23 @@ def _privacy_facts() -> dict[str, Any]:
     return {
         "contact": settings.PRIVACY_CONTACT or None,
         # where page content goes for AI planning/healing: a third-party API, this machine, or nowhere
-        "ai_processing": {"api": "cloud", "local": "local"}.get(provider, "none"),
+        "ai_processing": {"api": "cloud", "chain": "cloud", "local": "local"}.get(provider, "none"),
         "error_reporting": bool(settings.SENTRY_DSN),
     }
+
+
+def _llm_facts(llm: LLMConfig) -> dict[str, Any]:
+    """The model in use; for the fallback chain, each provider in order and how long it is benched."""
+    if llm.provider != "chain":
+        return {"provider": llm.provider, "model": llm.model, "configured": llm.is_configured}
+    from agents.llm.config import chain_links
+    from agents.llm.providers.chain import benched_for
+
+    links = chain_links()
+    return {"provider": "chain", "model": " -> ".join(link.model for link in links) or None,
+            "configured": bool(links),
+            "chain": [{"name": link.name, "model": link.model, "benched_seconds": round(benched_for(link.name))}
+                      for link in links]}
 
 
 @router.get("")
@@ -86,7 +100,7 @@ def system_info(authorization: str | None = Header(None)) -> dict[str, Any]:
         "environment": settings.APP_ENV,
         "commit": git_commit(),
         "database": settings.DATABASE_BACKEND,
-        "llm": {"provider": llm.provider, "model": llm.model, "configured": llm.is_configured},
+        "llm": _llm_facts(llm),
         "scan_scope": sorted(LOOPBACK_HOSTS) + extra,
         "passive_any_host": settings.SECURITY_PASSIVE_ANY_HOST,
         "active_scan": settings.SECURITY_ACTIVE_SCAN,
