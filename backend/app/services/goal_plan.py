@@ -27,7 +27,10 @@ from app.services.auth_plan import SERVER_ERROR
 # Parts of a goal: split on "and"/"then"/commas, but "username X and password Y" stays one part
 _SPLIT = re.compile(r"\s*(?:,\s*(?:and\s+|then\s+)?|;\s*|\s+and then\s+|\s+then\s+|\s+and\s+)", re.IGNORECASE)
 _FORM_VERB = re.compile(r"^(?:log ?in|sign ?in|search|type|enter|fill|submit)\b", re.IGNORECASE)
-_CREDENTIAL = re.compile(r"^(?:(?:the|my|a)\s+)?(?:pass(?:word)?|user ?name|user|e-?mail|login)\b", re.IGNORECASE)
+_CREDENTIAL = re.compile(r"^(?:(?:the|my|a)\s+)?(?:pass(?:word)?|user ?name|user|e-?mail|login)\b"
+                         # "confirm Other-Pass-99" (one value, not "confirm the page shows ..."), "accept the terms"
+                         r"|^confirm(?:ation)?(?:\s+(?:the\s+)?password)?\s+(?:with\s+)?\S+$"
+                         r"|^(?:accept|agree\s+to|tick)\s+(?:the\s+)?(?:terms|conditions|privacy)", re.IGNORECASE)
 _ARTICLE = re.compile(r"^(?:the|a|an|my|your|this|that)\s+", re.IGNORECASE)
 
 _CONTAINER = ":is(li,tr,td,article,section,form,div)"
@@ -95,11 +98,59 @@ def no_server_error(n: int) -> dict[str, Any]:
     return _step(n, "ASSERT_HIDDEN", "no server error is shown", target=SERVER_ERROR)
 
 
+# An error or validation message, as sites show them
+ERROR_MESSAGE = (':is([role=alert],[aria-live=assertive],.error,.errors,.alert-danger,.alert-error,.invalid-feedback,'
+                 '.field-error,.form-error,[aria-invalid=true])')
+_CHECK = r"^(?:check|verify|confirm|ensure|make sure|expect|see)\s+(?:that\s+)?"
+_SUBJECT = r"(?:the\s+page|the\s+screen|it|page|there)?\s*(?:still\s+)?"
+_ERROR_PART = re.compile(_CHECK + r"(?:an?\s+|the\s+)?(?:error|validation)(?:\s+message)?\s+(?:is\s+|gets\s+)?"
+                         r"(?:shown|displayed|visible|appears?)$", re.IGNORECASE)
+_NOT_SHOWN = re.compile(_CHECK + _SUBJECT + r"(?:does\s*n[o']t|does not|did not|no longer|never)\s+"
+                        r"(?:shows?|displays?|contains?)\s+(.+)$", re.IGNORECASE)
+_SHOWN = re.compile(_CHECK + _SUBJECT + r"(?:shows?|displays?|contains?|says)\s+(.+)$", re.IGNORECASE)
+_HIDES_PASSWORD = re.compile(_CHECK + r"(?:the\s+)?password(?:\s+field)?\s+(?:hides|masks)\b", re.IGNORECASE)
+
+
+_REFUSAL_WORDS = re.compile(r"\b(?:already|exists?|invalid|incorrect|wrong|error|failed|denied|not\s+(?:valid|allowed|found|match)"
+                            r"|taken|required|must|cannot|can't|unable|mismatch|do(?:es)?\s*n[o']t\s+match)\b", re.IGNORECASE)
+
+
+def expects_failure(part: str) -> bool:
+    """A part that expects the form to be refused: an error, a page that must not
+    appear, or a message that says why ("check the page shows already exists")."""
+    p = part.strip()
+    if _ERROR_PART.match(p) or _NOT_SHOWN.match(p):
+        return True
+    m = _SHOWN.match(p)
+    return bool(m and _REFUSAL_WORDS.search(m.group(1)))
+
+
+def _shown_text(raw: str) -> str:
+    """Text the page must show, exactly as written: "Your account" is not "account" (which a
+    signed-out page saying "Sign in to your account" also shows)."""
+    return raw.strip().strip("\"'“”").rstrip(".").strip()
+
+
 def later_part_steps(n: int, part: str, values: dict[str, str]) -> list[dict[str, Any]]:
     """Steps for one part after the form; [] when it cannot be turned into steps."""
     p = part.strip()
     if re.match(r"^(?:check|verify|confirm|see)\b.*\b(?:loads?|opens?|works?|renders?)$", p, re.IGNORECASE):
         return [_step(n, "ASSERT_VISIBLE", "the page loads", target="body")]
+    if re.match(r"^(?:reload|refresh)(?:\s+the\s+page)?$", p, re.IGNORECASE):
+        return [_step(n, "RELOAD", "reload the page")]
+    if re.match(r"^go\s+back$", p, re.IGNORECASE):
+        return [_step(n, "GO_BACK", "go back")]
+    if _ERROR_PART.match(p):
+        return [_step(n, "ASSERT_VISIBLE", "an error message is shown", target=ERROR_MESSAGE)]
+    if _HIDES_PASSWORD.match(p):
+        return [_step(n, "ASSERT_VISIBLE", "the password field hides what is typed", target="input[type=password]")]
+    m = _NOT_SHOWN.match(p)
+    if m and (what := _shown_text(m.group(1))):
+        return [_step(n, "ASSERT_HIDDEN", f"the page does not show '{what[:60]}'",
+                      target=f'internal:text="{_quote(what)}"i')]
+    m = _SHOWN.match(p)
+    if m and (what := _shown_text(m.group(1))):
+        return [_step(n, "ASSERT_CONTAINS_TEXT", f"the page shows '{what[:60]}'", target="body", value=what)]
     m = re.match(r"^(?:reach|see|verify|confirm|expect|land on|get to|view)\s+(?:that\s+)?(.+)$", p, re.IGNORECASE)
     if m:
         what = _noun(re.sub(r"\s+(?:page|screen)$", "", m.group(1), flags=re.IGNORECASE))
@@ -128,9 +179,14 @@ def later_part_steps(n: int, part: str, values: dict[str, str]) -> list[dict[str
             _step(n + 1, "ASSERT_VISIBLE", f"'{item[:40]}' is ticked", target=f"{box}:checked"),
         ]
 
+    m = re.match(r"^(?:open|go to|navigate to|visit|load)\s+(?:the\s+page\s+)?(/\S*|https?://\S+)$", p, re.IGNORECASE)
+    if m:
+        return [_step(n, "NAVIGATE", f"open {m.group(1)}", value=m.group(1))]
+
     m = re.match(r"^(?:click|press|tap|open|go to|navigate to|select|choose)\s+(?:on\s+)?(.+)$", p, re.IGNORECASE)
     if m or re.match(r"^(?:log ?out|sign ?out)$", p, re.IGNORECASE):
-        label = _noun(m.group(1)) if m else p
+        # "click Sign in without filling anything": the label is what comes before the qualifier
+        label = _noun(re.sub(r"\s+(?:without|before|after|while|instead)\b.*$", "", m.group(1), flags=re.IGNORECASE)) if m else p
         return [_step(n, "CLICK", f"'{label[:40]}'", target=f'{_ACTIONABLE}:has-text("{_quote(label)}")')] if label else []
     return []
 
@@ -147,10 +203,17 @@ def plan_goal(prompt: str | None, inputs: list[dict[str, Any]], values: dict[str
     untested: list[str] = []
     steps: list[dict[str, Any]] = []
     n = first_step
+    # "log in with a wrong password and check an error is shown": the goal expects the
+    # form to be refused, so success is not asserted (its own checks say what to see)
+    # Only the check right after the form speaks about it: in "log in, click Log out, check the
+    # page does not show Signed in as" the check is about logging out, and the login must succeed
+    refusal_expected = len(parts) > 1 and expects_failure(parts[1])
     for i, part in enumerate(parts):
         if i == 0 and form_used and (is_form_part(part, values) or not later_part_steps(n, part, values)):
-            new = form_outcome(n, part, inputs, values)
-            if new:
+            new = [] if refusal_expected else form_outcome(n, part, inputs, values)
+            if refusal_expected:
+                tested.append(part)
+            elif new:
                 tested.append(part)
             else:
                 # Submitted, but nothing in the goal says what success looks like:

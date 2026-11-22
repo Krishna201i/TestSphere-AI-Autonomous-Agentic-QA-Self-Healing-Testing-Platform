@@ -264,7 +264,9 @@ async def draft_with_model(instruction: str, analysis: dict[str, Any], llm: Any,
 def draft_with_rules(instruction: str, analysis: dict[str, Any]) -> dict[str, Any]:
     """The rule-based planner's steps for the same description (analysis made with it as the goal)."""
     case = analysis.get("synthesized_test_case") or {}
-    steps = [s for s in case.get("steps") or [] if str(s.get("action", "")).upper() != "NAVIGATE"]
+    steps = list(case.get("steps") or [])
+    if steps and str(steps[0].get("action", "")).upper() == "NAVIGATE":
+        steps = steps[1:]  # the opening of the analyzed page: stored_steps adds it back
     goal = case.get("goal") or {}
     return {"name": "", "steps": steps, "not_covered": list(goal.get("untested") or [])}
 

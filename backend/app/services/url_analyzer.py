@@ -648,13 +648,16 @@ class URLAnalyzerService:
     def prompt_values(prompt: str | None) -> dict[str, str]:
         """Values written in the goal: user name, password and a text to type.
 
-        Understands "log in with tomsmith / SuperSecretPassword!",
+        Understands "log in with tomsmith / SuperSecretPassword!", "log in with
+        ann@example.com and password Secret-1" (an email address is the user name),
         "username student and password Password123", "as standard_user with
         password secret_sauce", "add a todo called Buy milk", quoted text.
         """
         text = re.sub(r"\b(?:https?://|www\.)\S+", " ", prompt or "")  # a URL is not "user / password"
         values: dict[str, str] = {}
-        pair = re.search(r"([\w.@+-]+)\s*/\s*(\S+)", text)
+        # "with tomsmith / SuperSecret", "as demo / pw": not "open /account" (a path)
+        pair = re.search(r"\b(?:with|as|using|credentials?:?)\s+([\w.@+-]+)\s*/\s*(\S+)", text, re.IGNORECASE) \
+            or re.search(r"^\s*([\w.@+-]+)\s*/\s*(\S+)\s*$", text)
         if pair:
             values["username"], values["password"] = pair.group(1), pair.group(2).rstrip(".,;")
         pw = re.search(r"\bpass(?:word)?\b\s*(?:is|=|:)?\s*[\"']?([^\s\"',;]+)", text, re.IGNORECASE)
@@ -665,6 +668,19 @@ class URLAnalyzerService:
             or re.search(r"\bas\s+[\"']?([\w.@+-]+)\s+(?:with|and)\s+pass", text, re.IGNORECASE)
         if user and user.group(1).lower() not in ("and", "with", "password", "is"):
             values["username"] = user.group(1)
+        if "username" not in values:
+            # "log in with ann@example.com and password Secret-1": an email address is the user name
+            email = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", text)
+            if email:
+                values["username"] = email.group(0)
+        # Sign-up values: "confirm Other-Pass-99", "name Ann Lee"
+        confirm = re.search(r"\bconfirm(?:ation)?(?:\s+(?:the\s+)?password)?\s*(?:is|=|:|with)?\s*[\"']?([^\s\"',;]+)",
+                            text, re.IGNORECASE)
+        if confirm and confirm.group(1).lower() not in ("and", "the", "password"):
+            values["confirm"] = confirm.group(1)
+        name = re.search(r"\b(?i:full\s+name|name)\s*(?:is|=|:)?\s*[\"']?([A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*)*)", text)
+        if name:
+            values["name"] = name.group(1)
         quoted = re.search(r"[\"“]([^\"”]{1,80})[\"”]", text)
         called = re.search(r"\b(?:called|named|titled|search(?:es)? for|type)\s+(.+?)(?:\s+and\b|[.,;]|$)", text, re.IGNORECASE)
         if quoted:
@@ -842,9 +858,13 @@ class URLAnalyzerService:
         inputs, buttons = cls._form_of_goal(inputs, buttons, prompt)
         form_kind = auth_plan.kind(inputs, prompt, buttons) if use_form else None
         not_run = None
+        own = cls.prompt_values(prompt)
+        # The goal names the account to create ("sign up with email ann@example.com ..."):
+        # that is the consent, and its values are used
+        explicit_account = bool(own.get("username"))
         if form_kind == "login" and not (given.get("username") and given.get("password")):
             not_run = "needs credentials in the goal"
-        elif form_kind == "signup" and not allow_test_accounts:
+        elif form_kind == "signup" and not allow_test_accounts and not explicit_account:
             not_run = "test accounts are off for this project"
         if form_kind and blocked:
             not_run = blocked
@@ -853,7 +873,13 @@ class URLAnalyzerService:
             # the form's own tests (auth_plan) still run, and the goal says why it was not
             return steps, {"tested": [], "untested": [f"{p} ({not_run})" if i == 0 else p for i, p in enumerate(parts)]}
         if form_kind == "signup":
-            given = {**auth_plan.signup_values(email_domain), **{k: v for k, v in given.items() if k == "text"}}
+            generated = auth_plan.signup_values(email_domain)
+            if explicit_account:
+                password = own.get("password", generated["password"])
+                given = {**generated, **own, "email": own["username"], "password": password,
+                         "confirm": own.get("confirm", password)}
+            else:
+                given = {**generated, **{k: v for k, v in given.items() if k == "text"}}
 
         # Step 3: Interactive Inputs (if discovered)
         if inputs and use_form:
