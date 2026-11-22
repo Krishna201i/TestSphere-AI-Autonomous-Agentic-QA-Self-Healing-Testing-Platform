@@ -1225,6 +1225,7 @@ details > ul { margin-top: var(--s-2); }
 .feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-3); }
 .feed li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: var(--s-3); align-items: center; font-size: var(--fs-sm); }
 .feed li > svg { color: var(--text-2); }
+.feed.rich li { grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; }
 .feed .feed-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .feed .feed-time { font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
 

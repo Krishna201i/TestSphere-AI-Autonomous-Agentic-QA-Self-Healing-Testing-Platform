@@ -96,3 +96,26 @@ def test_a_rejected_heal_fails_the_next_run_instead_of_passing(site):
     again = client.post("/workflow/plan-and-execute", json={"test_case_id": saved["id"]}).json()
     assert again["status"] == "FAILED"
     assert "a reviewer rejected healing this step" in again["error_message"]
+
+
+def test_an_imported_playwright_test_runs_in_the_engine(site):
+    url, _ = site
+    client = TestClient(app)
+    project = client.post("/projects", json={"name": "Shop", "app_url": url}).json()
+    spec = """
+import { test, expect } from '@playwright/test';
+test('signs in', async ({ page }) => {
+  await page.getByLabel('User name').fill('demo');
+  await page.getByLabel('Password').fill('secret');
+  await page.getByRole('button', { name: 'Log in' }).click();
+  await expect(page.getByRole('heading', { name: 'Products' })).toBeVisible();
+  await expect(page.getByText('Welcome, demo')).toBeVisible();
+});
+"""
+    imported = client.post(f"/projects/{project['id']}/studio/import", json={"text": spec, "filename": "auth.spec.ts"}).json()
+    [draft] = imported["files"][0]["tests"]
+    assert draft["problems"] == [] and draft["not_imported"] == []
+    saved = client.post(f"/projects/{project['id']}/studio/tests",
+                        json={"name": draft["name"], "steps": draft["steps"]}).json()
+    result = client.post("/workflow/plan-and-execute", json={"test_case_id": saved["id"]}).json()
+    assert result["status"] == "PASSED", result.get("error_message")

@@ -67,7 +67,7 @@ _NO_TARGET = {"NAVIGATE", "WAIT", "RELOAD", "GO_BACK", "ASSERT_URL", "ASSERT_URL
 # Always present on a rendered page
 _ANY_PAGE = {"body", "main", "h1", "title", "head > title"}
 # Playwright resolves these by visible text when the step runs
-_TEXT_SELECTOR = re.compile(r":has-text\(|:text\(|:text-is\(|:text-matches\(|^text=|^role=", re.IGNORECASE)
+_TEXT_SELECTOR = re.compile(r":has-text\(|:text\(|:text-is\(|:text-matches\(|^text=|^role=|^internal:(?:role|text|label|attr|testid)=", re.IGNORECASE)
 _ALIASES = {"GOTO": "NAVIGATE", "OPEN": "NAVIGATE", "TYPE": "FILL", "ENTER": "FILL", "TAP": "CLICK",
             "WAIT_FOR": "WAIT", "BACK": "GO_BACK", "ASSERT_TEXT": "ASSERT_CONTAINS_TEXT",
             "ASSERT_NOT_VISIBLE": "ASSERT_HIDDEN", "ELEMENT_VISIBLE": "ASSERT_VISIBLE",

@@ -131,6 +131,11 @@ export const saveStudioTest = (projectId, payload) =>
   request(`/api/projects/${projectId}/studio/tests`, { method: 'POST', body: payload });
 export const updateStudioTest = (projectId, testId, payload) =>
   request(`/api/projects/${projectId}/studio/tests/${testId}`, { method: 'PUT', body: payload });
+/** Test Studio, codebase-aware: flows worth testing, and Playwright tests imported as text (never run). */
+export const suggestStudioFlows = (projectId) => request(`/api/projects/${projectId}/studio/suggest`, { method: 'POST', body: {} });
+export const importPlaywright = (projectId, text, filename) =>
+  request(`/api/projects/${projectId}/studio/import`, { method: 'POST', body: { text, filename } });
+export const importPlaywrightRepo = (projectId) => request(`/api/projects/${projectId}/studio/import-repo`, { method: 'POST', body: {} });
 /** Self-healing review: every heal with its evidence, and approve / reject one. */
 export const getHeals = (limit = 200) => request(`/api/heals?limit=${limit}`);
 export const reviewHeal = (executionId, originalLocator, decision) =>
