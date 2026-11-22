@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 from playwright.async_api import async_playwright
 
-from backend.services.url_analyzer import URLAnalyzerService as U
+from app.services.url_analyzer import URLAnalyzerService as U
 from engine.locators import (
     best_unique,
     css_string,

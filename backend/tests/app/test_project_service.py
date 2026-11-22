@@ -12,9 +12,9 @@ Validates:
 
 import unittest
 
-from backend.database.session import get_store
-from backend.services.exceptions import ProjectNotFoundError
-from backend.services.project_service import ProjectService
+from app.database.session import get_store
+from app.services.exceptions import ProjectNotFoundError
+from app.services.project_service import ProjectService
 
 
 class TestProjectService(unittest.TestCase):

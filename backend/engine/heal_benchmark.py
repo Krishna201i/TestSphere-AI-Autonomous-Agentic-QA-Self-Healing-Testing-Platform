@@ -64,7 +64,7 @@ from engine.schemas import (
     TestPlan,
 )
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]  # repository root (docs/ lives there)
 DOCS = ROOT / "docs"
 
 # ── Pages ──────────────────────────────────────────────────────────────────

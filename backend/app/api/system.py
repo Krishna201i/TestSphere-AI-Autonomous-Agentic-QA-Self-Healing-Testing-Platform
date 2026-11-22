@@ -16,9 +16,9 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 
 from agents.llm.config import LLMConfig
-from backend.auth import get_current_user
-from backend.config import settings
-from backend.observability import git_commit
+from app.auth import get_current_user
+from app.config import settings
+from app.observability import git_commit
 from security.scope import LOOPBACK_HOSTS
 
 router = APIRouter(prefix="/system", tags=["System"])

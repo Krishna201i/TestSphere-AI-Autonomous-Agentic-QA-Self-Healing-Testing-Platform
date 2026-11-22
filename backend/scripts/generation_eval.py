@@ -8,7 +8,7 @@ catch real bugs, without failing a healthy site?
 For each scenario (a page of ``tests/fixtures/auth_app.py`` and a written
 goal, or none) it does what a pipeline run does: analyzes the healthy page
 (``URLAnalyzerService.analyze_live_website``), plans its tests
-(``backend.pipeline.suite.page_tests``) and converts each to an engine plan
+(``app.pipeline.suite.page_tests``) and converts each to an engine plan
 the way the orchestrator does (``parse_stored_steps``,
 ``test_case_to_engine_plan``).  Then it runs every test, in Chromium:
 
@@ -43,15 +43,15 @@ os.environ.setdefault("ALLOW_PRIVATE_TARGETS", "true")  # the site is on 127.0.0
 os.environ.setdefault("LLM_PROVIDER", "mock")
 
 from agents.planner.schemas import TestCase as Member1TestCase  # noqa: E402
-from backend.orchestration.converters import test_case_to_engine_plan  # noqa: E402
-from backend.orchestration.orchestrator import parse_stored_steps  # noqa: E402
-from backend.pipeline import suite  # noqa: E402
-from backend.services.url_analyzer import URLAnalyzerService  # noqa: E402
+from app.orchestration.converters import test_case_to_engine_plan  # noqa: E402
+from app.orchestration.orchestrator import parse_stored_steps  # noqa: E402
+from app.pipeline import suite  # noqa: E402
+from app.services.url_analyzer import URLAnalyzerService  # noqa: E402
 from engine.runner import run_test  # noqa: E402
 from engine.schemas import RunOptions, TestStatus  # noqa: E402
 from tests.fixtures.auth_app import BLOCKERS, LOGIN_GOAL, MUTANTS, AuthApp  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]  # repository root (docs/ lives there)
 DOCS = ROOT / "docs"
 
 # Assertions that say nothing about the login or sign-up working

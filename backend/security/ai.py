@@ -11,7 +11,7 @@ they already produced and asks the model to:
   * **explain** — one plain-English sentence on the real-world risk,
   * **fix** — concrete remediation steps tailored to this finding.
 
-Design rules (same contract as ``backend/pipeline/ai_plan.py``):
+Design rules (same contract as ``app/pipeline/ai_plan.py``):
 
   * It never contacts the target.  It only reads findings produced in scope,
     so it cannot widen scope or be used for SSRF.
@@ -52,7 +52,7 @@ class AIInsight(BaseModel):
 def enabled() -> bool:
     """True when AI triage should run (mirrors the planner's gate)."""
     from agents.llm.config import LLMConfig
-    from backend.config import settings
+    from app.config import settings
 
     mode = settings.SECURITY_AI
     if mode == "off":
@@ -136,7 +136,7 @@ async def triage(
 
     from agents.llm.exceptions import LLMError
     from agents.llm.schemas import LLMRequest
-    from backend.config import settings
+    from app.config import settings
 
     if timeout is None:
         timeout = settings.SECURITY_AI_TIMEOUT

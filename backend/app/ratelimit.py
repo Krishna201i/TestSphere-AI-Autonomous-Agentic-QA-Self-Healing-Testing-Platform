@@ -20,11 +20,11 @@ from collections import defaultdict, deque
 
 from fastapi import Depends, HTTPException, status
 
-from backend.auth import User, get_current_user
-from backend.config import settings
-from backend.database.session import get_db
-from backend.database.store import Store
-from backend.models import RATE_LIMITS
+from app.auth import User, get_current_user
+from app.config import settings
+from app.database.session import get_db
+from app.database.store import Store
+from app.models import RATE_LIMITS
 
 WINDOW_SECONDS = 60.0
 

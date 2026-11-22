@@ -12,8 +12,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
-from backend.config import settings
-from backend.services.url_analyzer import (
+from app.config import settings
+from app.services.url_analyzer import (
     URLAnalyzerService,
     get_verifying_first,
     is_certificate_error,

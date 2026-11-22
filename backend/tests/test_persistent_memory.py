@@ -5,7 +5,7 @@ from pathlib import Path
 
 from agents.memory.memory_schemas import HealingRecord
 from agents.memory.persistent_store import COLLECTION, PersistentMemoryStore
-from backend.database.store import LocalStore
+from app.database.store import LocalStore
 
 
 def _record(i: int, old: str = "#old") -> HealingRecord:
@@ -54,8 +54,8 @@ def test_clear_wipes_the_collection(fresh_store) -> None:
 
 
 def test_start_up_record_limit_comes_from_settings(monkeypatch):
-    from backend.config import settings
-    from backend.orchestration import orchestrator
+    from app.config import settings
+    from app.orchestration import orchestrator
 
     monkeypatch.setattr(settings, "AGENT_MEMORY_BACKEND", "database")
     monkeypatch.setattr(settings, "AGENT_MEMORY_MAX_RECORDS", 50)

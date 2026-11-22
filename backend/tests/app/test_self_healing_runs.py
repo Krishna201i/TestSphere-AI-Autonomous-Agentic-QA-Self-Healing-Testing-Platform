@@ -1,5 +1,5 @@
 """
-Self-healing on real executions (backend/orchestration/orchestrator.py).
+Self-healing on real executions (app/orchestration/orchestrator.py).
 
 Covers the path a run takes when a locator breaks:
 - the AI healer gets the failed page's elements, its replacement is
@@ -35,26 +35,26 @@ from agents.memory.persistent_store import (
 )
 from agents.orchestration.workflow_schemas import AgentState, WorkflowStep
 from agents.schemas.enums import FailureType
-from backend.database.session import get_store
-from backend.models import AGENT_MEMORY, TEST_CASES, TEST_EXECUTIONS
-from backend.orchestration import orchestrator as orchestration
-from backend.orchestration.converters import (
+from app.database.session import get_store
+from app.models import AGENT_MEMORY, TEST_CASES, TEST_EXECUTIONS
+from app.orchestration import orchestrator as orchestration
+from app.orchestration.converters import (
     collect_learned_targets,
     engine_result_to_execution_result,
     learned_targets_by_locator,
     page_elements_from_dom,
 )
-from backend.orchestration.converters import (
+from app.orchestration.converters import (
     test_case_to_engine_plan as to_engine_plan,
 )
-from backend.orchestration.orchestrator import (
+from app.orchestration.orchestrator import (
     PlatformWorkflowOrchestrator,
     create_default_orchestrator,
 )
-from backend.services.application_service import ApplicationService
-from backend.services.project_service import ProjectService
-from backend.services.test_case_service import TestCaseService
-from backend.services.test_execution_service import TestExecutionService
+from app.services.application_service import ApplicationService
+from app.services.project_service import ProjectService
+from app.services.test_case_service import TestCaseService
+from app.services.test_execution_service import TestExecutionService
 from engine.schemas import (
     ActionType,
     ElementFingerprint,
@@ -138,7 +138,7 @@ class TestAIHealingOnARun:
                                   confidence=0.9, strategy_used="fallback[0]")))
         db, _tc, execution = _setup(LOGIN_STEPS)
 
-        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(return_value=healed)):
+        with patch("app.orchestration.orchestrator.run_test", new=AsyncMock(return_value=healed)):
             result = await _service().execute_test_run(db=db, execution_id=execution.id)
 
         assert result["status"] == "HEALED"
@@ -159,7 +159,7 @@ class TestAIHealingOnARun:
         db, tc, execution = _setup(LOGIN_STEPS, _known_login_button())
         memory = InMemoryStore()
 
-        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(side_effect=[failed, validated])) as run:
+        with patch("app.orchestration.orchestrator.run_test", new=AsyncMock(side_effect=[failed, validated])) as run:
             result = await _service(memory).execute_test_run(db=db, execution_id=execution.id)
 
         assert result["status"] == "HEALED", result["error_message"]
@@ -189,7 +189,7 @@ class TestAIHealingOnARun:
         db, _, execution = _setup(LOGIN_STEPS, _known_login_button())
         memory = InMemoryStore()
 
-        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(side_effect=[failed, failed, failed])):
+        with patch("app.orchestration.orchestrator.run_test", new=AsyncMock(side_effect=[failed, failed, failed])):
             result = await _service(memory).execute_test_run(db=db, execution_id=execution.id)
 
         assert result["status"] == "FAILED"
@@ -206,7 +206,7 @@ class TestAIHealingOnARun:
         db, _, execution = _setup(LOGIN_STEPS, _known_login_button())
 
         run = AsyncMock(side_effect=[failed, RuntimeError("browser vanished")])
-        with patch("backend.orchestration.orchestrator.run_test", new=run):
+        with patch("app.orchestration.orchestrator.run_test", new=run):
             result = await _service().execute_test_run(db=db, execution_id=execution.id)
 
         assert result["status"] == "FAILED"
@@ -217,7 +217,7 @@ class TestAIHealingOnARun:
         service = _service()
         failed = _result(TestStatus.FAILED, StepResult(step_id="step-1", status=StepStatus.FAILED, duration_ms=1,
                                                        error="boom"))
-        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(return_value=failed)), \
+        with patch("app.orchestration.orchestrator.run_test", new=AsyncMock(return_value=failed)), \
                 patch.object(service.ai_orchestrator, "submit_execution_result",
                              new=AsyncMock(side_effect=AttributeError("no such field"))), \
                 pytest.raises(AttributeError):
@@ -258,7 +258,7 @@ class TestLocatorTimeouts:
                                                      error="Page.goto: Timeout 15000ms exceeded."))
         passed = _result(TestStatus.PASSED, _ok("step-1"), _ok("step-2"))
 
-        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(side_effect=[slow, passed])) as run:
+        with patch("app.orchestration.orchestrator.run_test", new=AsyncMock(side_effect=[slow, passed])) as run:
             result = await _service().execute_test_run(db=db, execution_id=execution.id)
 
         assert run.await_count == 2
@@ -268,7 +268,7 @@ class TestLocatorTimeouts:
         db, _, execution = _setup(LOGIN_STEPS)
         slow = _result(TestStatus.FAILED, StepResult(step_id="step-1", status=StepStatus.FAILED, duration_ms=15000,
                                                      error="Page.goto: Timeout 15000ms exceeded."))
-        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(return_value=slow)) as run:
+        with patch("app.orchestration.orchestrator.run_test", new=AsyncMock(return_value=slow)) as run:
             result = await _service().execute_test_run(db=db, execution_id=execution.id)
 
         assert result["status"] == "FAILED"
@@ -367,7 +367,7 @@ class TestLearnedTargets:
             return _result(TestStatus.PASSED, _ok("step-1"), _ok("step-2"))
 
         memory = InMemoryStore()
-        with patch("backend.orchestration.orchestrator.run_test", new=run):
+        with patch("app.orchestration.orchestrator.run_test", new=run):
             await _service(memory).execute_test_run(db=db, execution_id=execution.id)
 
         saved = db.get(TEST_CASES, tc.id)["healing_targets"]
@@ -384,7 +384,7 @@ class TestLearnedTargets:
             seen.append(plan.steps[1].target.model_copy(deep=True))
             return _result(TestStatus.PASSED, _ok("step-1"), _ok("step-2"))
 
-        with patch("backend.orchestration.orchestrator.run_test", new=run_again):
+        with patch("app.orchestration.orchestrator.run_test", new=run_again):
             await _service(memory).execute_test_run(db=db, execution_id=second.id)
         assert seen[0].fingerprint == LOGIN_FINGERPRINT
         assert seen[0].fallback_locators == ['button:has-text("Log in")']
@@ -397,7 +397,7 @@ class TestLearnedTargets:
             healing=HealingReport(original_locator="#login-button", selected_locator="#sign-in", confidence=0.86,
                                   strategy_used="fingerprint")))
         memory = InMemoryStore()
-        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(return_value=healed)):
+        with patch("app.orchestration.orchestrator.run_test", new=AsyncMock(return_value=healed)):
             result = await _service(memory).execute_test_run(db=db, execution_id=execution.id)
 
         assert result["status"] == "HEALED"
@@ -419,7 +419,7 @@ class TestHealingMemoryStorage:
     async def test_a_run_stores_its_memory_under_its_owner(self, fresh_store):
         db, _, execution = _setup(LOGIN_STEPS, owner="alice")
         passed = _result(TestStatus.PASSED, _ok("step-1"), _ok("step-2"))
-        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(return_value=passed)):
+        with patch("app.orchestration.orchestrator.run_test", new=AsyncMock(return_value=passed)):
             await _service(PersistentMemoryStore(fresh_store)).execute_test_run(db=db, execution_id=execution.id)
 
         rows = fresh_store.find(AGENT_MEMORY)
@@ -450,7 +450,7 @@ class TestHealingMemoryStorage:
             assert memory.get_healing_history("#old") == []
 
     def test_account_erasure_covers_healing_memory(self):
-        from backend.api import me
+        from app.api import me
 
         assert AGENT_MEMORY in me.OWNED_COLLECTIONS
 
@@ -582,7 +582,7 @@ async def test_checkbox_steps_and_exact_checks_reach_the_engine():
         seen.append(plan)
         return _result(TestStatus.PASSED, *[_ok(s.step_id) for s in plan.steps])
 
-    with patch("backend.orchestration.orchestrator.run_test", new=run):
+    with patch("app.orchestration.orchestrator.run_test", new=run):
         await _service().execute_test_run(db=db, execution_id=execution.id)
 
     steps = [(s.action.value, s.expected, s.exact) for s in seen[0].steps]
@@ -593,7 +593,7 @@ async def test_checkbox_steps_and_exact_checks_reach_the_engine():
 async def test_an_unknown_stored_action_is_not_run_as_a_click():
     db, _, execution = _setup(_steps({"action": "teleport", "target": "#menu"}))
     run = AsyncMock()
-    with patch("backend.orchestration.orchestrator.run_test", new=run):
+    with patch("app.orchestration.orchestrator.run_test", new=run):
         result = await _service().execute_test_run(db=db, execution_id=execution.id)
     assert run.await_count == 0
     assert result["status"] == "FAILED" and "could not be read" in result["error_message"]
@@ -607,7 +607,7 @@ async def test_an_unknown_stored_action_is_not_run_as_a_click():
 def test_write_back_rewrites_steps_and_keeps_the_old_locator_as_first_fallback():
     import json
 
-    from backend.orchestration.converters import write_back_heals
+    from app.orchestration.converters import write_back_heals
 
     description = json.dumps({"steps": [
         {"action": "click", "target": "#submit"}, {"action": "assert_visible", "target": "#welcome"},

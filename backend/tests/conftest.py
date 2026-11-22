@@ -33,9 +33,9 @@ os.environ.setdefault("ANALYZE_VISIBILITY", "false")
 @pytest.fixture(autouse=True)
 def fresh_store():
     """Every test gets an empty in-memory store (also used by the API via get_db)."""
-    from backend import auth
-    from backend.database.session import set_store
-    from backend.database.store import MemoryStore
+    from app import auth
+    from app.database.session import set_store
+    from app.database.store import MemoryStore
 
     store = MemoryStore()
     set_store(store)
@@ -47,7 +47,7 @@ def fresh_store():
 @pytest.fixture(autouse=True)
 def fresh_artifacts():
     """Screenshots and traces go to an in-memory store, never the dev data folder."""
-    from backend.artifacts import MemoryArtifactStore, set_artifact_store
+    from app.artifacts import MemoryArtifactStore, set_artifact_store
 
     store = MemoryArtifactStore()
     set_artifact_store(store)
@@ -58,7 +58,7 @@ def fresh_artifacts():
 @pytest.fixture(autouse=True)
 def fresh_rate_limits():
     """Rate-limit counts never carry over between tests."""
-    from backend import ratelimit
+    from app import ratelimit
 
     ratelimit.reset()
     yield

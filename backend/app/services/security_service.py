@@ -6,8 +6,8 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from backend.database.store import Record, Store, now_iso
-from backend.models import AUDIT_EVENTS, SECURITY_FINDINGS
+from app.database.store import Record, Store, now_iso
+from app.models import AUDIT_EVENTS, SECURITY_FINDINGS
 from security.findings import tier_of
 
 

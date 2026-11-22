@@ -9,16 +9,16 @@ Does not import, modify, or duplicate Member 1 TestCase business logic.
 
 from fastapi import APIRouter, Depends, Query, status
 
-from backend.api.schemas import (
+from app.api.schemas import (
     TestCaseCreate,
     TestCaseResponse,
     TestCaseUpdate,
 )
-from backend.auth import User, ensure_owned, get_current_user, scope
-from backend.database.session import get_db
-from backend.database.store import Record, Store
-from backend.models import APPLICATIONS, TEST_CASES
-from backend.services.test_case_service import TestCaseService
+from app.auth import User, ensure_owned, get_current_user, scope
+from app.database.session import get_db
+from app.database.store import Record, Store
+from app.models import APPLICATIONS, TEST_CASES
+from app.services.test_case_service import TestCaseService
 
 router = APIRouter(prefix="/test-cases", tags=["Test Cases"])
 

@@ -9,8 +9,8 @@ import logging
 import threading
 from collections.abc import Generator
 
-from backend.config import settings
-from backend.database.store import Store, StoreUnavailableError, create_store
+from app.config import settings
+from app.database.store import Store, StoreUnavailableError, create_store
 
 logger = logging.getLogger("testsphere.database")
 

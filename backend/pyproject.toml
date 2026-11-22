@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "testsphere-ai"
 version = "0.1.0"
 description = "Autonomous Agentic QA & Self-Healing Testing Platform"
-readme = "README.md"
+# readme: ../README.md (setuptools cannot package a file outside this folder)
 requires-python = ">=3.11"
 license = {text = "MIT"}
 
@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.scripts]
-testsphere-mcp = "backend.mcp_server:main"
+testsphere-mcp = "app.mcp_server:main"
 
 [project.optional-dependencies]
 engine = [
@@ -41,7 +41,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["agents*", "engine*", "backend*", "security*", "ingestion*"]
+include = ["app*", "agents*", "engine*", "security*", "ingestion*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -50,7 +50,7 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 target-version = "py311"
-extend-exclude = ["build", "frontend", "artifacts", "data"]
+extend-exclude = ["build", "artifacts", "data"]
 
 [tool.ruff.lint]
 # Correctness (pyflakes, syntax), import order, modern syntax, likely bugs,

@@ -18,11 +18,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.security import widen_active_scope
-from backend.config import settings
-from backend.main import app
-from backend.models import SCAN_TARGETS
-from backend.services import domain_verify
+from app.api.security import widen_active_scope
+from app.config import settings
+from app.main import app
+from app.models import SCAN_TARGETS
+from app.services import domain_verify
 from security import ActiveScanner, ScopePolicy
 
 PUBLISHED: dict[str, str] = {}
@@ -128,7 +128,7 @@ def test_the_active_scanner_attacks_verified_sites_and_nothing_else():
 
 
 def test_the_number_of_sites_is_limited(client, monkeypatch):
-    import backend.api.security as sec_api
+    import app.api.security as sec_api
 
     monkeypatch.setattr(sec_api, "MAX_SCAN_TARGETS", 2)
     for n in range(2):
@@ -139,7 +139,7 @@ def test_the_number_of_sites_is_limited(client, monkeypatch):
 def test_a_passive_scan_reaches_any_public_site_but_never_probes_its_secret_files():
     import httpx
 
-    from backend.api.security import get_scanner
+    from app.api.security import get_scanner
 
     requested: list[str] = []
     transport = httpx.MockTransport(lambda r: (requested.append(r.url.path), httpx.Response(200, text="<p>hi</p>"))[1])
@@ -151,8 +151,8 @@ def test_a_passive_scan_reaches_any_public_site_but_never_probes_its_secret_file
 
 def test_the_first_one_click_run_already_uses_the_chosen_settings(client, fresh_store, monkeypatch):
     """Settings chosen in the run form before the first run land on the project it creates."""
-    import backend.api.pipelines as pipes
-    from backend.models import PROJECTS
+    import app.api.pipelines as pipes
+    from app.models import PROJECTS
 
     started = []
     monkeypatch.setattr(pipes, "start_run", lambda db, project, **kw: started.append(project) or {"id": 1})

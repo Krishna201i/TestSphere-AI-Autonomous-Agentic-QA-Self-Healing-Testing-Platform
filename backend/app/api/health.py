@@ -15,10 +15,10 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter
 
-from backend.config import settings
-from backend.database import session as db_session
-from backend.database.store import StoreUnavailableError
-from backend.models import PIPELINE_RUNS
+from app.config import settings
+from app.database import session as db_session
+from app.database.store import StoreUnavailableError
+from app.models import PIPELINE_RUNS
 
 router = APIRouter(tags=["Health"])
 
@@ -37,7 +37,7 @@ def _queued_seconds(row, now: datetime) -> float:
 
 def _queue_status() -> tuple[int, str]:
     """(runs waiting, "ok" or "stalled"), cached like the database probe."""
-    from backend.worker import (
+    from app.worker import (
         IDLE_POLL_SECONDS,  # imported here: the worker module pulls in the pipeline
     )
 

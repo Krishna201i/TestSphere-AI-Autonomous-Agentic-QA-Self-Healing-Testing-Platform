@@ -5,9 +5,9 @@ import asyncio
 import httpx
 import pytest
 
-from backend.config import settings
-from backend.netguard import BlockedTargetError, check_target, guard_request
-from backend.services.url_analyzer import URLAnalyzerService
+from app.config import settings
+from app.netguard import BlockedTargetError, check_target, guard_request
+from app.services.url_analyzer import URLAnalyzerService
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def test_analyzer_reports_a_blocked_target_instead_of_fetching_it(hosted):
 
 
 def test_the_server_holds_browser_runs_to_the_same_policy():
-    import backend.main  # noqa: F401 - installs the guard
+    import app.main  # noqa: F401 - installs the guard
     from engine import browser
 
     assert browser._request_guard is check_target
@@ -59,7 +59,7 @@ async def test_a_browser_step_cannot_reach_an_internal_address(hosted):
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-    import backend.main  # noqa: F401 - installs the guard
+    import app.main  # noqa: F401 - installs the guard
     from engine.runner import run_test
     from engine.schemas import ActionType, Step, StepStatus, TestPlan
 
@@ -98,7 +98,7 @@ async def test_a_browser_step_cannot_reach_an_internal_address(hosted):
 def test_ipv6_forms_are_judged_by_the_address_they_reach(address, blocked):
     import ipaddress
 
-    from backend.netguard import _blocked
+    from app.netguard import _blocked
 
     assert _blocked(ipaddress.ip_address(address)) is blocked
 
@@ -127,7 +127,7 @@ def fake_dns(monkeypatch):
 
 def _pinned_with_recorder(responses=None):
     """A PinnedTransport whose real connection is replaced by a recorder."""
-    from backend.netguard import PinnedTransport
+    from app.netguard import PinnedTransport
 
     sent: list[httpx.Request] = []
 
@@ -188,7 +188,7 @@ async def test_pinned_transport_refuses_internal_ip_literals(hosted):
 async def test_pinned_transport_tries_the_next_checked_address_when_one_is_unreachable(hosted, fake_dns):
     answers, _ = fake_dns
     answers["dual.test"] = [["93.184.215.14", "2606:4700::1111"]]  # dead IPv4 route, working IPv6
-    from backend.netguard import PinnedTransport
+    from app.netguard import PinnedTransport
 
     tried: list[str] = []
 

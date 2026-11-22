@@ -16,10 +16,10 @@ from types import SimpleNamespace
 import pytest
 
 from agents.planner.schemas import TestCase as Member1TestCase
-from backend.orchestration.converters import test_case_to_engine_plan as to_engine_plan
-from backend.orchestration.orchestrator import parse_stored_steps
-from backend.pipeline import acceptance, suite
-from backend.services.url_analyzer import URLAnalyzerService as U
+from app.orchestration.converters import test_case_to_engine_plan as to_engine_plan
+from app.orchestration.orchestrator import parse_stored_steps
+from app.pipeline import acceptance, suite
+from app.services.url_analyzer import URLAnalyzerService as U
 from engine.runner import run_test
 from engine.schemas import RunOptions, TestStatus
 
@@ -58,7 +58,7 @@ def site():
 
 
 def _form_tests(url: str, html: str) -> dict[str, dict]:
-    from backend.services import form_checks
+    from app.services import form_checks
 
     return {t["slug"]: t for t in form_checks.negative_tests(url, U._extract_inputs(html), U._extract_buttons(html), html)}
 

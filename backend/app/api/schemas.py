@@ -10,11 +10,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from backend.config import git_hosts
-from backend.models.test_execution import TestExecutionStatus
-from backend.notify import NOTIFY_CHOICES, check_alert_webhook
-from backend.pipeline.deploy_config import check_hook_url
-from backend.pipeline.profile import GenerationProfile
+from app.config import git_hosts
+from app.models.test_execution import TestExecutionStatus
+from app.notify import NOTIFY_CHOICES, check_alert_webhook
+from app.pipeline.deploy_config import check_hook_url
+from app.pipeline.profile import GenerationProfile
 from ingestion.source import SourceError, validate_git_url
 
 # ============================================================================

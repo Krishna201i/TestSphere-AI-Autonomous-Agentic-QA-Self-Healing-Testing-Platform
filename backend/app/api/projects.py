@@ -13,17 +13,17 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from backend import dbsource
-from backend.api.schemas import ProjectCreate, ProjectResponse, ProjectUpdate
-from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
-from backend.database.session import get_db
-from backend.database.store import Record, Store, now_iso
-from backend.models import PROJECTS
-from backend.ratelimit import limit_runs
-from backend.secretbox import SecretBoxError, encrypt
-from backend.services import domain_verify
-from backend.services.project_service import PIPELINE_FIELDS, ProjectService
-from backend.services.security_service import record_audit
+from app import dbsource
+from app.api.schemas import ProjectCreate, ProjectResponse, ProjectUpdate
+from app.auth import User, actor_for, ensure_owned, get_current_user, scope
+from app.database.session import get_db
+from app.database.store import Record, Store, now_iso
+from app.models import PROJECTS
+from app.ratelimit import limit_runs
+from app.secretbox import SecretBoxError, encrypt
+from app.services import domain_verify
+from app.services.project_service import PIPELINE_FIELDS, ProjectService
+from app.services.security_service import record_audit
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 

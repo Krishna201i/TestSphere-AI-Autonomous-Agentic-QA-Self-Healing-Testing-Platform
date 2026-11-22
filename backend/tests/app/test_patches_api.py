@@ -6,12 +6,12 @@ import textwrap
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import auth
-from backend.config import settings
-from backend.database.session import get_store
-from backend.main import app
-from backend.models import SECURITY_FINDINGS
-from backend.services.project_service import ProjectService
+from app import auth
+from app.config import settings
+from app.database.session import get_store
+from app.main import app
+from app.models import SECURITY_FINDINGS
+from app.services.project_service import ProjectService
 
 SITE = "http://shop.test/"
 APP = textwrap.dedent("""
@@ -101,7 +101,7 @@ def test_patches_belong_to_their_owner(repo, monkeypatch):
     # Bob cannot patch Alice's findings either
     assert client.post("/api/security/patches", json={"target_url": SITE, "repo": str(repo)}, headers=bob).status_code == 422
 
-    from backend.api import me
+    from app.api import me
     monkeypatch.setattr(me, "_delete_sign_in_account", lambda uid: True)
     client.request("DELETE", "/api/me", json={"confirm": "DELETE MY ACCOUNT"}, headers=alice)
     assert get_store().find("fix_patches", owner_uid="alice") == []

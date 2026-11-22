@@ -22,25 +22,25 @@ from agents.planner.schemas import (
     TestStep as Member1TestStep,
 )
 from agents.schemas.enums import AssertionType, TestAction
-from backend.database.session import get_store
-from backend.models.test_execution import TestExecutionStatus
-from backend.orchestration.converters import (
+from app.database.session import get_store
+from app.models.test_execution import TestExecutionStatus
+from app.orchestration.converters import (
     engine_result_to_execution_result,
     map_action_to_engine,
     map_assertion_to_engine,
 )
-from backend.orchestration.converters import (
+from app.orchestration.converters import (
     test_case_to_engine_plan as convert_test_case_to_engine_plan,
 )
-from backend.orchestration.orchestrator import (
+from app.orchestration.orchestrator import (
     PlatformWorkflowOrchestrator,
     apply_healed_selector,
     create_default_orchestrator,
 )
-from backend.services.application_service import ApplicationService
-from backend.services.project_service import ProjectService
-from backend.services.test_case_service import TestCaseService
-from backend.services.test_execution_service import TestExecutionService
+from app.services.application_service import ApplicationService
+from app.services.project_service import ProjectService
+from app.services.test_case_service import TestCaseService
+from app.services.test_execution_service import TestExecutionService
 from engine.schemas import (
     ActionType,
     HealingReport,
@@ -218,7 +218,7 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         orch = create_default_orchestrator()
         self.assertIsNotNone(orch)
 
-    @patch("backend.orchestration.orchestrator.run_test")
+    @patch("app.orchestration.orchestrator.run_test")
     async def test_execute_test_run_success(self, mock_run_test: AsyncMock) -> None:
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-LOGIN-001",
@@ -247,7 +247,7 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.execution.duration_ms, 150)
         self.assertIsNotNone(result["dashboard_summary"])
 
-    @patch("backend.orchestration.orchestrator.run_test")
+    @patch("app.orchestration.orchestrator.run_test")
     async def test_engine_heal_is_recorded_as_healed(self, mock_run_test: AsyncMock) -> None:
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-LOGIN-001",
@@ -280,7 +280,7 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.execution = self._reload_execution()
         self.assertEqual(self.execution.status, TestExecutionStatus.HEALED.value)
 
-    @patch("backend.orchestration.orchestrator.run_test")
+    @patch("app.orchestration.orchestrator.run_test")
     async def test_browser_failure_is_never_reported_as_passed(self, mock_run_test: AsyncMock) -> None:
         # Even when the stored plain-HTTP page analysis succeeded
         TestCaseService.update_test_case(
@@ -323,7 +323,7 @@ class TestStoredSteps(unittest.IsolatedAsyncioTestCase):
         execution = TestExecutionService.create_execution(self.db, tc.id, status=TestExecutionStatus.PENDING)
         return execution, PlatformWorkflowOrchestrator().execute_test_run(db=self.db, execution_id=execution.id)
 
-    @patch("backend.orchestration.orchestrator.run_test")
+    @patch("app.orchestration.orchestrator.run_test")
     async def test_unreadable_stored_steps_fail_the_run_instead_of_passing_a_page_load(self, mock_run_test) -> None:
         """Regression: a parse error used to be swallowed and a bare 'open the page' run could pass."""
         execution, run = self._run_for('{"steps": [{"action": "fill", "target": "#q", "step_number": "not-a-number"}]}')
@@ -334,7 +334,7 @@ class TestStoredSteps(unittest.IsolatedAsyncioTestCase):
         stored = TestExecutionService.get_execution(self.db, execution.id)
         self.assertEqual(stored.status, TestExecutionStatus.FAILED.value)
 
-    @patch("backend.orchestration.orchestrator.run_test")
+    @patch("app.orchestration.orchestrator.run_test")
     async def test_a_plain_text_description_still_runs_the_page_check(self, mock_run_test) -> None:
         mock_run_test.return_value = EngineTestResult(
             test_id="t", status=TestStatus.PASSED, started_at=datetime.now(UTC), duration_ms=1,

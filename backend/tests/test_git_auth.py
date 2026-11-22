@@ -82,9 +82,9 @@ def test_clone_keeps_the_token_out_of_the_command_and_explains_failures(tmp_path
 
 
 def test_credentials_per_host_and_the_github_token(monkeypatch):
-    from backend.api import integrations
-    from backend.database.session import get_store
-    from backend.main import app
+    from app.api import integrations
+    from app.database.session import get_store
+    from app.main import app
 
     client = TestClient(app)
     saved = client.put("/api/integrations/git-credentials", json={"host": "gitlab.com", "token": "glpat-abcdefgh"}).json()
@@ -104,8 +104,8 @@ def test_credentials_per_host_and_the_github_token(monkeypatch):
 
 
 def test_ingest_uses_the_callers_credentials(monkeypatch):
-    from backend.api import ingest
-    from backend.main import app
+    from app.api import ingest
+    from app.main import app
 
     used = []
     monkeypatch.setattr(ingest, "git_auth", lambda db, uid, url: GitAuth("oauth2", f"token-of-{uid}"))
@@ -130,7 +130,7 @@ def test_a_checkout_over_the_size_limit_is_deleted_and_refused(tmp_path, monkeyp
 
 
 def test_ingest_deletes_the_clone_once_it_is_analyzed(tmp_path, monkeypatch):
-    from backend.api import ingest
+    from app.api import ingest
 
     checkout = tmp_path / "b-1234"
 

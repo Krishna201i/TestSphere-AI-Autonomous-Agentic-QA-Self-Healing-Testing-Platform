@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-DOCKERFILE = Path(__file__).resolve().parent.parent / "Dockerfile"
+DOCKERFILE = Path(__file__).resolve().parents[2] / "Dockerfile"
 
 
 def _runtime_stage() -> str:

@@ -28,7 +28,7 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
-from backend.config import settings
+from app.config import settings
 
 logger = logging.getLogger("testsphere.artifacts")
 
@@ -124,7 +124,7 @@ class GCSArtifactStore:
     def __init__(self, bucket: str) -> None:
         from firebase_admin import storage
 
-        from backend.database.store import firebase_app
+        from app.database.store import firebase_app
 
         app = firebase_app(settings.FIREBASE_CREDENTIALS or None, settings.FIREBASE_PROJECT_ID or None)
         self.bucket = storage.bucket(bucket, app=app)

@@ -17,7 +17,7 @@ import logging
 from typing import Any
 from urllib.parse import urlparse
 
-from backend.config import settings
+from app.config import settings
 
 logger = logging.getLogger("testsphere.ai_plan")
 
@@ -84,7 +84,7 @@ def to_suite_tests(cases: list[Any], analysis: dict[str, Any]) -> tuple[list[dic
     known = {e["selector"] for e in [*(inv.get("inputs") or []), *(inv.get("buttons") or [])] if e.get("selector")} | _ANY_PAGE
     url = analysis["url"]
     kept, dropped = [], 0
-    for tc in cases[:20]:  # the profile's max_ai_tests limits what is kept (backend/pipeline/profile.py)
+    for tc in cases[:20]:  # the profile's max_ai_tests limits what is kept (app/pipeline/profile.py)
         steps: list[dict[str, Any]] = [{"step_number": 1, "action": "NAVIGATE", "value": url, "target": None,
                                         "description": f"Open {url}"}]
         ok = True
@@ -142,7 +142,7 @@ async def ai_tests(analysis: dict[str, Any], prompt: str | None, frameworks: lis
     try:
         if planner is None:
             from agents.planner.planner import LLMTestPlanner
-            from backend.orchestration.orchestrator import create_platform_llm_client
+            from app.orchestration.orchestrator import create_platform_llm_client
 
             planner = LLMTestPlanner(llm_client=create_platform_llm_client())
         plan = await asyncio.wait_for(

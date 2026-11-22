@@ -2,7 +2,7 @@
 
 import pytest
 
-from backend.services.url_analyzer import URLAnalyzerService as U
+from app.services.url_analyzer import URLAnalyzerService as U
 
 
 @pytest.mark.parametrize(("prompt", "expected"), [
@@ -89,7 +89,7 @@ def test_a_goal_that_starts_elsewhere_does_not_type_into_the_form():
     ("", []),
 ])
 def test_goals_split_into_parts(prompt, parts):
-    from backend.services.goal_plan import split_goal
+    from app.services.goal_plan import split_goal
 
     assert split_goal(prompt) == parts
 
@@ -107,7 +107,7 @@ def test_client_rendered_shells_are_recognised(html, client):
 def test_other_schemes_are_refused_clearly(url):
     from fastapi.testclient import TestClient
 
-    from backend.main import app
+    from app.main import app
 
     r = TestClient(app).post("/api/workflow/analyze", json={"url": url})
     assert r.status_code == 422 and "Only http:// and https://" in r.json()["detail"]

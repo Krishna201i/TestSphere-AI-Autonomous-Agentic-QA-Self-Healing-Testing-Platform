@@ -18,17 +18,17 @@ Validates:
 import unittest
 from datetime import UTC, datetime
 
-from backend.database.session import get_store
-from backend.models.test_execution import TestExecutionStatus
-from backend.services.application_service import ApplicationService
-from backend.services.exceptions import (
+from app.database.session import get_store
+from app.models.test_execution import TestExecutionStatus
+from app.services.application_service import ApplicationService
+from app.services.exceptions import (
     InvalidExecutionStatusError,
     TestCaseNotFoundError,
     TestExecutionNotFoundError,
 )
-from backend.services.project_service import ProjectService
-from backend.services.test_case_service import TestCaseService
-from backend.services.test_execution_service import TestExecutionService
+from app.services.project_service import ProjectService
+from app.services.test_case_service import TestCaseService
+from app.services.test_execution_service import TestExecutionService
 
 
 class TestTestExecutionService(unittest.TestCase):

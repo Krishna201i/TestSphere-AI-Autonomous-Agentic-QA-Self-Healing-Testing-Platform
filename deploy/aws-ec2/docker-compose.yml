@@ -44,22 +44,22 @@ x-testsphere: &testsphere
     ARTIFACT_BUCKET: ${ARTIFACT_BUCKET:-}
     AWS_REGION: ap-southeast-2
   volumes:
-    - testsphere-data:/app/data   # artifacts (screenshots, traces) the API serves and the worker writes
+    - testsphere-data:/app/backend/data   # artifacts (screenshots, traces) the API serves and the worker writes
 
 services:
   api:
     <<: *testsphere
     # Behind Caddy: trust its X-Forwarded-* headers (the API port is not published)
-    command: ["sh", "-c", "exec uvicorn backend.main:app --host 0.0.0.0 --port 8000 --no-access-log --proxy-headers --forwarded-allow-ips '*'"]
+    command: ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log --proxy-headers --forwarded-allow-ips '*'"]
     expose: ["8000"]
 
   worker:
     <<: *testsphere
-    command: ["python", "-m", "backend.worker"]
+    command: ["python", "-m", "app.worker"]
     healthcheck:
       # The image's check probes the API's HTTP port, which the worker has none
       # of; this one fails when the worker loop stops (no database read)
-      test: ["CMD", "python", "-m", "backend.worker_alive"]
+      test: ["CMD", "python", "-m", "app.worker_alive"]
       interval: 60s
       timeout: 15s
       start_period: 60s

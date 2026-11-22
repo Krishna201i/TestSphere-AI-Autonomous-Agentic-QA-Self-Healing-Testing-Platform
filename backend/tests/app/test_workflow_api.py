@@ -12,13 +12,13 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from backend.database.session import get_store
-from backend.main import app
-from backend.models.test_execution import TestExecutionStatus
-from backend.services.application_service import ApplicationService
-from backend.services.project_service import ProjectService
-from backend.services.test_case_service import TestCaseService
-from backend.services.test_execution_service import TestExecutionService
+from app.database.session import get_store
+from app.main import app
+from app.models.test_execution import TestExecutionStatus
+from app.services.application_service import ApplicationService
+from app.services.project_service import ProjectService
+from app.services.test_case_service import TestCaseService
+from app.services.test_execution_service import TestExecutionService
 from engine.schemas import (
     StepResult,
     StepStatus,
@@ -47,7 +47,7 @@ class TestWorkflowAPI(unittest.TestCase):
         )
         self.execution_id = self.execution.id
 
-    @patch("backend.orchestration.orchestrator.run_test")
+    @patch("app.orchestration.orchestrator.run_test")
     def test_execute_workflow_endpoint_success(self, mock_run_test: AsyncMock) -> None:
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-FLOW-1",
@@ -74,7 +74,7 @@ class TestWorkflowAPI(unittest.TestCase):
         response = self.client.post("/workflow/execute/999999")
         self.assertEqual(response.status_code, 404)
 
-    @patch("backend.orchestration.orchestrator.run_test")
+    @patch("app.orchestration.orchestrator.run_test")
     def test_plan_and_execute_endpoint(self, mock_run_test: AsyncMock) -> None:
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-AUTO-1",
@@ -104,7 +104,7 @@ class TestWorkflowAPI(unittest.TestCase):
         res_root = self.client.post("/workflow/plan-and-execute", json=payload)
         self.assertEqual(res_root.status_code, 200)
 
-    @patch("backend.orchestration.orchestrator.run_test")
+    @patch("app.orchestration.orchestrator.run_test")
     def test_stream_workflow_events(self, mock_run_test: AsyncMock) -> None:
         mock_run_test.return_value = EngineTestResult(
             test_id="TC-FLOW-1",
@@ -140,7 +140,7 @@ class TestPlanFromErrorPage(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
 
-    @patch("backend.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
+    @patch("app.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
     def test_404_target_is_refused(self, mock_analyze: AsyncMock) -> None:
         mock_analyze.return_value = {"success": False, "status_code": 404, "page_title": "Error response"}
         res = self.client.post("/api/workflow/plan-and-execute", json={"app_url": "http://127.0.0.1:1/missing"})
@@ -148,7 +148,7 @@ class TestPlanFromErrorPage(unittest.TestCase):
         self.assertIn("HTTP 404", res.json()["detail"])
         self.assertEqual(self.client.get("/api/test-cases").json(), [])
 
-    @patch("backend.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
+    @patch("app.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
     def test_a_run_without_a_target_is_refused_not_pointed_at_example_com(self, mock_analyze: AsyncMock) -> None:
         for payload in ({}, {"app_url": "   "}, {"app_name": "Shop"}):
             res = self.client.post("/api/workflow/plan-and-execute", json=payload)
@@ -158,7 +158,7 @@ class TestPlanFromErrorPage(unittest.TestCase):
         for url in ("", "   "):
             self.assertEqual(self.client.post("/api/workflow/analyze", json={"url": url}).status_code, 422)
 
-    @patch("backend.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
+    @patch("app.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
     def test_unreachable_target_is_refused(self, mock_analyze: AsyncMock) -> None:
         mock_analyze.side_effect = RuntimeError("connection refused")
         res = self.client.post("/api/workflow/plan-and-execute", json={"app_url": "http://127.0.0.1:1/"})
@@ -166,11 +166,11 @@ class TestPlanFromErrorPage(unittest.TestCase):
         self.assertIn("connection refused", res.json()["detail"])  # the real cause, not just "unreachable"
 
 
-@patch("backend.orchestration.orchestrator.run_test")
-@patch("backend.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
+@patch("app.orchestration.orchestrator.run_test")
+@patch("app.api.workflow.URLAnalyzerService.analyze_live_website", new_callable=AsyncMock)
 def test_planning_the_same_page_again_updates_its_test_instead_of_adding_one(analyze, run_test, fresh_store):
     """Each plan-and-execute call used to insert another test case with the same external id."""
-    from backend.models import TEST_CASES
+    from app.models import TEST_CASES
 
     analyze.return_value = {"success": True, "page_title": "Shop", "url": "https://shop.example/",
                             "synthesized_test_case": {"name": "Shop", "steps": []}}
@@ -190,7 +190,7 @@ def test_planning_the_same_page_again_updates_its_test_instead_of_adding_one(ana
     assert row["version"] == 2
 
 
-@patch("backend.orchestration.orchestrator.run_test")
+@patch("app.orchestration.orchestrator.run_test")
 def test_an_execution_can_be_run_again(run_test, fresh_store):
     """Running a finished execution again answered 500 ("cannot submit in step COMPLETED")."""
     run_test.return_value = EngineTestResult(test_id="t", status=TestStatus.PASSED, started_at=datetime.now(UTC),

@@ -10,18 +10,18 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.config import settings
-from backend.database.session import get_store
-from backend.main import app
-from backend.models import PIPELINE_RUNS
-from backend.notify import (
+from app.config import settings
+from app.database.session import get_store
+from app.main import app
+from app.models import PIPELINE_RUNS
+from app.notify import (
     check_alert_webhook,
     notify_run,
     should_notify,
     slack_message,
     webhook_kind,
 )
-from backend.services.project_service import ProjectService
+from app.services.project_service import ProjectService
 
 HOOK = "https://hooks.slack.com/services/T000/B000/XXXX"
 
@@ -128,7 +128,7 @@ def test_junit_export_marks_failures_and_quarantine():
 
 
 def test_junit_stays_valid_xml_with_terminal_colours_and_markup():
-    from backend.api.pipelines import junit_xml
+    from app.api.pipelines import junit_xml
 
     run = {"id": 1, "project_name": "A&B <shop>", "tests": [
         {"name": 'x<y "q"', "status": "FAILED", "error": "Timeout \x1b[31mred\x1b[0m & <b>"}]}

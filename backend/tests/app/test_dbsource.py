@@ -7,11 +7,11 @@ import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import dbsource
-from backend.config import settings
-from backend.main import app
-from backend.models import PROJECTS
-from backend.services.project_service import ProjectService
+from app import dbsource
+from app.config import settings
+from app.main import app
+from app.models import PROJECTS
+from app.services.project_service import ProjectService
 
 
 @pytest.fixture
@@ -61,7 +61,7 @@ def test_a_run_reports_changed_tables_and_where_the_goals_data_landed(app_db):
 
 
 def _seal(url):
-    from backend.secretbox import encrypt
+    from app.secretbox import encrypt
 
     return encrypt(url)
 

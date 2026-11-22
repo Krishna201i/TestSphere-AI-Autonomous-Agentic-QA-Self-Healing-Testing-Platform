@@ -24,10 +24,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
-from backend.database.session import get_db
-from backend.database.store import Store
-from backend.models import PROJECTS
-from backend.pipeline.runner import active_run, start_run
+from app.database.session import get_db
+from app.database.store import Store
+from app.models import PROJECTS
+from app.pipeline.runner import active_run, start_run
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 

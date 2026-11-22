@@ -1,5 +1,5 @@
 """
-TestSphere-AI — Worker liveness file (``python -m backend.worker_alive``).
+TestSphere-AI — Worker liveness file (``python -m app.worker_alive``).
 
 The worker touches ``WORKER_ALIVE_FILE`` on every loop pass and heartbeat.
 Run as a module, this exits 1 once the file is older than

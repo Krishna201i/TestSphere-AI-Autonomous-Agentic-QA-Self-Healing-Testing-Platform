@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import auth
-from backend.config import settings
-from backend.main import app
+from app import auth
+from app.config import settings
+from app.main import app
 
 TOKENS = {"token-alice": {"uid": "alice"}, "token-bob": {"uid": "bob"}}
 
@@ -18,7 +18,7 @@ def client(monkeypatch):
     monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
     monkeypatch.setattr(settings, "RATE_LIMIT_RUNS_PER_MINUTE", 3)
     monkeypatch.setattr(auth, "verify_token", lambda token: TOKENS[token])
-    with patch("backend.api.workflow.URLAnalyzerService.analyze_live_website",
+    with patch("app.api.workflow.URLAnalyzerService.analyze_live_website",
                new=AsyncMock(return_value={"success": True})):
         yield TestClient(app)
 
@@ -52,8 +52,8 @@ def test_the_budget_is_shared_across_expensive_endpoints(client):
 
 
 def test_a_database_budget_is_shared_by_every_instance(client, monkeypatch, fresh_store):
-    from backend import ratelimit
-    from backend.models import RATE_LIMITS
+    from app import ratelimit
+    from app.models import RATE_LIMITS
 
     monkeypatch.setattr(settings, "RATE_LIMIT_BACKEND", "database")
     assert [analyze(client, "token-alice").status_code for _ in range(2)] == [200, 200]
@@ -65,7 +65,7 @@ def test_a_database_budget_is_shared_by_every_instance(client, monkeypatch, fres
 
 
 def test_old_starts_leave_the_shared_window(client, monkeypatch, fresh_store):
-    from backend.models import RATE_LIMITS
+    from app.models import RATE_LIMITS
 
     monkeypatch.setattr(settings, "RATE_LIMIT_BACKEND", "database")
     fresh_store.insert(RATE_LIMITS, owner_uid="alice", starts=[1.0, 2.0, 3.0])  # long ago

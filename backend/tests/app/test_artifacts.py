@@ -9,21 +9,21 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import auth
-from backend.artifacts import (
+from app import auth
+from app.artifacts import (
     LocalArtifactStore,
     execution_prefix,
     persist_run_artifacts,
 )
-from backend.config import settings
-from backend.database.session import get_store
-from backend.main import app
-from backend.models import TEST_EXECUTIONS
-from backend.orchestration.orchestrator import PlatformWorkflowOrchestrator
-from backend.services.application_service import ApplicationService
-from backend.services.project_service import ProjectService
-from backend.services.test_case_service import TestCaseService
-from backend.services.test_execution_service import TestExecutionService
+from app.config import settings
+from app.database.session import get_store
+from app.main import app
+from app.models import TEST_EXECUTIONS
+from app.orchestration.orchestrator import PlatformWorkflowOrchestrator
+from app.services.application_service import ApplicationService
+from app.services.project_service import ProjectService
+from app.services.test_case_service import TestCaseService
+from app.services.test_execution_service import TestExecutionService
 from engine.schemas import (
     HealingCandidate,
     HealingReport,
@@ -107,7 +107,7 @@ class TestOrchestratorRecordsEvidence:
         tc = TestCaseService.create_test_case(db, application.id, external_id="TC-1", name="Login")
         execution = TestExecutionService.create_execution(db, tc.id)
 
-        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(return_value=engine_result(tmp_path))):
+        with patch("app.orchestration.orchestrator.run_test", new=AsyncMock(return_value=engine_result(tmp_path))):
             await PlatformWorkflowOrchestrator().execute_test_run(db=db, execution_id=execution.id)
 
         saved = db.get(TEST_EXECUTIONS, execution.id)
@@ -182,7 +182,7 @@ def test_expired_artifacts_say_so(client, fresh_artifacts):
 
 
 def test_deleting_an_execution_or_account_removes_its_artifacts(client, fresh_artifacts, monkeypatch):
-    from backend.api import me
+    from app.api import me
 
     ex = _seed_execution("alice", fresh_artifacts)
     alice = {"Authorization": "Bearer token-alice"}
@@ -201,7 +201,7 @@ def test_local_retention_removes_only_old_files(tmp_path, monkeypatch):
     import os
     import time
 
-    from backend import artifacts
+    from app import artifacts
 
     store = LocalArtifactStore(str(tmp_path / "store"))
     store.put("alice/executions/1/old.png", b"x", "image/png")
@@ -222,7 +222,7 @@ def test_local_retention_removes_only_old_files(tmp_path, monkeypatch):
 
 
 def test_step_descriptions_read_like_sentences_and_hide_typed_values():
-    from backend.orchestration.orchestrator import describe_step
+    from app.orchestration.orchestrator import describe_step
     from engine.schemas import ActionType, Step, Target
 
     assert describe_step(Step(step_id="a", action=ActionType.GOTO, value="https://shop.example/")) == "Open https://shop.example/"
@@ -244,7 +244,7 @@ def s3():
     import boto3
     from botocore.stub import Stubber
 
-    from backend.artifacts import S3ArtifactStore
+    from app.artifacts import S3ArtifactStore
 
     client = boto3.client("s3", region_name="ap-southeast-2", aws_access_key_id="test", aws_secret_access_key="test")
     with Stubber(client) as stub:
@@ -299,7 +299,7 @@ def test_s3_retention_adds_one_rule_and_keeps_the_bucket_s_others(s3):
 
 
 def test_s3_store_needs_a_bucket(monkeypatch):
-    from backend import artifacts
+    from app import artifacts
 
     monkeypatch.setattr(artifacts.settings, "ARTIFACT_STORE", "s3")
     monkeypatch.setattr(artifacts.settings, "ARTIFACT_BUCKET", "")

@@ -27,7 +27,7 @@ it there. Unlike a sign-in session it does not expire after an hour. Deleting yo
 
 ## Setup
 
-Install TestSphere (`pip install -e .`) and start the server (`python -m uvicorn backend.main:app --port 8000`).
+Install TestSphere (`pip install -e .`) and start the server (`python -m uvicorn app.main:app --port 8000`).
 Then add the MCP server to your client.
 
 **Antigravity:** Agent panel → … → MCP Servers → Manage MCP Servers → View raw config, then add:
@@ -37,7 +37,7 @@ Then add the MCP server to your client.
   "mcpServers": {
     "testsphere": {
       "command": "python",
-      "args": ["-m", "backend.mcp_server"],
+      "args": ["-m", "app.mcp_server"],
       "cwd": "/path/to/TestSphere-AI-Autonomous-Agentic-QA-Self-Healing-Testing-Platform",
       "env": { "TESTSPHERE_URL": "http://127.0.0.1:8000" }
     }
@@ -50,10 +50,10 @@ Then add the MCP server to your client.
 **Claude Code:**
 
 ```bash
-claude mcp add testsphere --env TESTSPHERE_URL=http://127.0.0.1:8000 -- python -m backend.mcp_server
+claude mcp add testsphere --env TESTSPHERE_URL=http://127.0.0.1:8000 -- python -m app.mcp_server
 ```
 
-With the package installed, `testsphere-mcp` can replace `python -m backend.mcp_server` everywhere.
+With the package installed, `testsphere-mcp` can replace `python -m app.mcp_server` everywhere.
 
 ## Example
 

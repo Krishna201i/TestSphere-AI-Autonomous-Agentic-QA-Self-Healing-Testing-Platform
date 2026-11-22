@@ -8,8 +8,8 @@ from agents.analyzer.analyzer import FailureAnalyzerAgent, engine_expected_actua
 from agents.analyzer.schemas import FailureContext
 from agents.memory.in_memory_store import InMemoryStore
 from agents.schemas.enums import ConfidenceLevel, FailureType
-from backend.reporting.diagnosis import NEXT_STEPS, diagnosis_of
-from backend.reporting.summary import run_summary
+from app.reporting.diagnosis import NEXT_STEPS, diagnosis_of
+from app.reporting.summary import run_summary
 
 
 def test_the_engines_check_failures_name_expected_and_actual():
@@ -95,12 +95,12 @@ PNG_1PX = bytes.fromhex(
 def _seed_run(owner="local-dev", status="failed"):
     import pytest  # noqa: F401 - keeps this helper importable by other modules' fixtures
 
-    from backend.artifacts import MemoryArtifactStore, set_artifact_store
-    from backend.database.session import get_store
-    from backend.models import PIPELINE_RUNS, TEST_EXECUTIONS
-    from backend.services.application_service import ApplicationService
-    from backend.services.project_service import ProjectService
-    from backend.services.test_case_service import TestCaseService
+    from app.artifacts import MemoryArtifactStore, set_artifact_store
+    from app.database.session import get_store
+    from app.models import PIPELINE_RUNS, TEST_EXECUTIONS
+    from app.services.application_service import ApplicationService
+    from app.services.project_service import ProjectService
+    from app.services.test_case_service import TestCaseService
 
     db = get_store()
     store = MemoryArtifactStore()
@@ -129,7 +129,7 @@ def _seed_run(owner="local-dev", status="failed"):
 def test_the_report_document_shows_summary_diagnosis_and_screenshot_and_escapes_markup():
     from fastapi.testclient import TestClient
 
-    from backend.main import app
+    from app.main import app
 
     run = _seed_run()
     resp = TestClient(app).get(f"/api/pipelines/runs/{run['id']}/report")
@@ -146,9 +146,9 @@ def test_the_report_document_shows_summary_diagnosis_and_screenshot_and_escapes_
 def test_only_a_finished_run_of_ones_own_has_a_report(monkeypatch):
     from fastapi.testclient import TestClient
 
-    from backend import auth
-    from backend.config import settings
-    from backend.main import app
+    from app import auth
+    from app.config import settings
+    from app.main import app
 
     # Signed in, as in production (with sign-in off the one local user owns everything)
     monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
@@ -169,7 +169,7 @@ def test_only_a_finished_run_of_ones_own_has_a_report(monkeypatch):
 def test_the_pdf_report_is_a_real_pdf():
     from fastapi.testclient import TestClient
 
-    from backend.main import app
+    from app.main import app
 
     run = _seed_run()
     resp = TestClient(app).get(f"/api/pipelines/runs/{run['id']}/report.pdf")
@@ -183,9 +183,9 @@ def test_the_pdf_report_is_a_real_pdf():
 def _signed_in(monkeypatch):
     from fastapi.testclient import TestClient
 
-    from backend import auth
-    from backend.config import settings
-    from backend.main import app
+    from app import auth
+    from app.config import settings
+    from app.main import app
 
     monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
     monkeypatch.setattr(settings, "DASHBOARD_URL", "https://testsphere.example")
@@ -195,8 +195,8 @@ def _signed_in(monkeypatch):
 
 
 def test_a_share_link_shows_only_that_report_without_signing_in(monkeypatch):
-    from backend.database.session import get_store
-    from backend.models import AUDIT_EVENTS, REPORT_SHARES
+    from app.database.session import get_store
+    from app.models import AUDIT_EVENTS, REPORT_SHARES
 
     client, alice, _ = _signed_in(monkeypatch)
     run = _seed_run(owner="alice")
@@ -226,8 +226,8 @@ def test_a_share_link_shows_only_that_report_without_signing_in(monkeypatch):
 def test_revoked_expired_and_unknown_links_all_answer_the_same_404(monkeypatch):
     from datetime import UTC, datetime, timedelta
 
-    from backend.database.session import get_store
-    from backend.models import REPORT_SHARES
+    from app.database.session import get_store
+    from app.models import REPORT_SHARES
 
     client, alice, bob = _signed_in(monkeypatch)
     run = _seed_run(owner="alice")
@@ -250,8 +250,8 @@ def test_revoked_expired_and_unknown_links_all_answer_the_same_404(monkeypatch):
 
 
 def test_a_link_lasts_at_most_30_days_and_dies_with_its_run(monkeypatch):
-    from backend.database.session import get_store
-    from backend.models import PIPELINE_RUNS
+    from app.database.session import get_store
+    from app.models import PIPELINE_RUNS
 
     client, alice, _ = _signed_in(monkeypatch)
     run = _seed_run(owner="alice")

@@ -13,8 +13,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from backend.artifacts import delete_owner_artifacts
-from backend.auth import (
+from app.artifacts import delete_owner_artifacts
+from app.auth import (
     API_TOKEN_PREFIX,
     User,
     ensure_owned,
@@ -24,10 +24,10 @@ from backend.auth import (
     remember_display_name,
     scope,
 )
-from backend.config import settings
-from backend.database.session import get_db
-from backend.database.store import Record, Store, now_iso
-from backend.models import (
+from app.config import settings
+from app.database.session import get_db
+from app.database.store import Record, Store, now_iso
+from app.models import (
     AGENT_MEMORY,
     API_TOKENS,
     APPLICATIONS,
@@ -183,7 +183,7 @@ def _delete_sign_in_account(uid: str) -> bool:
     try:
         from firebase_admin import auth
 
-        from backend.database.store import firebase_app
+        from app.database.store import firebase_app
 
         auth.delete_user(uid, app=firebase_app(settings.FIREBASE_CREDENTIALS or None,
                                                settings.FIREBASE_PROJECT_ID or None))
@@ -205,7 +205,7 @@ def delete_me(payload: AccountDeletion, db: Store = Depends(get_db),
     deleted = {name: len(db.delete_where(name, owner_uid=user.uid)) for name in OWNED_COLLECTIONS}
     deleted[USERS] = len(db.delete_where(USERS, uid=user.uid))
     if deleted[AGENT_MEMORY]:
-        from backend.orchestration.orchestrator import forget_healing_memory
+        from app.orchestration.orchestrator import forget_healing_memory
 
         forget_healing_memory()  # the running healer's copy of the erased records
     deleted["artifacts"] = delete_owner_artifacts(user.uid)

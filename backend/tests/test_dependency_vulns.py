@@ -64,9 +64,9 @@ def test_an_unreachable_osv_is_reported_not_raised():
 def test_ingesting_records_vulnerable_dependencies_as_findings(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from backend.api import ingest
-    from backend.config import settings
-    from backend.main import app
+    from app.api import ingest
+    from app.config import settings
+    from app.main import app
 
     (tmp_path / "package-lock.json").write_text(json.dumps({"packages": {"node_modules/axios": {"version": "1.6.2"}}}))
     monkeypatch.setattr(settings, "INGEST_ALLOW_LOCAL_PATHS", True)

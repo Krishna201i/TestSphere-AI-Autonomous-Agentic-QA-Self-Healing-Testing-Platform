@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from backend.services.auth_plan import SERVER_ERROR
+from app.services.auth_plan import SERVER_ERROR
 
 # Parts of a goal: split on "and"/"then"/commas, but "username X and password Y" stays one part
 _SPLIT = re.compile(r"\s*(?:,\s*(?:and\s+|then\s+)?|;\s*|\s+and then\s+|\s+then\s+|\s+and\s+)", re.IGNORECASE)

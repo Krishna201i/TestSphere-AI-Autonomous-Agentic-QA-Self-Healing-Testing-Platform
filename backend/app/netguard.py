@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from backend.config import settings
+from app.config import settings
 
 
 class BlockedTargetError(ValueError):

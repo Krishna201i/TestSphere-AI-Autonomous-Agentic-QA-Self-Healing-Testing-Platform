@@ -6,9 +6,9 @@ Encapsulates storage and business operations for web applications under test.
 
 from typing import Any
 
-from backend.database.store import Record, Store
-from backend.models import APPLICATIONS, PROJECTS, TEST_CASES
-from backend.services.exceptions import ApplicationNotFoundError, ProjectNotFoundError
+from app.database.store import Record, Store
+from app.models import APPLICATIONS, PROJECTS, TEST_CASES
+from app.services.exceptions import ApplicationNotFoundError, ProjectNotFoundError
 
 DEFAULT_PROJECT = {"name": "TestSphere Auto QA", "description": "Autonomous agentic QA testing workspace"}
 
@@ -19,7 +19,7 @@ def default_project(db: Store, owner_uid: str | None = None) -> Record:
     existing = db.find(PROJECTS, limit=1, **filters)
     if existing:
         return existing[0]
-    from backend.services.project_service import ProjectService
+    from app.services.project_service import ProjectService
 
     return ProjectService.create_project(db, owner_uid=owner_uid, **DEFAULT_PROJECT)
 
@@ -65,7 +65,7 @@ class ApplicationService:
     @staticmethod
     def delete_application(db: Store, application_id: int) -> None:
         """Delete an application and its test cases and executions."""
-        from backend.services.test_case_service import TestCaseService
+        from app.services.test_case_service import TestCaseService
 
         ApplicationService.get_application(db, application_id)
         for tc in db.find(TEST_CASES, application_id=application_id):

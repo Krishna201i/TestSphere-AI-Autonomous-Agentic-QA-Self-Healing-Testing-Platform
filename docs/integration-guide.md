@@ -10,7 +10,7 @@ TestSphere-AI unifies three distinct architectural domains into a unified QA aut
 2. **Member 2: Browser Execution Engine** ([`engine/`](file:///engine/))
    - Executes test actions deterministically on real Chromium/Firefox/WebKit browsers.
    - Captures screenshots, DOM state dumps, and execution timings.
-3. **Member 3: Platform Backend & APIs** ([`backend/`](file:///backend/))
+3. **Member 3: Platform Backend & APIs** ([`backend/`](../backend/app/))
    - Manages state (projects, test cases, executions, findings, audit trail) in Cloud Firestore (or a local JSON file offline).
    - Exposes REST APIs, orchestration pipelines, and real-time SSE streams.
 
@@ -21,7 +21,7 @@ TestSphere-AI unifies three distinct architectural domains into a unified QA aut
 TestSphere-AI features an offline-first design. All 1,102 automated tests run offline with **zero external API calls and zero costs**.
 
 ### 2.1 Offline Mode (`LLM_PROVIDER=mock`)
-Default setting out of the box. Utilizes registered scenario providers (`agents/planner/mock_scenarios.py`) simulating realistic LLM responses:
+Default setting out of the box. Utilizes registered scenario providers (`backend/agents/planner/mock_scenarios.py`) simulating realistic LLM responses:
 ```bash
 # In .env:
 LLM_PROVIDER=mock
@@ -63,8 +63,8 @@ You can invoke the entire autonomous QA pipeline programmatically in Python:
 
 ```python
 import asyncio
-from backend.database.session import get_db_session
-from backend.orchestration.orchestrator import PlatformWorkflowOrchestrator
+from app.database.session import get_db_session
+from app.orchestration.orchestrator import PlatformWorkflowOrchestrator
 from agents.planner.schemas import ApplicationContext, PageElement
 
 async def run_autonomous_qa():
@@ -151,5 +151,6 @@ Verify that all components are properly wired together by running the complete i
 
 ```powershell
 # Run engine tests, backend tests, and agent test suites
-python -m pytest tests/engine/ tests/backend/ tests/test_planner_pipeline.py -v
+cd backend
+python -m pytest tests/engine/ tests/app/ tests/test_planner_pipeline.py -v
 ```

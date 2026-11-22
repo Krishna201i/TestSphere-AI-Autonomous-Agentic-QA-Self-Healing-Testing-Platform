@@ -6,16 +6,16 @@ import json
 
 from agents.explorer import GoalExplorer
 from agents.memory.in_memory_store import InMemoryStore
-from backend.models import TEST_CASES, TEST_EXECUTIONS
-from backend.models.test_execution import TestExecutionStatus
-from backend.orchestration.orchestrator import (
+from app.models import TEST_CASES, TEST_EXECUTIONS
+from app.models.test_execution import TestExecutionStatus
+from app.orchestration.orchestrator import (
     PlatformWorkflowOrchestrator,
     create_default_orchestrator,
 )
-from backend.pipeline import explore
-from backend.services.application_service import ApplicationService
-from backend.services.project_service import ProjectService
-from backend.services.test_execution_service import TestExecutionService
+from app.pipeline import explore
+from app.services.application_service import ApplicationService
+from app.services.project_service import ProjectService
+from app.services.test_execution_service import TestExecutionService
 from tests.explorer.test_explorer import ScriptedModel, num, site  # noqa: F401 - site is a fixture
 
 GOAL = "open the Patient portal and reach the sign-in page"

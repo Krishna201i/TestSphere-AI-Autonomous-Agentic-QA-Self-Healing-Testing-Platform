@@ -1,5 +1,5 @@
 """
-TestSphere-AI — Pipeline worker (``python -m backend.worker``).
+TestSphere-AI — Pipeline worker (``python -m app.worker``).
 
 With ``PIPELINE_EXECUTION=worker`` the API only queues pipeline runs; this
 process executes them, so browser runs no longer share the API's memory and
@@ -17,7 +17,7 @@ queued runs survive API restarts or sleep.  It also runs the scheduler
   executes here, and the worker waits for it before taking the next run or
   stopping.
 - Liveness: every loop pass and heartbeat touches ``WORKER_ALIVE_FILE``
-  (``backend.worker_alive``, the container's health check), without a
+  (``app.worker_alive``, the container's health check), without a
   database write.
 - Polling backs off while the queue stays empty (POLL_SECONDS doubling up to
   IDLE_POLL_SECONDS) and stale runs are looked for every REAP_SECONDS: an
@@ -35,18 +35,18 @@ import signal
 import socket
 from datetime import UTC, datetime, timedelta
 
-from backend import worker_alive
-from backend.config import pipeline_problem, settings
-from backend.database.session import get_store, init_db
-from backend.database.store import Record, Store, StoreUnavailableError, now_iso
-from backend.models import PIPELINE_RUNS
-from backend.observability import (
+from app import worker_alive
+from app.config import pipeline_problem, settings
+from app.database.session import get_store, init_db
+from app.database.store import Record, Store, StoreUnavailableError, now_iso
+from app.models import PIPELINE_RUNS
+from app.observability import (
     configure_logging,
     default_log_format,
     git_commit,
     init_error_reporting,
 )
-from backend.pipeline import runner
+from app.pipeline import runner
 
 logger = logging.getLogger("testsphere.worker")
 
@@ -111,7 +111,7 @@ async def _heartbeat(db: Store, run_id: int) -> None:
 
 
 async def run_one(db: Store, run: Record) -> None:
-    from backend.pipeline import deploy
+    from app.pipeline import deploy
 
     beat = asyncio.create_task(_heartbeat(db, run["id"]))
     try:
@@ -162,8 +162,8 @@ async def main() -> None:
                        "services so runs are only executed here.", settings.PIPELINE_EXECUTION)
     init_db()
 
-    from backend.netguard import check_target
-    from backend.pipeline import deploy
+    from app.netguard import check_target
+    from app.pipeline import deploy
 
     deploy.set_executor(worker_id())
     from engine.browser import set_request_guard
@@ -178,7 +178,7 @@ async def main() -> None:
 
     tasks = [asyncio.create_task(work(stop))]
     if settings.SCHEDULER_ENABLED:
-        from backend.pipeline.scheduler import scheduler_loop
+        from app.pipeline.scheduler import scheduler_loop
 
         tasks.append(asyncio.create_task(scheduler_loop()))
     await stop.wait()

@@ -18,8 +18,8 @@ from urllib.parse import urlparse
 
 import httpx
 
-from backend.netguard import PinnedTransport
-from backend.services import auth_plan, form_checks, goal_plan
+from app.netguard import PinnedTransport
+from app.services import auth_plan, form_checks, goal_plan
 from engine.locators import best_unique, css_string, stable_candidates
 
 logger = logging.getLogger("testsphere.analyzer")
@@ -182,7 +182,7 @@ class URLAnalyzerService:
         # ANALYZE_VISIBILITY every page is read that way, with what a visitor
         # cannot see marked, so no test is planned on a control in a closed
         # dialog, tab or menu.
-        from backend.config import settings
+        from app.config import settings
 
         rendered, hidden_controls = False, None
         if not error_encountered and status_code < 400 and (
@@ -232,7 +232,7 @@ class URLAnalyzerService:
         )
         auth_tests = cls._auth_tests(normalized_url, inputs, buttons, prompt, blocked,
                                      allow_test_accounts=allow_test_accounts, email_domain=email_domain)
-        # Input the page's other forms must refuse (backend/services/form_checks.py)
+        # Input the page's other forms must refuse (app/services/form_checks.py)
         form_tests = [] if blocked else form_checks.negative_tests(normalized_url, inputs, buttons, html, prompt)
 
         # Generate real telemetry event logs

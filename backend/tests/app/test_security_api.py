@@ -7,9 +7,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.security import get_active_scanner, get_scanner
-from backend.config import settings
-from backend.main import app
+from app.api.security import get_active_scanner, get_scanner
+from app.config import settings
+from app.main import app
 from security import PassiveScanner, ScopePolicy
 
 HARDENED = {
@@ -56,7 +56,7 @@ def test_scan_returns_sorted_findings_and_summary(client) -> None:
 
 def test_ai_triage_enriches_and_reorders_findings(client, monkeypatch) -> None:
     """When AI triage is on, each finding carries `ai` and is ordered by priority."""
-    from backend.api import security as sec
+    from app.api import security as sec
     from security.ai import AIInsight
 
     async def fake_triage(url, findings, **kw):
@@ -79,7 +79,7 @@ def test_ai_triage_enriches_and_reorders_findings(client, monkeypatch) -> None:
 
 def test_ai_triage_failure_leaves_findings_intact(client, monkeypatch) -> None:
     """A triage that returns nothing must not alter the rule-based result."""
-    from backend.api import security as sec
+    from app.api import security as sec
 
     async def empty_triage(url, findings, **kw):
         return {}
@@ -235,7 +235,7 @@ def _vuln_active_transport():
 
 @pytest.fixture
 def active_client(state, monkeypatch):
-    from backend.api.security import get_active_scanner, get_scanner
+    from app.api.security import get_active_scanner, get_scanner
     from security import ActiveScanner
 
     monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", True)
@@ -281,8 +281,8 @@ def test_signed_in_users_attack_only_sites_they_verified(active_client, monkeypa
     "anyone may attack anything"."""
     from datetime import UTC, datetime
 
-    from backend import auth
-    from backend.models import SCAN_TARGETS
+    from app import auth
+    from app.models import SCAN_TARGETS
 
     monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
     tokens = {"guest": {"uid": "anon1", "firebase": {"sign_in_provider": "anonymous"}},
@@ -333,8 +333,8 @@ async def test_saving_a_scan_does_not_block_the_event_loop(fresh_store) -> None:
     import asyncio
     import time
 
-    from backend.database.session import set_store
-    from backend.database.store import MemoryStore
+    from app.database.session import set_store
+    from app.database.store import MemoryStore
 
     class SlowStore(MemoryStore):  # every call costs a round trip
         def find(self, *a, **k):
@@ -459,7 +459,7 @@ async def _fake_triage(url, findings, **kw):
 
 def test_the_ai_triage_is_kept_on_the_findings(client, monkeypatch) -> None:
     """It was only in the scan's answer: the findings list (and reports) never showed it."""
-    from backend.api import security as sec
+    from app.api import security as sec
 
     monkeypatch.setattr(sec.security_ai, "enabled", lambda: True)
     monkeypatch.setattr(sec.security_ai, "triage", _fake_triage)
@@ -470,9 +470,9 @@ def test_the_ai_triage_is_kept_on_the_findings(client, monkeypatch) -> None:
 
 
 def test_an_active_scan_of_an_unverified_host_is_refused_until_it_is_verified(active_client, monkeypatch) -> None:
-    from backend import auth
-    from backend.database.session import get_store
-    from tests.backend.test_domain_verification import _verified
+    from app import auth
+    from app.database.session import get_store
+    from tests.app.test_domain_verification import _verified
 
     monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
     monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "ann")

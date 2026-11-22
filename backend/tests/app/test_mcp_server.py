@@ -5,7 +5,7 @@ import json
 
 import httpx
 
-from backend import mcp_server
+from app import mcp_server
 
 RUN_DONE = {"id": 7, "status": "failed", "app_url": "https://shop.test/", "error": None,
             "summary": {"total": 3, "passed": 2, "failed": 1, "healed": 1, "goal_untested_parts": ["fly to the moon"],

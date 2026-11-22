@@ -1,6 +1,6 @@
 # Load test
 
-Measured with `python scripts/loadtest.py` on Windows 10, 16 CPU threads, 16.4 GB RAM; one uvicorn worker, local JSON store, sign-in off, ENGINE_MAX_BROWSERS=2. Hosted servers are slower per core; treat these as upper bounds and keep headroom.
+Measured with `python backend/scripts/loadtest.py` on Windows 10, 16 CPU threads, 16.4 GB RAM; one uvicorn worker, local JSON store, sign-in off, ENGINE_MAX_BROWSERS=2. Hosted servers are slower per core; treat these as upper bounds and keep headroom.
 
 ## Dashboard API
 

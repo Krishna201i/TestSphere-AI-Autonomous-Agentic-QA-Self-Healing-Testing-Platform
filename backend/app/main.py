@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.api import (
+from app.api import (
     applications_router,
     audit_router,
     health_router,
@@ -35,12 +35,12 @@ from backend.api import (
     webhooks_router,
     workflow_router,
 )
-from backend.config import settings, startup_safety_problem
-from backend.database.session import get_store, init_db
-from backend.database.store import StoreUnavailableError
-from backend.http_hardening import HardeningMiddleware
-from backend.netguard import check_target
-from backend.observability import (
+from app.config import settings, startup_safety_problem
+from app.database.session import get_store, init_db
+from app.database.store import StoreUnavailableError
+from app.http_hardening import HardeningMiddleware
+from app.netguard import check_target
+from app.observability import (
     RequestContextMiddleware,
     configure_logging,
     default_log_format,
@@ -74,11 +74,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:  # noqa: BLE001 - startup check: log and keep serving
         logger.warning(f"Database connection initialization check encountered: {exc}")
     try:
-        from backend.pipeline.runner import recover_interrupted
+        from app.pipeline.runner import recover_interrupted
 
         if interrupted := recover_interrupted(get_store()):
             logger.warning("Marked %d pipeline run(s) interrupted by the restart.", interrupted)
-        from backend.pipeline.deploy import recover_interrupted as recover_deployments
+        from app.pipeline.deploy import recover_interrupted as recover_deployments
 
         if interrupted := recover_deployments(get_store()):
             logger.warning("Marked %d deployment(s) interrupted by the restart.", interrupted)
@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.PIPELINE_EXECUTION == "worker":
         logger.info("Pipeline runs are queued for the worker (PIPELINE_EXECUTION=worker); it also runs the scheduler.")
     elif settings.SCHEDULER_ENABLED:
-        from backend.pipeline.scheduler import scheduler_loop
+        from app.pipeline.scheduler import scheduler_loop
 
         scheduler_task = asyncio.create_task(scheduler_loop())
     logger.info("Sign-in %s.", "required (Firebase Auth)" if settings.AUTH_REQUIRED else "OFF: single local user")
@@ -156,7 +156,7 @@ for router in api_routers:
     app.include_router(router)
 
 # Mount frontend dashboard (serve React production build if dist exists, else static dir)
-frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
+frontend_dir = Path(__file__).resolve().parents[2] / "frontend"  # <repo>/frontend
 frontend_dist = frontend_dir / "dist"
 target_dir = frontend_dist if frontend_dist.exists() else frontend_dir
 if target_dir.exists():
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "backend.main:app",
+        "app.main:app",
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,

@@ -22,18 +22,18 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
-from backend.api.ingest import _git_hosts
-from backend.api.integrations import git_auth
-from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
-from backend.config import settings
-from backend.database.session import get_db
-from backend.database.store import Record, Store
-from backend.gitforges import parse_forge_repo
-from backend.github import parse_repo
-from backend.models import FIX_PATCHES, PROJECTS
-from backend.ratelimit import limit_runs
-from backend.services import security_service as findings_store
-from backend.services.security_service import record_audit
+from app.api.ingest import _git_hosts
+from app.api.integrations import git_auth
+from app.auth import User, actor_for, ensure_owned, get_current_user, scope
+from app.config import settings
+from app.database.session import get_db
+from app.database.store import Record, Store
+from app.gitforges import parse_forge_repo
+from app.github import parse_repo
+from app.models import FIX_PATCHES, PROJECTS
+from app.ratelimit import limit_runs
+from app.services import security_service as findings_store
+from app.services.security_service import record_audit
 from ingestion import GitAuth, SourceError, clone, is_git_url, resolve_local
 from security.patcher import build_patch
 
@@ -213,9 +213,9 @@ async def open_pull_request(
 ) -> dict[str, Any]:
     """Open a pull request (GitHub, Bitbucket) or merge request (GitLab) with this
     patch on the repository it was built from."""
-    from backend.api.integrations import git_auth, github_token
-    from backend.gitforges import BitbucketClient, GitLabClient
-    from backend.github import GitHubClient, GitHubError
+    from app.api.integrations import git_auth, github_token
+    from app.gitforges import BitbucketClient, GitLabClient
+    from app.github import GitHubClient, GitHubError
 
     row = ensure_owned(user, db.get(FIX_PATCHES, patch_id), "Fix patch")
     if row.get("pull_request"):

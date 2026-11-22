@@ -10,7 +10,7 @@ drives a TestSphere server through its REST API:
 
 Tools: test_site (the whole loop on a URL, waiting for the result), get_run,
 list_findings, scan_dependencies and get_fix_patch.  Start it with
-``python -m backend.mcp_server`` (or ``testsphere-mcp``); see
+``python -m app.mcp_server`` (or ``testsphere-mcp``); see
 docs/mcp-server.md for each client's configuration.
 """
 

@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-import backend.database.store as store_module
-from backend.database.store import (
+import app.database.store as store_module
+from app.database.store import (
     FirestoreStore,
     LocalStore,
     MemoryStore,
@@ -353,7 +353,7 @@ def test_firestore_falls_back_when_the_composite_index_is_missing(caplog) -> Non
 
 
 def test_the_firebase_project_id_comes_from_every_credential_form_the_store_reads(monkeypatch, tmp_path):
-    from backend import config
+    from app import config
 
     monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
     monkeypatch.setenv("FIREBASE_CREDENTIALS", "'{\"type\": \"service_account\", \"project_id\": \"demo-proj\"}'")

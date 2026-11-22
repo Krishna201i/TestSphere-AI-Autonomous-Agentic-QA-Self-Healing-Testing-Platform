@@ -144,6 +144,6 @@ def default_log_format() -> str:
     explicit = os.getenv("LOG_FORMAT", "").strip().lower()
     if explicit in ("json", "text"):
         return explicit
-    from backend.config import _hosted
+    from app.config import _hosted
 
     return "json" if _hosted() else "text"

@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from backend.main import app
+from app.main import app
 
 client = TestClient(app)
 
@@ -26,7 +26,7 @@ def test_a_route_with_its_own_policy_keeps_it():
     from fastapi import FastAPI, Response
     from fastapi.testclient import TestClient as TC
 
-    from backend.http_hardening import HardeningMiddleware
+    from app.http_hardening import HardeningMiddleware
 
     inner = FastAPI()
 

@@ -10,12 +10,12 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import gitforges
-from backend.config import settings
-from backend.database.session import get_store
-from backend.gitforges import BitbucketClient, GitLabClient, parse_forge_repo
-from backend.main import app
-from backend.models import FIX_PATCHES
+from app import gitforges
+from app.config import settings
+from app.database.session import get_store
+from app.gitforges import BitbucketClient, GitLabClient, parse_forge_repo
+from app.main import app
+from app.models import FIX_PATCHES
 
 BASE = "b" * 40
 
@@ -153,7 +153,7 @@ def test_merge_and_pull_requests_use_the_saved_git_credential(forges, repo, host
      (f"/2.0/repositories/acme/shop/commit/{BASE}/statuses/build", {"state": "FAILED", "key": "testsphere"})),
 ])
 def test_commit_status_on_gitlab_and_bitbucket(forges, monkeypatch, repo, host, token, expect):
-    from backend.pipeline.runner import report_commit_status
+    from app.pipeline.runner import report_commit_status
 
     monkeypatch.setattr(settings, "DASHBOARD_URL", "https://testsphere.example")
     client = TestClient(app)

@@ -17,7 +17,7 @@ Runs are documents in ``pipeline_runs``, updated after every stage and test,
 so the dashboard follows progress by polling.  Runs execute one at a time per
 process (each needs a browser; small hosts have little memory) — others wait
 as "queued".  With ``PIPELINE_EXECUTION=worker`` the API only queues runs and
-``backend.worker`` claims and executes them.
+``app.worker`` claims and executes them.
 """
 
 from __future__ import annotations
@@ -36,11 +36,11 @@ from urllib.parse import urlparse
 import httpx
 
 from agents.llm.budget import token_budget
-from backend import dbsource
-from backend.config import settings
-from backend.database.session import get_store
-from backend.database.store import Record, Store, StoreUnavailableError, now_iso
-from backend.models import (
+from app import dbsource
+from app.config import settings
+from app.database.session import get_store
+from app.database.store import Record, Store, StoreUnavailableError, now_iso
+from app.models import (
     APPLICATIONS,
     BLUEPRINTS,
     PIPELINE_RUNS,
@@ -48,16 +48,16 @@ from backend.models import (
     TEST_CASES,
     TEST_EXECUTIONS,
 )
-from backend.models.test_execution import TestExecutionStatus
-from backend.notify import notify_run
-from backend.pipeline import ai_plan, explore, suite
-from backend.pipeline.profile import profile_of
-from backend.pipeline.profile import select as select_by_profile
-from backend.reporting.summary import run_summary
-from backend.services.security_service import record_audit
-from backend.services.test_case_service import TestCaseService
-from backend.services.test_execution_service import TestExecutionService
-from backend.services.url_analyzer import URLAnalyzerService, get_verifying_first
+from app.models.test_execution import TestExecutionStatus
+from app.notify import notify_run
+from app.pipeline import ai_plan, explore, suite
+from app.pipeline.profile import profile_of
+from app.pipeline.profile import select as select_by_profile
+from app.reporting.summary import run_summary
+from app.services.security_service import record_audit
+from app.services.test_case_service import TestCaseService
+from app.services.test_execution_service import TestExecutionService
+from app.services.url_analyzer import URLAnalyzerService, get_verifying_first
 
 logger = logging.getLogger("testsphere.pipeline")
 
@@ -296,16 +296,16 @@ def _start_pending_push(db: Store, project: Record) -> Record | None:
 def report_commit_status(db: Store, project: Record, run: Record) -> bool:
     """Show the run's result on the pushed commit in GitHub, GitLab or Bitbucket
     (with the owner's connected GitHub or saved Git credential)."""
-    from backend.api.integrations import git_auth, github_token
-    from backend.gitforges import (
+    from app.api.integrations import git_auth, github_token
+    from app.gitforges import (
         BitbucketClient,
         GitLabClient,
         parse_forge_repo,
         set_bitbucket_status,
         set_gitlab_status,
     )
-    from backend.github import GitHubClient, GitHubError, parse_repo
-    from backend.notify import run_url
+    from app.github import GitHubClient, GitHubError, parse_repo
+    from app.notify import run_url
 
     repo = parse_repo(project.get("repo_url"))
     forge = None if repo else parse_forge_repo(project.get("repo_url"))
@@ -341,7 +341,7 @@ def report_commit_status(db: Store, project: Record, run: Record) -> bool:
 
 def _deploy_if_green(db: Store, project: Record, run: Record) -> None:
     """Close the loop: a clean run of a project with deploy_on_pass ships it (stage 6)."""
-    from backend.pipeline import deploy
+    from app.pipeline import deploy
 
     if not (project.get("deploy_on_pass") and project.get("deploy_hook_url")):
         return
@@ -434,8 +434,8 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
 
 
 async def _stage_codebase(state: _RunState, project: Record) -> dict[str, Any] | None:
-    from backend.api.ingest import ingest_source, save_blueprint
-    from backend.api.integrations import git_auth
+    from app.api.ingest import ingest_source, save_blueprint
+    from app.api.integrations import git_auth
     from ingestion import SourceError
 
     db = state.db
@@ -484,7 +484,7 @@ async def _reachable(urls: list[str]) -> dict[str, dict[str, Any] | None]:
     """What each URL answers (None when unreachable), checked concurrently:
     ``status``, whether it is a ``file`` (a download, not a page) and a
     ``digest`` of the body (to recognise a catch-all answer)."""
-    from backend.netguard import BlockedTargetError
+    from app.netguard import BlockedTargetError
 
     async def one(url: str) -> dict[str, Any] | None:
         try:
@@ -672,7 +672,7 @@ def _what_it_checks(tc: Record) -> dict[str, Any]:
 
 async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrator: Any,
                          owner: str | None, *, sign_in_first: bool = False) -> list[dict[str, Any]]:
-    from backend.orchestration.orchestrator import get_platform_orchestrator
+    from app.orchestration.orchestrator import get_platform_orchestrator
     from engine.schemas import RunOptions
 
     orch = orchestrator or get_platform_orchestrator()
@@ -718,8 +718,8 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
 async def _stage_acceptance(state: _RunState, test_cases: list[Record], results: list[dict[str, Any]],
                             app_url: str) -> None:
     """Run new or changed tests that passed on a deliberately broken page
-    (``backend/pipeline/acceptance.py``) and note each test's verdict."""
-    from backend.pipeline import acceptance
+    (``app/pipeline/acceptance.py``) and note each test's verdict."""
+    from app.pipeline import acceptance
 
     if settings.ACCEPTANCE_MAX_PER_RUN <= 0:
         return
@@ -762,7 +762,7 @@ def _tested_pages(test_cases: list[Record], app_url: str) -> list[str]:
 async def _stage_security(state: _RunState, app_url: str, owner: str | None, scanner: Any,
                           *, active: bool = False, pages: list[str] | None = None,
                           routes: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
-    from backend.api.security import (
+    from app.api.security import (
         _attach_ai,
         active_scan_refusal,
         get_active_scanner,
@@ -770,7 +770,7 @@ async def _stage_security(state: _RunState, app_url: str, owner: str | None, sca
         scan_result,
         widen_active_scope,
     )
-    from backend.services import domain_verify
+    from app.services import domain_verify
     from security import ActiveScanError, OutOfScopeError, ScanError
     from security import ai as security_ai
 

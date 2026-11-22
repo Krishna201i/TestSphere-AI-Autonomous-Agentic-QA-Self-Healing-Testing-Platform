@@ -21,15 +21,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from backend.auth import User, actor_for, get_current_user, scope
-from backend.config import settings
-from backend.database.session import get_db
-from backend.database.store import Record, Store
-from backend.models import SCAN_TARGETS
-from backend.netguard import BlockedTargetError, PinnedTransport
-from backend.ratelimit import limit_runs
-from backend.services import domain_verify
-from backend.services import security_service as store
+from app.auth import User, actor_for, get_current_user, scope
+from app.config import settings
+from app.database.session import get_db
+from app.database.store import Record, Store
+from app.models import SCAN_TARGETS
+from app.netguard import BlockedTargetError, PinnedTransport
+from app.ratelimit import limit_runs
+from app.services import domain_verify
+from app.services import security_service as store
 from security import (
     ACTIVE_CHECK_IDS,
     EXPOSURE_CHECK_IDS,
@@ -99,7 +99,7 @@ def widen_active_scope(scanner: Any, hosts: set[str]) -> Any:
 
 def get_active_scanner() -> ActiveScanner:
     """Build an active scanner limited to the configured scope (overridable in tests)."""
-    from backend.services.xss_confirm import confirm_in_browser
+    from app.services.xss_confirm import confirm_in_browser
 
     # Reflected XSS is confirmed by running the payload in the guarded browser
     return ActiveScanner(_configured_scope(), max_requests=settings.SECURITY_ACTIVE_MAX_REQUESTS,

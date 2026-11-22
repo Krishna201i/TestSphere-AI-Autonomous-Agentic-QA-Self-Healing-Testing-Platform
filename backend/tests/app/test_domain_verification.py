@@ -9,12 +9,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.security import active_scan_refusal
-from backend.config import settings
-from backend.main import app
-from backend.models import PROJECTS
-from backend.services import domain_verify
-from backend.services.project_service import ProjectService
+from app.api.security import active_scan_refusal
+from app.config import settings
+from app.main import app
+from app.models import PROJECTS
+from app.services import domain_verify
+from app.services.project_service import ProjectService
 
 
 @pytest.fixture

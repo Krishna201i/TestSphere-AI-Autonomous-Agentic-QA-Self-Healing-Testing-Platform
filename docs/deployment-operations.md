@@ -6,7 +6,7 @@ TestSphere-AI runs on a developer machine or as a container. Production runs on 
 
 ### Minimum Requirements:
 - **Operating System**: Linux (Ubuntu 22.04+ recommended), macOS, or Windows 10/11
-- **Python**: 3.11 or 3.12 (`pyproject.toml` requires >= 3.11)
+- **Python**: 3.11 or 3.12 (`backend/pyproject.toml` requires >= 3.11)
 - **Memory**: 4 GB RAM minimum (8 GB recommended when running headed Playwright browsers)
 - **Disk Space**: 2 GB free disk space for browser binaries and test artifact storage
 
@@ -85,7 +85,7 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `PIPELINE_DEEP_PAGES` | `3` | How many of those pages are analyzed for content checks (title, heading, form controls present); the rest only must render. Forms on them are never submitted |
 | `PIPELINE_AI_PLANNER` | `auto` | `auto`: AI-written tests when a real model is configured; `on` / `off` force it |
 | `PIPELINE_AI_EXPLORER` / `PIPELINE_AI_EXPLORER_TIMEOUT` | `auto` / `240` | `auto`: with a real model, an AI agent reaches the project's written goal in a browser once (up to 15 steps, typing only values from the goal, refusing delete/pay/sign-out elements, ending with an outcome check it must pass) and saves the steps as the quarantined test "AI explored: …"; later runs replay it without the model, and the goal is explored again only after a failed replay or a changed goal. Seconds allowed for one exploration |
-| `PIPELINE_EXECUTION` | `inline` | `inline`: pipeline runs execute in the API process. `worker`: the API only queues them and a separate `python -m backend.worker` service executes them (and runs the scheduler). Requires Firestore. See §3.1 |
+| `PIPELINE_EXECUTION` | `inline` | `inline`: pipeline runs execute in the API process. `worker`: the API only queues them and a separate `python -m app.worker` service executes them (and runs the scheduler). Requires Firestore. See §3.1 |
 | `WORKER_POLL_SECONDS` / `WORKER_HEARTBEAT_SECONDS` / `WORKER_STALE_SECONDS` | `5` / `30` / `600` | Worker queue polling; heartbeat while a run executes; a running run silent for longer than the stale limit is marked interrupted |
 | `DASHBOARD_URL` | `""` | Public address of the dashboard, used for "Open run" links in Slack alerts |
 | `PRIVACY_CONTACT` | `""` | E-mail or URL users contact about their data, shown on the dashboard's privacy notice (`#/privacy`, readable before sign-in). Without it the notice says "the operator of this server" |
@@ -201,9 +201,11 @@ The repository's [`Dockerfile`](../Dockerfile) builds one image with the API,
 the dashboard and headless Chromium:
 
 - **Stage 1** (`node:24-slim`): `npm ci` and `npm run build` for the dashboard.
-- **Stage 2** (`python:3.11-slim`): the hash-checked lock (`pip install --require-hashes -r requirements.txt`),
+- **Stage 2** (`python:3.11-slim`): the hash-checked lock (`pip install --require-hashes -r backend/requirements.txt`),
   Chromium with its system libraries (`playwright install --with-deps chromium`), the backend packages and
-  the built dashboard. Runs as an unprivileged user (uid 10001) with a `HEALTHCHECK` on `/api/health`.
+  the built dashboard. The image mirrors the repository: Python in `/app/backend` (the working directory,
+  so data lives in `/app/backend/data`) and the dashboard in `/app/frontend/dist`. Runs as an unprivileged
+  user (uid 10001) with a `HEALTHCHECK` on `/api/health`.
 
 ```bash
 docker build -t testsphere .
@@ -229,7 +231,7 @@ With a worker:
 
 1. Set `PIPELINE_EXECUTION=worker` on **both** the API and the worker (same environment otherwise,
    including Firestore credentials; the worker refuses to start without a shared database).
-2. Run the worker: `python -m backend.worker` (Docker: `docker run --env-file .env testsphere python -m backend.worker`;
+2. Run the worker: `python -m app.worker` (Docker: `docker run --env-file .env testsphere python -m app.worker`;
    on AWS EC2: the `worker` service in [`deploy/aws-ec2/docker-compose.yml`](../deploy/aws-ec2/docker-compose.yml)).
 
 The API then only queues runs. The worker claims the oldest queued run atomically (several workers never
@@ -247,7 +249,7 @@ Deployment is a separate workflow, [`.github/workflows/deploy.yml`](../.github/w
 
 | Job | Steps |
 |---|---|
-| Backend | Install the lock with `--require-hashes`, install Chromium, `ruff check` (rules in `pyproject.toml`), the full pytest suite, `pip-audit` |
+| Backend | Install the lock with `--require-hashes`, install Chromium, `ruff check` (rules in `backend/pyproject.toml`), the full pytest suite, `pip-audit` |
 | Frontend | `npm ci`, `npm run build`, `npm audit --omit=dev --audit-level=high` |
 
 Make both jobs required checks on `main` (GitHub → Settings → Branches → branch protection rule) so
@@ -260,4 +262,4 @@ nothing reaches `main`, and from there the server, without passing them.
 - **Structured JSON Logging**: one JSON object per line by default when hosted (`LOG_FORMAT=json|text` overrides), with a `request_id` on every line written while handling a request; works with CloudWatch, Datadog or Grafana Loki.
 - **Request ids**: every response carries `X-Request-ID`; send one in to correlate with your own logs.
 - **Error tracking**: set `SENTRY_DSN` to report unhandled errors to Sentry.
-- **Health Checks**: `GET /api/health` (public) reports database connectivity and, in worker mode, the number of queued runs and `worker: stalled` (and `status: degraded`) when runs wait with none running for longer than an idle worker takes to poll. The worker container's health check is `python -m backend.worker_alive`, which fails once the worker loop has not run for `WORKER_STALE_SECONDS`; signed-in users see browser availability in `GET /api/system`.
+- **Health Checks**: `GET /api/health` (public) reports database connectivity and, in worker mode, the number of queued runs and `worker: stalled` (and `status: degraded`) when runs wait with none running for longer than an idle worker takes to poll. The worker container's health check is `python -m app.worker_alive`, which fails once the worker loop has not run for `WORKER_STALE_SECONDS`; signed-in users see browser availability in `GET /api/system`.

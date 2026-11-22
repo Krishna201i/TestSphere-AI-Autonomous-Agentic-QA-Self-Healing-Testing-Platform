@@ -8,18 +8,18 @@ Delegates persistence and business logic to ApplicationService.
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from backend.api.schemas import (
+from app.api.schemas import (
     ApplicationCreate,
     ApplicationResponse,
     ApplicationUpdate,
 )
-from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
-from backend.database.session import get_db
-from backend.database.store import Record, Store
-from backend.models import APPLICATIONS, PROJECTS
-from backend.services.application_service import ApplicationService
-from backend.services.exceptions import ProjectNotFoundError
-from backend.services.security_service import record_audit
+from app.auth import User, actor_for, ensure_owned, get_current_user, scope
+from app.database.session import get_db
+from app.database.store import Record, Store
+from app.models import APPLICATIONS, PROJECTS
+from app.services.application_service import ApplicationService
+from app.services.exceptions import ProjectNotFoundError
+from app.services.security_service import record_audit
 
 router = APIRouter(prefix="/applications", tags=["Applications"])
 

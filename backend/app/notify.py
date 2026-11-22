@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from backend.config import settings
+from app.config import settings
 
 logger = logging.getLogger("testsphere.notify")
 

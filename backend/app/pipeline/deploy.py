@@ -44,18 +44,18 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from backend.api.integrations import git_auth, github_token
-from backend.config import git_hosts, settings
-from backend.database.session import get_store
-from backend.database.store import Record, Store, StoreUnavailableError, now_iso
-from backend.models import APPLICATIONS, DEPLOYMENTS, PROJECTS, TEST_CASES
-from backend.netguard import (
+from app.api.integrations import git_auth, github_token
+from app.config import git_hosts, settings
+from app.database.session import get_store
+from app.database.store import Record, Store, StoreUnavailableError, now_iso
+from app.models import APPLICATIONS, DEPLOYMENTS, PROJECTS, TEST_CASES
+from app.netguard import (
     BlockedTargetError,
     PinnedTransport,
     check_target,
     guard_request,
 )
-from backend.pipeline.deploy_config import (
+from app.pipeline.deploy_config import (
     DeployConfigError,
     check_hook_url,
     github_dispatch,
@@ -63,8 +63,8 @@ from backend.pipeline.deploy_config import (
     redeploys_a_commit,
     with_ref,
 )
-from backend.services.security_service import record_audit
-from backend.services.test_execution_service import TestExecutionService
+from app.services.security_service import record_audit
+from app.services.test_execution_service import TestExecutionService
 from ingestion.source import GitAuth, SourceError, git_env, validate_git_url
 
 logger = logging.getLogger("testsphere.deploy")
@@ -292,7 +292,7 @@ async def _smoke(state: _State, project: Record, orchestrator: Any) -> tuple[boo
     if not cases:
         return None, "No smoke tests yet: run the pipeline once to generate them", []
     if orchestrator is None:
-        from backend.orchestration.orchestrator import get_platform_orchestrator
+        from app.orchestration.orchestrator import get_platform_orchestrator
 
         orchestrator = get_platform_orchestrator()
     from engine.schemas import RunOptions

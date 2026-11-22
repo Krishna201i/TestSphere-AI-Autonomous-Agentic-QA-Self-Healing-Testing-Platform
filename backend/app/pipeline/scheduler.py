@@ -13,13 +13,13 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
-from backend.artifacts import expire_old_artifacts
-from backend.config import settings
-from backend.database.session import get_store
-from backend.database.store import Store, StoreUnavailableError
-from backend.models import PROJECTS
-from backend.pipeline.runner import active_run, start_run
-from backend.services.project_service import next_run_after
+from app.artifacts import expire_old_artifacts
+from app.config import settings
+from app.database.session import get_store
+from app.database.store import Store, StoreUnavailableError
+from app.models import PROJECTS
+from app.pipeline.runner import active_run, start_run
+from app.services.project_service import next_run_after
 
 logger = logging.getLogger("testsphere.scheduler")
 

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from backend.config import _hosted, settings
+from app.config import _hosted, settings
 
 _LOCAL_KEY = Path("data") / ".token_key"
 

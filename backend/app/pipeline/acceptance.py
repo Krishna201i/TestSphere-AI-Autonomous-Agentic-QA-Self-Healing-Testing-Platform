@@ -29,8 +29,8 @@ import json
 import logging
 from typing import Any
 
-from backend.database.store import Record, Store, now_iso
-from backend.models import TEST_CASES
+from app.database.store import Record, Store, now_iso
+from app.models import TEST_CASES
 
 logger = logging.getLogger("testsphere.acceptance")
 
@@ -100,8 +100,8 @@ def judge(plan: Any, result: Any, texts: list[str], selectors: list[str]) -> str
 async def check(tc: Record, base_url: str, *, runner: Any = None) -> dict[str, Any]:
     """Run *tc* on a broken copy of its page and return its verdict record."""
     from agents.planner.schemas import TestCase as Member1TestCase
-    from backend.orchestration.converters import test_case_to_engine_plan
-    from backend.orchestration.orchestrator import parse_stored_steps
+    from app.orchestration.converters import test_case_to_engine_plan
+    from app.orchestration.orchestrator import parse_stored_steps
     from engine.runner import run_test
     from engine.schemas import PageMutation, RunOptions
 

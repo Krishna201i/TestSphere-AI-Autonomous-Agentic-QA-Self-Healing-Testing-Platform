@@ -3,10 +3,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import artifacts
-from backend.config import settings
-from backend.main import app
-from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
+from app import artifacts
+from app.config import settings
+from app.main import app
+from app.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
 
 
 @pytest.fixture

@@ -311,7 +311,7 @@ def _service_account_source(credentials: str) -> dict | str:
     found raises ``StoreUnavailableError`` naming the file, never the value
     itself in case it is a mangled key.
     """
-    from backend.config import service_account_info
+    from app.config import service_account_info
 
     source = service_account_info(credentials, SECRET_FILES_DIR)
     if source is not None:

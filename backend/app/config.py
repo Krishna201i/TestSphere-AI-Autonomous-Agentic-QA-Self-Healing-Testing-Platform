@@ -170,7 +170,7 @@ class Settings(BaseSettings):
 
     # Where pipeline runs execute: "inline" in the API process (one service,
     # fits a free host), or "worker": the API only queues them and
-    # `python -m backend.worker` (a separate service) claims and runs them,
+    # `python -m app.worker` (a separate service) claims and runs them,
     # and runs the scheduler.  Queued runs then survive API restarts.
     PIPELINE_EXECUTION: str = Field(
         default_factory=lambda: os.getenv("PIPELINE_EXECUTION", "inline").strip().lower())
@@ -305,7 +305,7 @@ class Settings(BaseSettings):
     # data (e-mail or URL of the operator / grievance officer).
     PRIVACY_CONTACT: str = Field(default_factory=lambda: os.getenv("PRIVACY_CONTACT", ""))
 
-    # Logging & error reporting (see backend/observability.py)
+    # Logging & error reporting (see app/observability.py)
     LOG_LEVEL: str = Field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     SENTRY_DSN: str = Field(default_factory=lambda: os.getenv("SENTRY_DSN", ""))
 

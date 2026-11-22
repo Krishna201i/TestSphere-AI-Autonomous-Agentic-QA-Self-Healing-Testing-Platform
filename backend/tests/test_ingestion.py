@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.config import settings
-from backend.main import app
+from app.config import settings
+from app.main import app
 from ingestion import SourceError, analyze_repo, clone, repo_name, validate_git_url
 
 AWS_KEY = "AKIA" + "ABCDEFGHIJKLMNOP"  # split so this file isn't itself flagged
@@ -236,7 +236,7 @@ def test_git_checkout_respects_gitignore(tmp_path: Path) -> None:
     ({"INGEST_ALLOW_LOCAL_PATHS": "false"}, False),
 ])
 def test_local_path_default_is_safe_on_cloud_hosts(monkeypatch, env, expected) -> None:
-    from backend.config import _CLOUD_MARKERS, _default_allow_local_paths
+    from app.config import _CLOUD_MARKERS, _default_allow_local_paths
     for var in ("APP_ENV", "INGEST_ALLOW_LOCAL_PATHS", *_CLOUD_MARKERS):
         monkeypatch.delenv(var, raising=False)
     for k, v in env.items():

@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from backend.services import url_analyzer
-from backend.services.url_analyzer import URLAnalyzerService
+from app.services import url_analyzer
+from app.services.url_analyzer import URLAnalyzerService
 
 SHELL = '<!doctype html><html><head><title>CareLink</title></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>'
 RENDERED = """<html><head><title>Sign in · Patient portal</title></head><body>

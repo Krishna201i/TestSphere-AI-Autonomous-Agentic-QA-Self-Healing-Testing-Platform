@@ -11,14 +11,14 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.config import settings
-from backend.main import app
-from backend.models import DEPLOYMENTS, PROJECTS
-from backend.pipeline import deploy
-from backend.pipeline.deploy_config import DeployConfigError, check_hook_url, with_ref
-from backend.services.application_service import ApplicationService
-from backend.services.project_service import ProjectService
-from backend.services.test_case_service import TestCaseService
+from app.config import settings
+from app.main import app
+from app.models import DEPLOYMENTS, PROJECTS
+from app.pipeline import deploy
+from app.pipeline.deploy_config import DeployConfigError, check_hook_url, with_ref
+from app.services.application_service import ApplicationService
+from app.services.project_service import ProjectService
+from app.services.test_case_service import TestCaseService
 
 RENDER = "https://api.render.com/deploy/srv-abc?key=secret"
 SITE = "https://shop.example/"
@@ -188,7 +188,7 @@ def test_restart_marks_unfinished_deployments(fresh_store):
 
 
 def test_a_clean_pipeline_run_deploys_when_the_project_asks(fresh_store, monkeypatch):
-    from backend.pipeline import runner
+    from app.pipeline import runner
 
     started = []
     monkeypatch.setattr(deploy, "start_deployment", lambda db, p, **kw: started.append(kw))

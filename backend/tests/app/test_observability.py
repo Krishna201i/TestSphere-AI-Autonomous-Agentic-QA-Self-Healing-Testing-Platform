@@ -5,8 +5,8 @@ import logging
 
 from fastapi.testclient import TestClient
 
-from backend.main import app
-from backend.observability import JsonFormatter, init_error_reporting, request_id_var
+from app.main import app
+from app.observability import JsonFormatter, init_error_reporting, request_id_var
 
 
 def test_every_response_carries_a_request_id():
@@ -47,7 +47,7 @@ def test_error_reporting_is_off_without_a_dsn():
 
 
 def test_the_deployed_commit_comes_from_the_image(monkeypatch):
-    from backend import observability
+    from app import observability
 
     observability.git_commit.cache_clear()
     monkeypatch.setenv("GIT_COMMIT", "0123456789abcdef0123")

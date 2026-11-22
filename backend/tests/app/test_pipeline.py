@@ -12,12 +12,12 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.webhooks import signature_for
-from backend.config import settings
-from backend.main import app
-from backend.models import BLUEPRINTS, PIPELINE_RUNS, PROJECTS, TEST_CASES
-from backend.pipeline import runner, scheduler, suite
-from backend.services.project_service import ProjectService
+from app.api.webhooks import signature_for
+from app.config import settings
+from app.main import app
+from app.models import BLUEPRINTS, PIPELINE_RUNS, PROJECTS, TEST_CASES
+from app.pipeline import runner, scheduler, suite
+from app.services.project_service import ProjectService
 from security import OutOfScopeError, PassiveScanner, ScopePolicy
 
 URL = "http://app.test/login"
@@ -110,7 +110,7 @@ def stub_network(monkeypatch):
     async def no_fallback(base_url):
         return state.get("fallback", set())
 
-    monkeypatch.setattr("backend.pipeline.runner.URLAnalyzerService.analyze_live_website", analyze)
+    monkeypatch.setattr("app.pipeline.runner.URLAnalyzerService.analyze_live_website", analyze)
     monkeypatch.setattr(runner, "_reachable", reachable)
     monkeypatch.setattr(runner, "_fallback_digests", no_fallback)
     return state
@@ -568,7 +568,7 @@ def test_sign_in_first_checks_linked_pages_stay_put_instead_of_signed_out_conten
 
 
 def test_active_scan_runs_in_the_pipeline_only_when_project_and_server_both_allow(fresh_store, stub_network, monkeypatch):
-    import backend.api.security as sec_api
+    import app.api.security as sec_api
 
     calls = {"n": 0}
 
@@ -690,7 +690,7 @@ def test_generated_tests_no_longer_planned_are_retired_and_hidden(fresh_store):
 
 def test_the_security_stage_scans_the_pages_the_run_reached(fresh_store, stub_network):
     """It scanned the app URL only; the linked pages the QA stage already reached are scanned too."""
-    from backend.models import PIPELINE_RUNS, SECURITY_FINDINGS
+    from app.models import PIPELINE_RUNS, SECURITY_FINDINGS
 
     fetched = []
     scanner = scanner_for({"content-type": "text/html"})
@@ -712,9 +712,9 @@ def test_the_security_stage_scans_the_pages_the_run_reached(fresh_store, stub_ne
 
 
 def test_the_pipeline_adds_ai_triage_to_its_findings(fresh_store, stub_network, monkeypatch):
-    from backend.models import PIPELINE_RUNS, SECURITY_FINDINGS
+    from app.models import PIPELINE_RUNS, SECURITY_FINDINGS
     from security import ai as security_ai
-    from tests.backend.test_security_api import _fake_triage
+    from tests.app.test_security_api import _fake_triage
 
     monkeypatch.setattr(security_ai, "enabled", lambda: True)
     monkeypatch.setattr(security_ai, "triage", _fake_triage)

@@ -31,8 +31,8 @@ from typing import Any
 
 from fastapi import Header, HTTPException, status
 
-from backend.config import settings
-from backend.database.store import StoreUnavailableError, firebase_app
+from app.config import settings
+from app.database.store import StoreUnavailableError, firebase_app
 
 logger = logging.getLogger("testsphere.auth")
 
@@ -69,8 +69,8 @@ def hash_api_token(token: str) -> str:
 
 def _user_for_api_token(token: str) -> User:
     """The user an API token belongs to (401 for an unknown or revoked one)."""
-    from backend.database.session import get_store
-    from backend.models import API_TOKENS, USERS
+    from app.database.session import get_store
+    from app.models import API_TOKENS, USERS
 
     db = get_store()
     row = db.find_one(API_TOKENS, token_hash=hash_api_token(token))
@@ -177,8 +177,8 @@ def _display_name(uid: str) -> str | None:
     if cached and cached[1] > time.monotonic():
         return cached[0]
     try:
-        from backend.database.session import get_store
-        from backend.models import USERS
+        from app.database.session import get_store
+        from app.models import USERS
 
         row = get_store().find_one(USERS, uid=uid)
     except Exception as exc:  # noqa: BLE001 - the token's name will do

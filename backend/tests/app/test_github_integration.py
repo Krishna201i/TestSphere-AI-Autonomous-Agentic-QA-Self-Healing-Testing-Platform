@@ -9,12 +9,12 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import github, secretbox
-from backend.config import settings
-from backend.database.session import get_store
-from backend.github import GitHubClient, GitHubError, parse_repo
-from backend.main import app
-from backend.models import FIX_PATCHES, INTEGRATIONS
+from app import github, secretbox
+from app.config import settings
+from app.database.session import get_store
+from app.github import GitHubClient, GitHubError, parse_repo
+from app.main import app
+from app.models import FIX_PATCHES, INTEGRATIONS
 
 BASE = "a" * 40
 TOKEN = "github_pat_" + "x" * 40
@@ -206,7 +206,7 @@ def test_pull_requests_need_a_supported_git_host(gh):
 
 
 def test_commit_status_on_a_pushed_run(gh):
-    from backend.pipeline.runner import report_commit_status
+    from app.pipeline.runner import report_commit_status
 
     client = TestClient(app)
     client.put("/api/integrations/github", json={"token": TOKEN})

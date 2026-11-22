@@ -1,7 +1,7 @@
 """
 TestSphere-AI — Integrations API: connect GitHub with a personal token.
 
-The token is checked with GitHub, encrypted (backend/secretbox.py) and
+The token is checked with GitHub, encrypted (app/secretbox.py) and
 stored per user; it is never sent back to the browser.  It is used to open
 pull requests from fix patches and to set commit statuses on pushed commits.
 """
@@ -15,14 +15,14 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from backend.auth import User, get_current_user
-from backend.config import git_hosts
-from backend.database.session import get_db
-from backend.database.store import Store, now_iso
-from backend.github import GitHubClient, GitHubError
-from backend.models import INTEGRATIONS
-from backend.secretbox import SecretBoxError, decrypt, encrypt
-from backend.services.security_service import record_audit
+from app.auth import User, get_current_user
+from app.config import git_hosts
+from app.database.session import get_db
+from app.database.store import Store, now_iso
+from app.github import GitHubClient, GitHubError
+from app.models import INTEGRATIONS
+from app.secretbox import SecretBoxError, decrypt, encrypt
+from app.services.security_service import record_audit
 from ingestion.source import GitAuth
 
 router = APIRouter(prefix="/integrations", tags=["Integrations"])

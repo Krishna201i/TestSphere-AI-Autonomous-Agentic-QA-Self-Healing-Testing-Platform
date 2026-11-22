@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from backend.pipeline import runner, suite
+from app.pipeline import runner, suite
 
 INDEX = b"<!doctype html><title>App</title><h1>Welcome</h1>"
 
@@ -81,7 +81,7 @@ def test_a_slow_probe_still_finds_the_catch_all(spa_host, monkeypatch):
 
 
 def test_the_plan_checks_files_by_request_and_leaves_out_unserved_routes(fresh_store, spa_host, monkeypatch):
-    from backend.services.project_service import ProjectService
+    from app.services.project_service import ProjectService
 
     analysis = {"url": spa_host + "/", "page_title": "App", "success": True,
                 "elements_inventory": {"links": ["/samples/fleet.csv", "/about"], "headings": [], "hidden_controls": 3},

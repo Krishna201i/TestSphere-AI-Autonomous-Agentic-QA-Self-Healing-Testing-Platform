@@ -12,7 +12,7 @@ subresource and websocket, as ``CONNECT host:port`` or an absolute-URI
 request, and refuses it unless the guard accepts the destination.
 
 The guard is any callable taking a URL and raising to refuse it; the backend
-installs its SSRF check (``backend.netguard.check_target``) via
+installs its SSRF check (``app.netguard.check_target``) via
 ``engine.browser.set_request_guard``.
 
 DNS rebinding: the proxy resolves each host once, checks every address it

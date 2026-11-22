@@ -4,7 +4,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-import backend.config as config
+import app.config as config
 
 HOSTING = ("RENDER", "DYNO", "RAILWAY_ENVIRONMENT", "FLY_APP_NAME", "K_SERVICE", "VERCEL")
 
@@ -53,7 +53,7 @@ def test_local_development_runs_without_sign_in(env):
 
 
 def test_the_app_does_not_start_when_unsafe(monkeypatch):
-    import backend.main as main
+    import app.main as main
 
     monkeypatch.setattr(main, "startup_safety_problem", lambda: "unsafe")
     with pytest.raises(RuntimeError, match="unsafe"):
@@ -73,7 +73,7 @@ def test_cors_defaults(env):
 
 
 def test_cors_does_not_echo_unknown_origins():
-    from backend.main import app
+    from app.main import app
 
     resp = TestClient(app).get("/api/health", headers={"Origin": "https://evil.example"})
     assert "access-control-allow-origin" not in resp.headers

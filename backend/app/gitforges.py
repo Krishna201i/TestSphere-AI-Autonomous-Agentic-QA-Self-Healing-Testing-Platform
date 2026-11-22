@@ -1,7 +1,7 @@
 """
 TestSphere-AI — Fix patches as GitLab merge requests and Bitbucket pull requests.
 
-The GitHub flow lives in ``backend/github.py``; this module gives gitlab.com
+The GitHub flow lives in ``app/github.py``; this module gives gitlab.com
 and bitbucket.org the same ``open_fix_pr``: the patched files are committed on
 a new branch made from the commit the patch was built against, and a merge /
 pull request to the default branch is opened.  The credentials are the ones
@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 import httpx
 
-from backend.github import GitHubError
+from app.github import GitHubError
 
 GITLAB_API = "https://gitlab.com/api/v4"
 BITBUCKET_API = "https://api.bitbucket.org/2.0"

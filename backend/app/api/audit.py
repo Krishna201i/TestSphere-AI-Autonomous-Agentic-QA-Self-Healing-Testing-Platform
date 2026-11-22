@@ -6,10 +6,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from backend.auth import User, get_current_user, scope
-from backend.database.session import get_db
-from backend.database.store import Store
-from backend.services.security_service import list_audit
+from app.auth import User, get_current_user, scope
+from app.database.session import get_db
+from app.database.store import Store
+from app.services.security_service import list_audit
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from backend.main import app
-from backend.pipeline.profile import GenerationProfile, profile_of, select, type_of
+from app.main import app
+from app.pipeline.profile import GenerationProfile, profile_of, select, type_of
 
 TESTS = [
     {"slug": "smoke", "category": "smoke", "steps": [{"action": "ASSERT_VISIBLE", "target": "body"}]},
@@ -52,7 +52,7 @@ def test_the_profile_is_saved_and_validated_on_the_project(fresh_store):
 
 
 def test_the_planner_hears_the_profile_but_never_the_password():
-    from backend.pipeline.ai_plan import page_context
+    from app.pipeline.ai_plan import page_context
 
     analysis = {"url": "https://shop.example/", "page_title": "Shop", "elements_inventory": {}}
     profile = GenerationProfile(test_types=["negative"], test_data={"text": "laptop", "password": "S3cret!"})
@@ -61,8 +61,8 @@ def test_the_planner_hears_the_profile_but_never_the_password():
 
 
 async def test_the_pipeline_keeps_each_tests_acceptance_verdict(fresh_store, monkeypatch):
-    from backend.models import TEST_CASES
-    from backend.pipeline import acceptance
+    from app.models import TEST_CASES
+    from app.pipeline import acceptance
 
     async def fake_check(tc, base_url, runner=None):
         return {"steps_key": acceptance.steps_key(acceptance.steps_of(tc)), "status": acceptance.VERIFIED}

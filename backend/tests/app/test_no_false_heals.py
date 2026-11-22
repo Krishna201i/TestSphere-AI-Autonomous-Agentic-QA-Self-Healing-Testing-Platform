@@ -18,13 +18,13 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from agents.memory.in_memory_store import InMemoryStore
-from backend.database.session import get_store
-from backend.services.application_service import ApplicationService
-from backend.services.project_service import ProjectService
-from backend.services.test_case_service import TestCaseService
-from backend.services.test_execution_service import TestExecutionService
+from app.database.session import get_store
+from app.services.application_service import ApplicationService
+from app.services.project_service import ProjectService
+from app.services.test_case_service import TestCaseService
+from app.services.test_execution_service import TestExecutionService
 from engine.schemas import RunOptions
-from tests.backend.test_self_healing_runs import _service, _steps
+from tests.app.test_self_healing_runs import _service, _steps
 
 V1 = """<!doctype html><html><head><title>Shop</title></head><body>
 <button id="submit" class="btn primary" type="button">Log in</button>

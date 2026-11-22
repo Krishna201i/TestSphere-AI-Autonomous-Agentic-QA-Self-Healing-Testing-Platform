@@ -17,7 +17,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from backend.main import app
+from app.main import app
 
 
 class TestTestExecutionsAPI(unittest.TestCase):
@@ -156,8 +156,8 @@ if __name__ == "__main__":
 def test_list_limit_returns_the_newest_oldest_first_and_stats_count_all():
     from fastapi.testclient import TestClient
 
-    from backend.database.session import get_store
-    from backend.main import app
+    from app.database.session import get_store
+    from app.main import app
 
     db = get_store()
     statuses = ["PASSED", "FAILED", "HEALED", "PASSED", "RUNNING", "PASSED"]

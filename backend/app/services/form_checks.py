@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from backend.services import auth_plan
+from app.services import auth_plan
 
 MAX_FORMS = 2
 _TEXT_LIKE = {"text", "email", "password", "search", "tel", "url", "number", "textarea", None, ""}

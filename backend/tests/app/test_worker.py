@@ -7,11 +7,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from backend import worker
-from backend.config import settings, startup_safety_problem
-from backend.models import PIPELINE_RUNS
-from backend.pipeline import runner
-from backend.services.project_service import ProjectService
+from app import worker
+from app.config import settings, startup_safety_problem
+from app.models import PIPELINE_RUNS
+from app.pipeline import runner
+from app.services.project_service import ProjectService
 
 
 @pytest.fixture
@@ -118,7 +118,7 @@ def test_worker_mode_requires_a_shared_database(monkeypatch):
 
 
 def test_a_reaped_run_closes_its_stages_and_updates_the_project(fresh_store):
-    from backend.models import PROJECTS
+    from app.models import PROJECTS
 
     run = queue_run(fresh_store)
     old = (datetime.now(UTC) - timedelta(seconds=worker.STALE_SECONDS + 60)).isoformat()
@@ -147,7 +147,7 @@ def test_an_idle_worker_polls_less_and_less(monkeypatch):
 
 
 def test_the_worker_waits_for_the_runs_deployment(fresh_store, monkeypatch):
-    from backend.pipeline import deploy
+    from app.pipeline import deploy
 
     finished = []
 
@@ -168,7 +168,7 @@ def test_the_worker_waits_for_the_runs_deployment(fresh_store, monkeypatch):
 
 
 def test_the_alive_file_tells_the_health_check_whether_the_loop_runs(tmp_path, monkeypatch):
-    from backend import worker_alive
+    from app import worker_alive
 
     monkeypatch.setattr(worker_alive, "ALIVE_FILE", str(tmp_path / "alive"))
     assert not worker_alive.is_alive()  # never started
@@ -180,8 +180,8 @@ def test_the_alive_file_tells_the_health_check_whether_the_loop_runs(tmp_path, m
 def test_health_reports_a_stalled_worker(fresh_store, worker_mode, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from backend.api import health
-    from backend.main import app
+    from app.api import health
+    from app.main import app
 
     def body():
         health._queue_state["checked_at"] = 0.0

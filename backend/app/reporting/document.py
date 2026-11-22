@@ -19,9 +19,9 @@ from datetime import UTC, datetime
 from html import escape
 from typing import Any
 
-from backend.artifacts import get_artifact_store
-from backend.database.store import Record, Store
-from backend.models import TEST_EXECUTIONS
+from app.artifacts import get_artifact_store
+from app.database.store import Record, Store
+from app.models import TEST_EXECUTIONS
 
 GROUPS = [("smoke", "Smoke"), ("functional", "Goal scenario"), ("explored", "AI-explored goal"), ("content", "Content"),
           ("link", "Linked pages"), ("route", "Code routes"), ("ai", "AI-written tests"), ("saved", "Saved tests")]

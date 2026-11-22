@@ -60,7 +60,7 @@ and a dashboard that shows the loop live.
 ## Architecture
 
 ```
-frontend/  React dashboard ──────────────▶ backend/  FastAPI
+frontend/  React dashboard ──────────────▶ backend/app/  FastAPI
                                              │  api/            REST endpoints
                                              │  pipeline/       pipeline runner, scheduler, verified deploy
                                              │  orchestration/  ties the agents to the engine
@@ -68,23 +68,27 @@ frontend/  React dashboard ──────────────▶ backend
                                              │  artifacts.py    screenshots, DOM snapshots, traces (disk, S3 or GCS)
                                              │  github.py, notify.py, netguard.py, http_hardening.py
                                              ▼
-        agents/   planner, failure analyzer, healing decisions, memory, LLM client
-        engine/   Playwright runner, locator healing, egress guard, benchmarks
-        security/ passive + active (DAST) scanner, remediation, fix patcher
-        ingestion/ repository blueprint
+        backend/agents/     planner, failure analyzer, healing decisions, memory, LLM client
+        backend/engine/     Playwright runner, locator healing, egress guard, benchmarks
+        backend/security/   passive + active (DAST) scanner, remediation, fix patcher
+        backend/ingestion/  repository blueprint
 ```
+
+The repository has three parts: **`backend/`** (all Python: `pyproject.toml`, the dependency lock and tests live
+there, and every Python command runs from it), **`frontend/`** (the dashboard) and **`docs/`**. Deployment files
+(`Dockerfile`, [`deploy/aws-ec2`](deploy/aws-ec2/README.md), Firestore rules) stay at the root.
 
 | Folder | Contents |
 | --- | --- |
-| [`agents/`](agents/) | Test Planner, Failure Analyzer, healing decision engine, healing memory, agent orchestrator and recovery policy, provider-independent LLM client (mock, local, OpenAI-compatible API) |
-| [`engine/`](engine/) | Playwright execution engine, locator healer, outbound request guard for the browser, healing benchmarks |
-| [`backend/`](backend/) | FastAPI API, automated pipeline and scheduler, verified deploy, artifact store, integrations (GitHub, Slack), sign-in and data isolation, request hardening |
+| [`backend/app/`](backend/app/) | FastAPI API, automated pipeline and scheduler, pipeline worker, verified deploy, artifact store, integrations (GitHub, Slack), sign-in and data isolation, request hardening, MCP server |
+| [`backend/agents/`](backend/agents/) | Test Planner, Failure Analyzer, healing decision engine, healing memory, agent orchestrator and recovery policy, provider-independent LLM client (mock, local, OpenAI-compatible API) |
+| [`backend/engine/`](backend/engine/) | Playwright execution engine, locator healer, outbound request guard for the browser, healing benchmarks |
+| [`backend/security/`](backend/security/) | Passive and active security scanner, remediation proposals, fix patch generator |
+| [`backend/ingestion/`](backend/ingestion/) | Repository cloning and static analysis |
+| [`backend/tests/`](backend/tests/) | Unit, integration, engine and end-to-end tests |
+| [`backend/scripts/`](backend/scripts/) | Load test, test-generation evaluation |
 | [`frontend/`](frontend/) | React dashboard with its design system, live pipeline loop, run pages, reports, security, profile and privacy pages |
-| [`security/`](security/) | Passive security scanner, remediation proposals, fix patch generator |
-| [`ingestion/`](ingestion/) | Repository cloning and static analysis |
-| [`tests/`](tests/) | Unit, integration, engine and end-to-end tests |
-| [`scripts/`](scripts/) | Load test |
-| [`docs/`](docs/) | Architecture, operations and benchmark reports |
+| [`docs/`](docs/) | Architecture, operations, contributing guide and benchmark reports |
 
 ---
 
@@ -105,7 +109,7 @@ Work is merged into `main` through pull requests that pass CI.
 | --- | --- |
 | **Vinamra Bhatnagar** | Founded the AI agent layer: the shared agent schemas and contracts, the provider-independent LLM client (mock provider, response parser, `LLMClientSession` with validation and retry), the Test Planner Agent (schemas, prompt architecture, mock scenarios, generation pipeline), the failure classifier and Failure Analysis Agent, the self-healing contracts, test prioritization, their tests. |
 | **Krishna Singh** | The Playwright engine and locator healing with its benchmark, the passive and active security scanner and AI triage, codebase ingestion, fix patches and pull requests, verified deploy, the real LLM providers, persistent healing memory, the AI explorer, failure reports and PDF export, Firestore storage, CI and security scanning, hosting, and most of the current backend and dashboard. |
-| **Prashansha Maheshwari** | The first backend platform and workflow orchestration, the plan-and-execute API with live SSE events, the first React dashboard and its connection to the backend, the Vercel and Render deployment setup, and the architecture, API, engine, integration and operations documentation, plus `CONTRIBUTING.md`. |
+| **Prashansha Maheshwari** | The first backend platform and workflow orchestration, the plan-and-execute API with live SSE events, the first React dashboard and its connection to the backend, the Vercel and Render deployment setup, and the architecture, API, engine, integration and operations documentation, plus [`CONTRIBUTING.md`](docs/CONTRIBUTING.md). |
 
 ---
 
@@ -115,9 +119,11 @@ Work is merged into `main` through pull requests that pass CI.
 git clone https://github.com/Krishna201i/TestSphere-AI-Autonomous-Agentic-QA-Self-Healing-Testing-Platform.git
 cd TestSphere-AI-Autonomous-Agentic-QA-Self-Healing-Testing-Platform
 
-# Python package with development tools, and the browser
-pip install -e ".[dev]"
+# Python package with development tools, and the browser (all Python lives in backend/)
+cd backend
+pip install -r requirements.txt && pip install -e ".[dev]"
 python -m playwright install chromium
+cd ..
 
 # Dashboard
 cd frontend && npm install && cd ..
@@ -129,18 +135,18 @@ cp .env.example .env
 Run the platform:
 
 ```bash
-python -m uvicorn backend.main:app --port 8000   # API on http://127.0.0.1:8000
-cd frontend && npm run dev                        # dashboard on http://localhost:3000
+cd backend && python -m uvicorn app.main:app --port 8000   # API on http://127.0.0.1:8000
+cd frontend && npm run dev                                 # dashboard (second terminal) on http://localhost:3000
 ```
 
 Run the tests:
 
 ```bash
-python -m pytest -q                 # backend, agents, engine; end-to-end tests need: cd frontend && npm run build
+cd backend && python -m pytest -q   # app, agents, engine; end-to-end tests need: cd frontend && npm run build
 cd frontend && npm test             # dashboard unit tests and design-token lint
 ```
 
-Measure and scan:
+Measure and scan (from `backend/`):
 
 ```bash
 python -m engine.heal_benchmark --quick    # self-healing benchmark (drop --quick for all 277 cases)
@@ -182,7 +188,7 @@ Every setting, the Dockerfile, the worker, Firestore rules and indexes, and CI a
 - [MCP server for coding agents](docs/mcp-server.md)
 - [Deployment & operations](docs/deployment-operations.md)
 - [Healing benchmark](docs/healing-benchmark.md) · [Load test](docs/load-test.md)
-- [Contributing](CONTRIBUTING.md)
+- [Contributing](docs/CONTRIBUTING.md)
 
 ## Security and privacy
 

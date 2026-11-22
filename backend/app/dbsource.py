@@ -12,7 +12,7 @@ development server).  TestSphere then
 
 Every session is read-only (``default_transaction_read_only``, SQLite
 ``mode=ro``) with a statement timeout; nothing is ever written.  The URL is
-stored encrypted (``backend/secretbox.py``), never returned, and its host goes
+stored encrypted (``app/secretbox.py``), never returned, and its host goes
 through the SSRF guard: private addresses only where ALLOW_PRIVATE_TARGETS is
 on (local development).
 """
@@ -28,7 +28,7 @@ from contextlib import closing
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-from backend.config import settings
+from app.config import settings
 
 MAX_TABLES = 200
 MAX_SEARCH_TABLES = 60
@@ -207,7 +207,7 @@ def start_check(project: dict[str, Any]) -> dict[str, Any] | None:
     """Row counts before the tests run (None when the project has no database)."""
     if not project.get("db_url"):
         return None
-    from backend.secretbox import SecretBoxError, decrypt
+    from app.secretbox import SecretBoxError, decrypt
 
     try:
         url = decrypt(project["db_url"])

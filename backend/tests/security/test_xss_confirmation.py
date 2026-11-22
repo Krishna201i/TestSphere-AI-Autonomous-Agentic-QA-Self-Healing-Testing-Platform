@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from backend.services.xss_confirm import confirm_in_browser
+from app.services.xss_confirm import confirm_in_browser
 from security import ActiveScanner, ScopePolicy
 
 pytestmark = pytest.mark.asyncio

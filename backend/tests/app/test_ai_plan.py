@@ -4,10 +4,10 @@ import asyncio
 
 from agents.planner.schemas import Assertion, TestCase, TestPlan, TestStep
 from agents.schemas.enums import AssertionType, TestAction
-from backend.config import settings
-from backend.models import TEST_CASES
-from backend.pipeline import ai_plan, runner
-from backend.services.project_service import ProjectService
+from app.config import settings
+from app.models import TEST_CASES
+from app.pipeline import ai_plan, runner
+from app.services.project_service import ProjectService
 
 URL = "http://app.test/login"
 ANALYSIS = {

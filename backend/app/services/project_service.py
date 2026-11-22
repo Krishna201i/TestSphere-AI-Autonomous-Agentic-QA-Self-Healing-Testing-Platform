@@ -12,9 +12,9 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from backend.database.store import Record, Store
-from backend.models import APPLICATIONS, DEPLOYMENTS, PIPELINE_RUNS, PROJECTS
-from backend.services.exceptions import ProjectNotFoundError
+from app.database.store import Record, Store
+from app.models import APPLICATIONS, DEPLOYMENTS, PIPELINE_RUNS, PROJECTS
+from app.services.exceptions import ProjectNotFoundError
 
 # Fields a client may set on a project besides name/description
 PIPELINE_FIELDS = ("app_url", "repo_url", "prompt", "schedule_minutes", "slack_webhook_url", "notify_on",
@@ -80,7 +80,7 @@ class ProjectService:
     @staticmethod
     def delete_project(db: Store, project_id: int) -> None:
         """Delete a project and, like the old foreign-key cascade, everything under it."""
-        from backend.services.application_service import ApplicationService
+        from app.services.application_service import ApplicationService
 
         ProjectService.get_project(db, project_id)
         for app in db.find(APPLICATIONS, project_id=project_id):

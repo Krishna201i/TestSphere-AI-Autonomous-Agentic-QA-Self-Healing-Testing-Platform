@@ -23,10 +23,10 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from backend.config import _hosted, settings
-from backend.database.store import Record, Store, now_iso
-from backend.models import PROJECTS, SCAN_TARGETS
-from backend.netguard import BlockedTargetError, PinnedTransport
+from app.config import _hosted, settings
+from app.database.store import Record, Store, now_iso
+from app.models import PROJECTS, SCAN_TARGETS
+from app.netguard import BlockedTargetError, PinnedTransport
 
 WELL_KNOWN_PATH = "/.well-known/testsphere-verify.txt"
 VALID_DAYS = 30

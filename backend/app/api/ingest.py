@@ -14,14 +14,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from backend.api.integrations import git_auth
-from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
-from backend.config import git_hosts, settings
-from backend.database.session import get_db
-from backend.database.store import Record, Store
-from backend.models import BLUEPRINTS
-from backend.ratelimit import limit_runs
-from backend.services.security_service import record_audit, save_scan
+from app.api.integrations import git_auth
+from app.auth import User, actor_for, ensure_owned, get_current_user, scope
+from app.config import git_hosts, settings
+from app.database.session import get_db
+from app.database.store import Record, Store
+from app.models import BLUEPRINTS
+from app.ratelimit import limit_runs
+from app.services.security_service import record_audit, save_scan
 from ingestion import (
     GitAuth,
     SourceError,
@@ -67,7 +67,7 @@ def _summary(row: Record) -> dict[str, Any]:
 def ingest_source(source: str, auth: GitAuth | None = None) -> dict[str, Any]:
     """Clone (or resolve) and analyze *source*; raises ``SourceError`` with a readable cause.
 
-    *auth* fetches a private repository (``backend.api.integrations.git_auth``).
+    *auth* fetches a private repository (``app.api.integrations.git_auth``).
     """
     cloned = is_git_url(source)
     if cloned:

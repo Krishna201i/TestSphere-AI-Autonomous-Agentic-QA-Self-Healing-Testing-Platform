@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from backend.services import url_analyzer
+from app.services import url_analyzer
 from security import PassiveScanner, ScanError, ScopePolicy
 
 

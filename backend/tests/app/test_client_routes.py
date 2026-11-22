@@ -18,8 +18,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from backend.config import settings
-from backend.pipeline import runner
+from app.config import settings
+from app.pipeline import runner
 from ingestion.analyzer import _client_routes, analyze_repo
 
 # One HTML page for every path; its "router" draws the page or redirects
@@ -93,8 +93,8 @@ def test_component_files_are_not_routes_outside_next(tmp_path):
 
 
 def test_a_protected_page_is_tested_to_stay_protected_and_client_pages_are_kept(fresh_store, spa, monkeypatch):
-    from backend.services.project_service import ProjectService
-    from backend.services.url_analyzer import URLAnalyzerService
+    from app.services.project_service import ProjectService
+    from app.services.url_analyzer import URLAnalyzerService
 
     monkeypatch.setattr(settings, "ANALYZE_VISIBILITY", True)
     analysis = asyncio.run(URLAnalyzerService.analyze_live_website(spa + "/"))

@@ -8,10 +8,10 @@ Does NOT execute browser automation, invoke Playwright, or trigger AI agents.
 from datetime import datetime
 from typing import Any
 
-from backend.database.store import Record, Store
-from backend.models import TEST_CASES, TEST_EXECUTIONS
-from backend.models.test_execution import TestExecutionStatus
-from backend.services.exceptions import (
+from app.database.store import Record, Store
+from app.models import TEST_CASES, TEST_EXECUTIONS
+from app.models.test_execution import TestExecutionStatus
+from app.services.exceptions import (
     InvalidExecutionStatusError,
     TestCaseNotFoundError,
     TestExecutionNotFoundError,

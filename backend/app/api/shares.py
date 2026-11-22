@@ -25,18 +25,18 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
-from backend.api.pipelines import (
+from app.api.pipelines import (
     REPORT_CSP,
     _finished_run,
     report_html_response,
     report_pdf_response,
 )
-from backend.auth import User, actor_for, ensure_owned, get_current_user
-from backend.config import settings
-from backend.database.session import get_db
-from backend.database.store import Record, Store, now_iso
-from backend.models import PIPELINE_RUNS, REPORT_SHARES
-from backend.services.security_service import record_audit
+from app.auth import User, actor_for, ensure_owned, get_current_user
+from app.config import settings
+from app.database.session import get_db
+from app.database.store import Record, Store, now_iso
+from app.models import PIPELINE_RUNS, REPORT_SHARES
+from app.services.security_service import record_audit
 
 router = APIRouter(prefix="/pipelines", tags=["Report sharing"])
 public_router = APIRouter(prefix="/shared", tags=["Shared reports (public)"])

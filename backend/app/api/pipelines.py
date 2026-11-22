@@ -16,20 +16,20 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
-from backend.api.projects import owned_project
-from backend.api.schemas import _check_http_url
-from backend.auth import User, actor_for, ensure_owned, get_current_user, scope
-from backend.config import settings
-from backend.database.session import get_db
-from backend.database.store import Record, Store
-from backend.models import DEPLOYMENTS, PIPELINE_RUNS, PROJECTS
-from backend.pipeline import deploy, scheduler
-from backend.pipeline.profile import GenerationProfile
-from backend.pipeline.runner import active_run, cancel_run, start_run
-from backend.ratelimit import limit_runs
-from backend.reporting.document import build_report, render_html
-from backend.reporting.pdf import html_to_pdf
-from backend.services.project_service import ProjectService
+from app.api.projects import owned_project
+from app.api.schemas import _check_http_url
+from app.auth import User, actor_for, ensure_owned, get_current_user, scope
+from app.config import settings
+from app.database.session import get_db
+from app.database.store import Record, Store
+from app.models import DEPLOYMENTS, PIPELINE_RUNS, PROJECTS
+from app.pipeline import deploy, scheduler
+from app.pipeline.profile import GenerationProfile
+from app.pipeline.runner import active_run, cancel_run, start_run
+from app.ratelimit import limit_runs
+from app.reporting.document import build_report, render_html
+from app.reporting.pdf import html_to_pdf
+from app.services.project_service import ProjectService
 
 router = APIRouter(prefix="/pipelines", tags=["Automated Pipeline"])
 

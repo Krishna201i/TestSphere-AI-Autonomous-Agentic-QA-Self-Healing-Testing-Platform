@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from backend.config import settings
+from app.config import settings
 
 GITHUB_API = "api.github.com"
 DEFAULT_HOOK_HOSTS = ("api.render.com", "api.vercel.com", "api.netlify.com", GITHUB_API)

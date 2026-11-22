@@ -7,9 +7,9 @@ Does not import or modify Member 1 TestCase AI logic.
 
 from typing import Any
 
-from backend.database.store import Record, Store
-from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
-from backend.services.exceptions import ApplicationNotFoundError, TestCaseNotFoundError
+from app.database.store import Record, Store
+from app.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
+from app.services.exceptions import ApplicationNotFoundError, TestCaseNotFoundError
 
 
 class TestCaseService:

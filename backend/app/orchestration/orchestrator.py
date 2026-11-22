@@ -58,12 +58,12 @@ from agents.schemas.member3_contract import (
     DashboardWorkflowSummary,
     build_dashboard_summary,
 )
-from backend.artifacts import load_baseline, persist_run_artifacts, record_visual
-from backend.config import settings
-from backend.database.store import Store, StoreUnavailableError
-from backend.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
-from backend.models.test_execution import TestExecutionStatus
-from backend.orchestration.converters import (
+from app.artifacts import load_baseline, persist_run_artifacts, record_visual
+from app.config import settings
+from app.database.store import Store, StoreUnavailableError
+from app.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
+from app.models.test_execution import TestExecutionStatus
+from app.orchestration.converters import (
     WRITE_BACK_CONFIDENCE,
     collect_learned_targets,
     element_record_from_fingerprint,
@@ -72,7 +72,7 @@ from backend.orchestration.converters import (
     test_case_to_engine_plan,
     write_back_heals,
 )
-from backend.reporting.diagnosis import diagnosis_of
+from app.reporting.diagnosis import diagnosis_of
 from engine.runner import run_test
 from engine.schemas import (
     EngineConfig,
@@ -193,11 +193,11 @@ def describe_step(step: EngineStep) -> str:
 
 def create_memory_store() -> MemoryStore:
     """Healing memory backend from ``AGENT_MEMORY_BACKEND`` (database by default)."""
-    from backend.config import settings
+    from app.config import settings
 
     if settings.AGENT_MEMORY_BACKEND == "memory":
         return InMemoryStore()
-    from backend.database.session import get_store
+    from app.database.session import get_store
 
     try:
         return PersistentMemoryStore(get_store(), max_records=settings.AGENT_MEMORY_MAX_RECORDS)

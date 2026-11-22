@@ -15,10 +15,10 @@ Validates:
 
 import unittest
 
-from backend.database.session import get_store
-from backend.services.application_service import ApplicationService
-from backend.services.exceptions import ApplicationNotFoundError, ProjectNotFoundError
-from backend.services.project_service import ProjectService
+from app.database.session import get_store
+from app.services.application_service import ApplicationService
+from app.services.exceptions import ApplicationNotFoundError, ProjectNotFoundError
+from app.services.project_service import ProjectService
 
 
 class TestApplicationService(unittest.TestCase):

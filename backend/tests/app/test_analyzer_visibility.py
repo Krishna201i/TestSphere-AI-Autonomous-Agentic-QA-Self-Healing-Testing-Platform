@@ -15,10 +15,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from backend.config import settings
-from backend.pipeline import suite
-from backend.services.url_analyzer import HIDDEN_MARK
-from backend.services.url_analyzer import URLAnalyzerService as U
+from app.config import settings
+from app.pipeline import suite
+from app.services.url_analyzer import HIDDEN_MARK
+from app.services.url_analyzer import URLAnalyzerService as U
 
 PAGE = """<!doctype html><title>Cloud Cost &amp; Performance</title>
 <style>.hidden{display:none}</style>

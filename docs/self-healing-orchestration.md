@@ -100,7 +100,7 @@ HEALED, so a person sees it. Tests the pipeline rebuilds from the live page on e
 rewritten (explorer recordings are).
 
 CI runs the quick healing benchmark with `--gate 0.90`: any false heal or missed refusal fails
-the build. `tests/backend/test_no_false_heals.py` covers the AI layer end to end in a real
+the build. `backend/tests/app/test_no_false_heals.py` covers the AI layer end to end in a real
 browser.
 
 ---
@@ -109,12 +109,12 @@ browser.
 
 The self-healing architecture comprises five cooperating specialized agents and engines located in [`agents/`](file:///agents/):
 
-### 2.1 Failure Analysis Agent (`agents/analyzer/analyzer.py`)
+### 2.1 Failure Analysis Agent (`backend/agents/analyzer/analyzer.py`)
 - Ingests the `FailureContext`, failure message, screenshot, and full serialized DOM snapshot.
 - Differentiates between actual software bugs (e.g. 500 error on submit, unhandled exception in app) versus test automation flakiness / locator degradation.
 - Determines whether self-healing is eligible for this failure type.
 
-### 2.2 Candidate Selector Generator (`agents/healer/candidate_generator.py`)
+### 2.2 Candidate Selector Generator (`backend/agents/healer/candidate_generator.py`)
 - Analyzes DOM element attributes in the vicinity of the failed target.
 - Generates a candidate pool of alternative locators spanning:
   - Accessible name and ARIA role (`getByRole('button', { name: 'Submit' })`)
@@ -122,24 +122,24 @@ The self-healing architecture comprises five cooperating specialized agents and 
   - Visible text content (`text="Log In"`)
   - Robust hierarchical CSS paths excluding fragile auto-generated hash classes
 
-### 2.3 Candidate Scorer (`agents/healer/candidate_scorer.py`)
+### 2.3 Candidate Scorer (`backend/agents/healer/candidate_scorer.py`)
 - Scores each generated candidate on a normalized 0.0 to 1.0 confidence scale.
 - Factors evaluated:
   - **Uniqueness**: Does the selector match exactly 1 DOM node?
   - **Stability**: Does the selector rely on semantic attributes rather than volatile class names?
   - **Simplicity**: Shorter, cleaner selectors receive higher confidence weight.
 
-### 2.4 Healing Decision Engine (`agents/healer/healing_decision.py`)
+### 2.4 Healing Decision Engine (`backend/agents/healer/healing_decision.py`)
 - Applies the `RecoveryPolicy` rules (max retry limit, confidence threshold cutoff).
 - Selects the optimal candidate or marks the step unhealable if confidence falls below threshold.
 
-### 2.5 Feedback & Learning Processor (`agents/healer/healing_feedback.py`)
+### 2.5 Feedback & Learning Processor (`backend/agents/healer/healing_feedback.py`)
 - Records the outcome of the self-healing attempt.
 - Feeds positive reinforcement back to the memory store (`HealingHistoryMemory`) so future test executions can directly utilize the healed locator without repeating the failure.
 
 ---
 
-## 3. Schema Bridging Layer (`backend/orchestration/converters.py`)
+## 3. Schema Bridging Layer (`backend/app/orchestration/converters.py`)
 
 Because Member 1 (AI Agent Layer) and Member 2 (Browser Engine) were developed with decoupled, domain-specific schemas, the converter layer serves as the zero-loss bridge:
 

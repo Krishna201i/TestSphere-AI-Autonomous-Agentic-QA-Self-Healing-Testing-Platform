@@ -2,10 +2,10 @@
 
 from fastapi.testclient import TestClient
 
-from backend.api import health
-from backend.database.session import set_store
-from backend.database.store import MemoryStore, StoreUnavailableError
-from backend.main import app
+from app.api import health
+from app.database.session import set_store
+from app.database.store import MemoryStore, StoreUnavailableError
+from app.main import app
 
 REASON = "Firestore is not enabled for this Firebase project. Open Firebase console → Firestore Database → Create database."
 
@@ -46,8 +46,8 @@ def test_health_ok_with_working_store() -> None:
 def test_memory_store_falls_back_when_database_is_down(monkeypatch) -> None:
     from agents.memory.in_memory_store import InMemoryStore
     from agents.memory.persistent_store import PersistentMemoryStore
-    from backend.config import settings
-    from backend.orchestration import orchestrator
+    from app.config import settings
+    from app.orchestration import orchestrator
 
     monkeypatch.setattr(settings, "AGENT_MEMORY_BACKEND", "database")
     set_store(BrokenStore())
@@ -57,7 +57,7 @@ def test_memory_store_falls_back_when_database_is_down(monkeypatch) -> None:
 
 def test_store_creation_failure_is_503(monkeypatch) -> None:
     """A store that cannot even be created (bad credentials) still yields a clean 503."""
-    from backend.database import session
+    from app.database import session
 
     def fail_create(*_a, **_kw):
         raise StoreUnavailableError("No Firebase credentials.")

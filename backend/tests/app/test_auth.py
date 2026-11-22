@@ -6,9 +6,9 @@ and the profile endpoints.
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import auth
-from backend.config import settings
-from backend.main import app
+from app import auth
+from app.config import settings
+from app.main import app
 
 TOKENS = {
     "token-alice": {"uid": "alice", "email": "alice@example.com", "name": "Alice", "firebase": {"sign_in_provider": "password"}},
@@ -102,10 +102,10 @@ def test_sign_in_off_runs_as_the_local_user():
 
 def test_workflow_events_are_only_streamed_to_the_runs_owner(client, monkeypatch):
     """Regression: any signed-in user could read any run's events by guessing wf-exec-<n>."""
-    from backend.api import workflow
-    from backend.database.session import get_store
-    from backend.models import TEST_EXECUTIONS
-    from backend.orchestration.orchestrator import (
+    from app.api import workflow
+    from app.database.session import get_store
+    from app.models import TEST_EXECUTIONS
+    from app.orchestration.orchestrator import (
         WorkflowEvent,
         WorkflowEventType,
         WorkflowStep,
@@ -127,8 +127,8 @@ def test_workflow_events_are_only_streamed_to_the_runs_owner(client, monkeypatch
 
 
 def test_unknown_or_eventless_workflows_are_404_not_invented(client):
-    from backend.database.session import get_store
-    from backend.models import TEST_EXECUTIONS
+    from app.database.session import get_store
+    from app.models import TEST_EXECUTIONS
 
     for wid in ("wf-exec-999", "999", "not-a-run"):
         assert client.get(f"/api/workflow/stream/{wid}", headers=as_user("token-alice")).status_code == 404
@@ -152,8 +152,8 @@ def test_system_info_shows_deployment_details_only_when_signed_in(client):
 
 
 def test_deleting_an_account_erases_only_that_users_data(client, monkeypatch):
-    from backend.api import me
-    from backend.database.session import get_store
+    from app.api import me
+    from app.database.session import get_store
 
     removed = []
     monkeypatch.setattr(me, "_delete_sign_in_account", lambda uid: removed.append(uid) or True)
@@ -181,7 +181,7 @@ def test_deleting_an_account_erases_only_that_users_data(client, monkeypatch):
 
 
 def test_a_failed_sign_in_deletion_is_reported(client, monkeypatch):
-    from backend.api import me
+    from app.api import me
 
     monkeypatch.setattr(me, "_delete_sign_in_account", lambda uid: False)
     body = client.request("DELETE", "/api/me", json={"confirm": "DELETE MY ACCOUNT"},

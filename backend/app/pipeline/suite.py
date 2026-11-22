@@ -11,7 +11,7 @@ has an ingested codebase, its HTTP routes into a suite of browser tests:
                a login or sign-up form's own tests: a wrong password or
                different passwords are refused, an empty form is not sent,
                the password is masked; with credentials or test accounts,
-               the session after signing in (``backend/services/auth_plan.py``)
+               the session after signing in (``app/services/auth_plan.py``)
 - content      the main heading is on the page
 - link-*       same-site pages linked from the target render; the first few
                are analyzed too, and also check their title, heading and
@@ -89,8 +89,8 @@ def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict
                 else f"Interaction: {_shorten(title, 50) or url}")
         tests.append({"slug": "interaction", "name": name, "category": "functional", "steps": synthesized})
 
-    # A login or sign-up form's own tests (backend/services/auth_plan.py), and
-    # what the page's other forms must refuse (backend/services/form_checks.py)
+    # A login or sign-up form's own tests (app/services/auth_plan.py), and
+    # what the page's other forms must refuse (app/services/form_checks.py)
     tests += analysis.get("auth_tests") or []
     tests += analysis.get("form_tests") or []
 

@@ -1,5 +1,5 @@
 """
-Login and sign-up forms get their own tests (backend/services/auth_plan.py),
+Login and sign-up forms get their own tests (app/services/auth_plan.py),
 and the goal's sign-in only runs with what it needs.
 
 Found by docs/generation-eval.md: a login with no goal was filled with made-up
@@ -16,8 +16,8 @@ from agents.analyzer.analyzer import FailureAnalyzerAgent
 from agents.analyzer.schemas import FailureContext
 from agents.memory.in_memory_store import InMemoryStore
 from agents.schemas.enums import FailureType
-from backend.services import auth_plan
-from backend.services.url_analyzer import URLAnalyzerService as U
+from app.services import auth_plan
+from app.services.url_analyzer import URLAnalyzerService as U
 from engine.runner import with_unique_values
 from engine.schemas import ActionType, Step, TestPlan
 

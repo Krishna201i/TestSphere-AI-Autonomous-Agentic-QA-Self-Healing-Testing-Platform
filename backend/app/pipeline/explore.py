@@ -19,12 +19,12 @@ import json
 import logging
 from typing import Any
 
-from backend.config import settings
-from backend.database.store import Record, Store
-from backend.models import TEST_CASES, TEST_EXECUTIONS
-from backend.models.test_execution import TestExecutionStatus
-from backend.services.test_case_service import TestCaseService
-from backend.services.url_analyzer import URLAnalyzerService
+from app.config import settings
+from app.database.store import Record, Store
+from app.models import TEST_CASES, TEST_EXECUTIONS
+from app.models.test_execution import TestExecutionStatus
+from app.services.test_case_service import TestCaseService
+from app.services.url_analyzer import URLAnalyzerService
 
 logger = logging.getLogger("testsphere.explore")
 
@@ -106,7 +106,7 @@ async def explored_test(db: Store, project: Record, application: Record, *, expl
 
 async def _explore(app_url: str, goal: str, explorer: Any):
     from agents.explorer import GoalExplorer
-    from backend.orchestration.orchestrator import create_platform_llm_client
+    from app.orchestration.orchestrator import create_platform_llm_client
     from engine.browser import BrowserSession
     from engine.schemas import EngineConfig
 

@@ -19,12 +19,12 @@ Entities are documents in these store collections (Firestore in production):
     deployments         project_id, status, commit, rollback_to, steps, health, smoke
     integrations        provider, login, token (encrypted), connected_at
 
-Documents owned by a user also carry ``owner_uid`` (see backend/auth.py).
+Documents owned by a user also carry ``owner_uid`` (see app/auth.py).
 
 Every document also has ``id`` (integer), ``created_at`` and ``updated_at``.
 """
 
-from backend.models.test_execution import TestExecutionStatus
+from app.models.test_execution import TestExecutionStatus
 
 PROJECTS = "projects"
 APPLICATIONS = "applications"

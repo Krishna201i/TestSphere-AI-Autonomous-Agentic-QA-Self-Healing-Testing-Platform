@@ -42,7 +42,7 @@ try:
 except ImportError:  # memory is reported only when psutil is available
     psutil = None
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent  # backend/ (where uvicorn runs)
 DASHBOARD_CALLS = ["/api/health", "/api/projects", "/api/test-executions?limit=200", "/api/test-executions/stats",
                    "/api/security/findings", "/api/audit?limit=300", "/api/pipelines/runs?limit=40",
                    "/api/pipelines/deployments?limit=10", "/api/system"]
@@ -85,7 +85,7 @@ class Backend:
                "RATE_LIMIT_RUNS_PER_MINUTE": "0", "PIPELINE_EXECUTION": "inline", "ARTIFACT_TRACES": "false",
                # The built-in planner: a real model in .env would time its API, not this server
                "LLM_PROVIDER": "mock"}
-        self.proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.main:app", "--port", str(self.port)],
+        self.proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(self.port)],
                                      cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(120):
             try:
@@ -243,7 +243,7 @@ def report(api: list[dict], runs: list[dict], idle_mb: float | None, seconds: fl
               "`ENGINE_MAX_BROWSERS=1`, or 2 GB with the default of 2. For more parallel runs, move them to the "
               "worker (`PIPELINE_EXECUTION=worker`) and size the worker, not the API.",
               ""]
-    path = ROOT / "docs" / "load-test.md"
+    path = ROOT.parent / "docs" / "load-test.md"
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
 
