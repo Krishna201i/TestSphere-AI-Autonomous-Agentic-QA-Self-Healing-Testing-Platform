@@ -131,6 +131,10 @@ export const saveStudioTest = (projectId, payload) =>
   request(`/api/projects/${projectId}/studio/tests`, { method: 'POST', body: payload });
 export const updateStudioTest = (projectId, testId, payload) =>
   request(`/api/projects/${projectId}/studio/tests/${testId}`, { method: 'PUT', body: payload });
+/** Self-healing review: every heal with its evidence, and approve / reject one. */
+export const getHeals = (limit = 200) => request(`/api/heals?limit=${limit}`);
+export const reviewHeal = (executionId, originalLocator, decision) =>
+  request(`/api/heals/${executionId}/review`, { method: 'POST', body: { original_locator: originalLocator, decision } });
 /** Any saved test as a Playwright .spec.ts file, as a Blob. */
 export const exportPlaywright = (testId) => request(`/api/studio/tests/${testId}/playwright`, { raw: true });
 
