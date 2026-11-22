@@ -47,7 +47,6 @@ from agents.healer.healing_feedback import (
 )
 from agents.healer.healing_schemas import (
     HealingContext,
-    HealingRecommendation,
     ScoredCandidate,
 )
 from agents.healer.schemas import HealingResult
@@ -81,22 +80,13 @@ from agents.planner.schemas import (
     ElementContext,
     PageContext,
 )
-from agents.schemas.contracts import (
+from agents.schemas.enums import (
     CandidateSource,
     ConfidenceLevel,
     FailureType,
-    HealingAction,
-    HealingDecision,
     HealingStatus,
     RecommendedAction,
     ValidationStatus,
-)
-from agents.schemas.member2_contract import (
-    MEMBER2_SAMPLE_EXECUTION_RESULT_JSON,
-    MEMBER2_SAMPLE_FEEDBACK_JSON,
-    parse_member2_execution_result,
-    parse_member2_feedback,
-    serialize_for_member2,
 )
 from agents.schemas.member3_contract import (
     build_dashboard_summary,
@@ -987,53 +977,6 @@ class TestWorkflowObservability:
         # Check monotonically non-decreasing timestamps
         for i in range(len(final_state.events) - 1):
             assert final_state.events[i].timestamp <= final_state.events[i + 1].timestamp
-
-
-# ══════════════════════════════════════════════════════════════
-#  10. Member 1 ↔ Member 2 Contract Tests
-# ══════════════════════════════════════════════════════════════
-
-
-class TestMember1ToMember2Contract:
-    """Validates serializability and schema adherence for Member 2 interactions."""
-
-    def test_parse_sample_execution_result(self):
-        result = parse_member2_execution_result(MEMBER2_SAMPLE_EXECUTION_RESULT_JSON)
-        assert result.workflow_id == "wf-e2e-001"
-        assert result.status == ExecutionResultStatus.FAILED
-        assert result.failure_context is not None
-        assert result.failure_context.target_selector == "#submit-btn"
-
-    def test_parse_sample_feedback(self):
-        feedback = parse_member2_feedback(MEMBER2_SAMPLE_FEEDBACK_JSON)
-        assert feedback.test_case_id == "tc-login-01"
-        assert feedback.healing_status == HealingStatus.VALIDATED_SUCCESS
-        assert feedback.validation_status == ValidationStatus.SUCCESS
-        assert feedback.confidence == 0.95
-
-    def test_serialize_healing_recommendation(self):
-        cand = ScoredCandidate(
-            selector="#new-btn",
-            confidence=0.95,
-            source=CandidateSource.CURRENT_DOM,
-        )
-        rec = HealingRecommendation(
-            test_id="tc-login-01",
-            execution_id="exec-001",
-            failed_step=2,
-            original_selector="#old-btn",
-            failure_type=FailureType.SELECTOR_CHANGED,
-            confidence=ConfidenceLevel.HIGH,
-            decision=HealingDecision.RECOMMEND_HEALING,
-            recommended_action=HealingAction.TRY_REPLACEMENT_SELECTOR,
-            selected_candidate=cand,
-            candidates=[cand],
-            evidence=["Exact testid match"],
-        )
-        json_str = serialize_for_member2(rec)
-        assert "#new-btn" in json_str
-        loaded = json.loads(json_str)
-        assert loaded["selected_candidate"]["selector"] == "#new-btn"
 
 
 # ══════════════════════════════════════════════════════════════

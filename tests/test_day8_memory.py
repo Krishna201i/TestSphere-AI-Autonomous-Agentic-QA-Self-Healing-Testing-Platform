@@ -934,17 +934,6 @@ class TestImports:
             TestExecutionRecord,
         )
 
-    def test_import_from_contracts(self):
-        """Memory schemas should be importable from agents.schemas.contracts."""
-        from agents.schemas.contracts import (  # noqa: F401
-            ContextComparisonResult,
-            ElementRecord,
-            FailureInfo,
-            FieldChange,
-            HealingRecord,
-            TestExecutionRecord,
-        )
-
     def test_import_enums(self):
         """New enums should be importable from agents.schemas."""
         from agents.schemas import ChangeType, ExecutionStatus  # noqa: F401

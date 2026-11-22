@@ -103,7 +103,7 @@ Work is merged into `main` through pull requests that pass CI.
 
 | Member | Contributed |
 | --- | --- |
-| **Vinamra Bhatnagar** | Founded the AI agent layer: the shared agent schemas and contracts, the provider-independent LLM client (mock provider, response parser, `LLMClientSession` with validation and retry), the Test Planner Agent (schemas, prompt architecture, mock scenarios, generation pipeline), the failure classifier and Failure Analysis Agent, the self-healing contracts, test prioritization, their tests, and the [AI agent architecture](docs/member1-architecture.md) document. |
+| **Vinamra Bhatnagar** | Founded the AI agent layer: the shared agent schemas and contracts, the provider-independent LLM client (mock provider, response parser, `LLMClientSession` with validation and retry), the Test Planner Agent (schemas, prompt architecture, mock scenarios, generation pipeline), the failure classifier and Failure Analysis Agent, the self-healing contracts, test prioritization, their tests. |
 | **Krishna Singh** | The Playwright engine and locator healing with its benchmark, the passive and active security scanner and AI triage, codebase ingestion, fix patches and pull requests, verified deploy, the real LLM providers, persistent healing memory, the AI explorer, failure reports and PDF export, Firestore storage, CI and security scanning, hosting, and most of the current backend and dashboard. |
 | **Prashansha Maheshwari** | The first backend platform and workflow orchestration, the plan-and-execute API with live SSE events, the first React dashboard and its connection to the backend, the Vercel and Render deployment setup, and the architecture, API, engine, integration and operations documentation, plus `CONTRIBUTING.md`. |
 
@@ -178,7 +178,6 @@ Every setting, the Dockerfile, the worker, Firestore rules and indexes, and CI a
 - [Backend architecture & API](docs/backend-architecture.md)
 - [Browser execution engine](docs/engine-architecture.md)
 - [Self-healing & orchestration](docs/self-healing-orchestration.md)
-- [AI agent architecture](docs/member1-architecture.md)
 - [Integration guide](docs/integration-guide.md)
 - [MCP server for coding agents](docs/mcp-server.md)
 - [Deployment & operations](docs/deployment-operations.md)

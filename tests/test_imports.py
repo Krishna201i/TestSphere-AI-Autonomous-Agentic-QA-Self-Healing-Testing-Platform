@@ -21,23 +21,6 @@ class TestImports:
             TestPriority,
         )
 
-    def test_import_schemas_contracts(self):
-        from agents.schemas.contracts import (  # noqa: F401
-            ApplicationContext,
-            Assertion,
-            FailureAnalysis,
-            FailureType,
-            HealingCandidate,
-            HealingResult,
-            HealingStatus,
-            PageInfo,
-            TestCase,
-            TestCategory,
-            TestFailure,
-            TestPriority,
-            TestStep,
-        )
-
     def test_import_llm(self):
         from agents.llm import LLMClient, LLMConfig  # noqa: F401
 

@@ -1526,17 +1526,6 @@ class TestAssertionFailureNotHealed:
 class TestContractImports:
     """Verify Day 13 contracts are accessible from the contracts module."""
 
-    def test_import_from_contracts(self):
-        """Day 13 schemas should be importable from contracts."""
-        from agents.schemas.contracts import (
-            AgentState,
-            ExecutionResult,
-            WorkflowStep,
-        )
-        assert AgentState is not None
-        assert WorkflowStep is not None
-        assert ExecutionResult is not None
-
     def test_import_from_orchestration(self):
         """Day 13 classes should be importable from orchestration package."""
         from agents.orchestration import (

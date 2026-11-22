@@ -1237,33 +1237,3 @@ class TestWorkflowEventTypes:
         assert WorkflowEventType.RETRY_INITIATED == "RETRY_INITIATED"
 
 
-# ══════════════════════════════════════════════════════════════
-#  10. Contracts Import Tests
-# ══════════════════════════════════════════════════════════════
-
-
-class TestContractsExport:
-    """Verify Day 14 exports are available via contracts."""
-
-    def test_import_recovery_action(self):
-        """RecoveryAction is importable from contracts."""
-        from agents.schemas.contracts import RecoveryAction as RA
-        assert RA.TRY_HEALING == "TRY_HEALING"
-
-    def test_import_recovery_decision(self):
-        """RecoveryDecision is importable from contracts."""
-        from agents.schemas.contracts import RecoveryDecision as RD
-        d = RD(decision=RecoveryAction.ABORT)
-        assert d.decision == RecoveryAction.ABORT
-
-    def test_import_recovery_policy(self):
-        """RecoveryPolicy is importable from contracts."""
-        from agents.schemas.contracts import RecoveryPolicy as RP
-        p = RP()
-        assert p is not None
-
-    def test_import_recovery_policy_config(self):
-        """RecoveryPolicyConfig is importable from contracts."""
-        from agents.schemas.contracts import RecoveryPolicyConfig as RPC
-        c = RPC()
-        assert c.max_healing_attempts == 3
