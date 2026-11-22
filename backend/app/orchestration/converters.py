@@ -172,6 +172,15 @@ def write_back_heals(
             targets = list(by_locator.values())
     return (json.dumps(stored) if changed else None), targets
 
+def drop_rejected(targets: list[dict[str, Any]], rejected: set[str]) -> list[dict[str, Any]]:
+    """Learned targets without what the engine learned about *rejected* locators
+    (every fallback and the fingerprint): a heal a reviewer rejected cannot come
+    back through another selector for the same element."""
+    if not rejected:
+        return targets
+    return [{**t, "fallback_locators": [], "fingerprint": None} if t.get("locator") in rejected else t for t in targets]
+
+
 # ── Elements of a page (for the AI healer) ───────────────────
 
 _INTERACTIVE_TAGS = frozenset({"button", "a", "input", "select", "textarea"})

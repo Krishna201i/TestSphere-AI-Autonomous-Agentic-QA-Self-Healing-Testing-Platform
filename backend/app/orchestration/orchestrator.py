@@ -66,6 +66,7 @@ from app.models.test_execution import TestExecutionStatus
 from app.orchestration.converters import (
     WRITE_BACK_CONFIDENCE,
     collect_learned_targets,
+    drop_rejected,
     element_record_from_fingerprint,
     engine_result_to_execution_result,
     learned_targets_by_locator,
@@ -366,6 +367,18 @@ def _sure_heals(result: EngineTestResult) -> list[tuple[str, str]]:
         and sr.healing.confidence >= WRITE_BACK_CONFIDENCE
     ))
 
+def rejected_heals(test_case: Any) -> set[str]:
+    """Locators of this test whose heal a reviewer rejected (Self-Healing page): they may not
+    self-heal again, to any selector, until the step is edited or a heal of it is approved."""
+    return {r.get("from") for r in test_case.get("rejected_heals") or [] if isinstance(r, dict) and r.get("from")}
+
+
+def _heals_used(result: EngineTestResult, ai_heal: tuple[str, str] | None) -> list[tuple[str, str]]:
+    used = [(sr.healing.original_locator, sr.healing.selected_locator) for sr in result.steps
+            if sr.status == StepStatus.HEALED and sr.healing and sr.healing.selected_locator]
+    return used + ([ai_heal] if ai_heal else [])
+
+
 # Hard cap on re-runs of a transient failure (the recovery policy sets the real limit)
 MAX_RETRY_RUNS = 3
 
@@ -604,6 +617,15 @@ class PlatformWorkflowOrchestrator:
                 if tried:
                     error_msg += f" (self-healing tried {tried} replacement selector(s); none passed)"
 
+        # A heal a reviewer rejected (it reached the wrong element) never passes a test
+        blocked = rejected_heals(test_case)
+        refused = [(old, new) for old, new in _heals_used(shown_result, ai_heal) if old in blocked]
+        if final_status == TestExecutionStatus.HEALED.value and refused:
+            final_status = TestExecutionStatus.FAILED.value
+            old, new = refused[0]
+            error_msg = (f"{old} is gone. Self-healing found {new}, but a reviewer rejected healing this step: "
+                         "update the test's step for this element.")
+
         # Learn from the run: healing memory and the targets' fallbacks/fingerprints
         try:
             self._learn_from_run(db, test_case, execution.id, m1_test_case, engine_plan, shown_plan,
@@ -826,7 +848,7 @@ class PlatformWorkflowOrchestrator:
                 ))
             previous_url = step_res.page_url or previous_url
 
-        targets = collect_learned_targets(engine_plan, shown_plan, shown_result)
+        targets = drop_rejected(collect_learned_targets(engine_plan, shown_plan, shown_result), rejected_heals(test_case))
         changes: dict[str, Any] = {}
         sure = _sure_heals(shown_result) if passed and _writes_back(test_case) else []
         if sure:

@@ -70,3 +70,29 @@ def test_a_studio_test_runs_and_heals_in_a_real_browser(site):
 
     listed = client.get(f"/projects/{project['id']}/studio/tests").json()
     assert listed[0]["last_result"]["status"] == "HEALED"
+
+
+def test_a_rejected_heal_fails_the_next_run_instead_of_passing(site):
+    url, publish = site
+    client = TestClient(app)
+    project = client.post("/projects", json={"name": "Shop", "app_url": url}).json()
+    steps = [
+        {"action": "FILL", "target": "#user", "value": "demo"},
+        {"action": "CLICK", "target": "#login"},
+        {"action": "ASSERT_CONTAINS_TEXT", "target": "body", "value": "Welcome, demo"},
+    ]
+    saved = client.post(f"/projects/{project['id']}/studio/tests", json={"name": "Sign in", "steps": steps}).json()
+    assert client.post("/workflow/plan-and-execute", json={"test_case_id": saved["id"]}).json()["status"] == "PASSED"
+
+    publish("sign-in-v2")
+    healed = client.post("/workflow/plan-and-execute", json={"test_case_id": saved["id"]}).json()
+    assert healed["status"] == "HEALED", healed.get("error_message")
+
+    [heal] = [h for h in client.get("/heals").json()["heals"] if h["test_case_id"] == saved["id"]]
+    assert heal["original"] == "#login"
+    res = client.post(f"/heals/{heal['execution_id']}/review", json={"original_locator": "#login", "decision": "reject"})
+    assert res.status_code == 200, res.text
+
+    again = client.post("/workflow/plan-and-execute", json={"test_case_id": saved["id"]}).json()
+    assert again["status"] == "FAILED"
+    assert "a reviewer rejected healing this step" in again["error_message"]

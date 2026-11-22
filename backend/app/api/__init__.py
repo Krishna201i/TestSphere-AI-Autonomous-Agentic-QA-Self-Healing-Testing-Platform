@@ -4,6 +4,7 @@ TestSphere-AI — API Package.
 
 from app.api.applications import router as applications_router
 from app.api.audit import router as audit_router
+from app.api.heals import router as heals_router
 from app.api.health import router as health_router
 from app.api.ingest import router as ingest_router
 from app.api.integrations import router as integrations_router
@@ -33,6 +34,7 @@ __all__ = [
     "studio_router",
     "system_router",
     "audit_router",
+    "heals_router",
     "health_router",
     "projects_router",
     "security_router",

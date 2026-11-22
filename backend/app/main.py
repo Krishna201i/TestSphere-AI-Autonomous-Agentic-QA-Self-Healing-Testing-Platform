@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api import (
     applications_router,
     audit_router,
+    heals_router,
     health_router,
     ingest_router,
     integrations_router,
@@ -152,6 +153,7 @@ api_routers = [
     shared_reports_router,
     webhooks_router,
     studio_router,
+    heals_router,
 ]
 for router in api_routers:
     app.include_router(router, prefix="/api")
