@@ -1,0 +1,20 @@
+case,held_out,page,planner,saveable,steps,healthy_pass,bug,caught,instruction
+sign-in,False,/login,rules,True,6,True,login-rejects-valid,True,Log in with demo@testsphere.test and password Correct-Horse-7 and check the page shows Signed in as demo@testsphere.test
+wrong-password,False,/login,rules,True,4,True,login-accepts-wrong-password,True,Log in with demo@testsphere.test and password Wrong-Pass-123 and check an error message is shown
+wrong-password,False,/login,rules,True,4,True,login-no-error-message,True,Log in with demo@testsphere.test and password Wrong-Pass-123 and check an error message is shown
+empty-submit,False,/login,rules,True,2,True,login-empty-submit,True,Click Sign in without filling anything and check the page still shows Sign in to your account
+log-out,False,/login,rules,True,8,True,logout-broken,True,"Log in with demo@testsphere.test and password Correct-Horse-7, click Log out, open /account and check the page does not show Signed in as"
+reload,False,/login,rules,True,7,True,session-lost-on-reload,True,"Log in with demo@testsphere.test and password Correct-Horse-7, reload the page and check it still shows Signed in as demo@testsphere.test"
+password-hidden,False,/login,rules,True,1,True,password-visible,True,Check the password field hides what is typed
+sign-up,False,/signup,rules,True,9,True,signup-broken,True,"Sign up with name Ann Lee, email ann.lee@testsphere.test, password Strong-Pass-42, confirm Strong-Pass-42, accept the terms and check the page shows Account created"
+sign-up,False,/signup,rules,True,9,True,signup-no-confirmation,True,"Sign up with name Ann Lee, email ann.lee@testsphere.test, password Strong-Pass-42, confirm Strong-Pass-42, accept the terms and check the page shows Account created"
+password-mismatch,False,/signup,rules,True,7,True,signup-mismatch-accepted,True,"Sign up with name Ann Lee, email ann.lee@testsphere.test, password Strong-Pass-42 and confirm Other-Pass-99, accept the terms and check the page does not show Account created"
+duplicate-email,False,/signup,rules,True,7,True,signup-duplicate-crash,True,"Sign up with name Demo, email demo@testsphere.test, password Strong-Pass-42, confirm Strong-Pass-42, accept the terms and check the page shows already exists"
+invalid-email,False,/signup,rules,True,7,True,signup-invalid-email-accepted,True,"Sign up with name Ann Lee, email not-an-email, password Strong-Pass-42, confirm Strong-Pass-42, accept the terms and check the page does not show Account created"
+store-sign-in,True,/store/login,rules,True,6,True,login-rejects-valid,True,Sign in using demo@testsphere.test with password Correct-Horse-7 then verify that the page says Your account
+bad-login,True,/store/login,rules,True,4,True,login-accepts-wrong-password,True,Try to sign in with demo@testsphere.test and password nope-nope-1 and make sure an error is displayed
+bad-login,True,/store/login,rules,True,4,True,login-no-error-message,True,Try to sign in with demo@testsphere.test and password nope-nope-1 and make sure an error is displayed
+signup-welcome,True,/signup,rules,True,9,True,signup-broken,True,"Create an account with name Bo Chen, email bo.chen@testsphere.test, password Lime-Tree-88, confirm Lime-Tree-88, agree to the terms and ensure the page shows Welcome aboard"
+signup-welcome,True,/signup,rules,True,9,True,signup-no-confirmation,True,"Create an account with name Bo Chen, email bo.chen@testsphere.test, password Lime-Tree-88, confirm Lime-Tree-88, agree to the terms and ensure the page shows Welcome aboard"
+signup-dup,True,/signup,rules,True,7,True,signup-duplicate-crash,True,"Register with name Demo, email demo@testsphere.test, password Lime-Tree-88, confirm Lime-Tree-88, accept the terms and check that an error message is shown"
+account-after-reload,True,/login,rules,True,7,True,session-lost-on-reload,False,"Log in with demo@testsphere.test and password Correct-Horse-7, refresh and confirm the page still shows Your account"

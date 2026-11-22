@@ -44,7 +44,7 @@ function saveBlob(blob, name) {
 }
 
 /** An artifact image fetched with the sign-in token; click to enlarge. */
-function Screenshot({ executionId, artifactKey, alt }) {
+export function Screenshot({ executionId, artifactKey, alt }) {
   const [url, setUrl] = useState(null);
   const [error, setError] = useState(null);
   const dialog = useRef(null);

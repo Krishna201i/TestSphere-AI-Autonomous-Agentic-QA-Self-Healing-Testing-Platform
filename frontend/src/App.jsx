@@ -4,6 +4,7 @@ import { WorkspaceProvider, useWorkspace } from './state/Workspace';
 import { AuthProvider, useAuth } from './state/Auth';
 import { healthStats } from './lib/derive';
 import TopNav, { PAGES } from './components/TopNav';
+import Sidebar from './components/Sidebar';
 import CommandCenter from './pages/CommandCenter';
 import Privacy, { PrivacyStandalone } from './pages/Privacy';
 import { AuthGate } from './pages/Login';
@@ -18,6 +19,16 @@ const Profile = lazy(() => import('./pages/Profile'));
 const PipelineVisualizer = lazy(() => import('./pages/PipelineVisualizer'));
 const AuditLogs = lazy(() => import('./pages/AuditLogs'));
 const RunDetail = lazy(() => import('./pages/RunDetail'));
+const TestRuns = lazy(() => import('./pages/TestRuns'));
+const AIAgents = lazy(() => import('./pages/AIAgents'));
+const SelfHealing = lazy(() => import('./pages/SelfHealing'));
+const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
+const Schedules = lazy(() => import('./pages/Schedules'));
+
+/** #/runs lists the runs; #/runs/<run>[/<execution>] opens one. */
+function Runs(props) {
+  return props.params?.tab ? <RunDetail {...props} /> : <TestRuns {...props} />;
+}
 
 /** Shown while the API is up but its database is not — explains why actions fail. */
 function DatabaseBanner() {
@@ -81,7 +92,11 @@ const VIEWS = {
   audit: AuditLogs,
   profile: Profile,
   privacy: Privacy,
-  runs: RunDetail,
+  runs: Runs,
+  agents: AIAgents,
+  healing: SelfHealing,
+  integrations: IntegrationsPage,
+  schedules: Schedules,
 };
 
 // Older page ids (links inside cards, bookmarks) → where they live now
@@ -95,7 +110,7 @@ const ALIASES = {
 };
 
 // Reachable by link (profile menu), not shown as a nav pill
-const EXTRA_PAGES = [{ id: 'profile', label: 'Profile' }, { id: 'privacy', label: 'Privacy' }, { id: 'runs', label: 'Run' }];
+const EXTRA_PAGES = [{ id: 'privacy', label: 'Privacy' }];
 // Pages whose address carries a sub-path: #/security/<tab>, #/runs/<run>[/<execution>]
 const SUB_PATH = ['security', 'runs'];
 
@@ -168,19 +183,26 @@ function Dashboard({ uid }) {
     if (!samePage) window.scrollTo({ top: 0 }); // e.g. opening a test inside a run keeps your place
   }, []);
 
+  const [menuOpen, setMenuOpen] = useState(false);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
   const View = VIEWS[page];
   return (
     <WorkspaceProvider uid={uid}>
-      <TopNav page={page} onNavigate={navigate} />
-      <DatabaseBanner />
-      <AccountBanner />
-      <main>
-        <PageErrorBoundary key={page}>
-          <Suspense fallback={<div className="empty" role="status">Loading…</div>}>
-            <View onNavigate={navigate} params={params} />
-          </Suspense>
-        </PageErrorBoundary>
-      </main>
+      <div className="shell">
+        <Sidebar page={page} onNavigate={navigate} open={menuOpen} onClose={closeMenu} />
+        <div className="shell-main">
+          <TopNav page={page} onNavigate={navigate} onMenu={() => setMenuOpen(true)} />
+          <DatabaseBanner />
+          <AccountBanner />
+          <main>
+            <PageErrorBoundary key={page}>
+              <Suspense fallback={<div className="empty" role="status">Loading…</div>}>
+                <View onNavigate={navigate} params={params} />
+              </Suspense>
+            </PageErrorBoundary>
+          </main>
+        </div>
+      </div>
     </WorkspaceProvider>
   );
 }

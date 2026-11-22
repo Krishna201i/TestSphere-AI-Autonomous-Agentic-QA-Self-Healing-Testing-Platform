@@ -27,8 +27,13 @@ WCAG_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]
 pytestmark = pytest.mark.skipif(not DIST.exists(), reason="dashboard not built (cd frontend && npm run build)")
 
 PAGES = [
-    ("", "#workflow-title"),
+    ("", "h1.hero-title"),
     ("autopilot", "h1:has-text('Autopilot')"),
+    ("runs", "h1:has-text('Test Runs')"),
+    ("agents", "h1:has-text('AI Agents')"),
+    ("healing", "h1:has-text('Self-Healing')"),
+    ("integrations", "h1:has-text('Integrations')"),
+    ("schedules", "h1:has-text('Schedules')"),
     ("studio", "h1:has-text('Test Studio')"),
     ("reports", "h1:has-text('Reports')"),
     ("security/attacker", "h1:has-text('AI Attacker Agent')"),
@@ -210,7 +215,18 @@ def test_loop_follows_a_running_pipeline(server, browser):
            "summary": None, "tests": [], "regressions": []}
     page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900})
     page.route("**/api/pipelines/runs?*", lambda r: r.fulfill(json=[run]))
+    # Dashboard: the running stage, the run and its agents
     page.goto(server)
+    page.wait_for_selector(".stage-card.running")
+    assert page.locator(".stage-card.running").count() == 1
+    assert "AI QA Agent" in page.locator(".stage-card.running").inner_text()
+    assert page.locator(".stage-card.done").count() >= 1
+    assert "Run #7" in page.locator("section.card:has(.stage-row)").inner_text()
+    assert page.locator(".live-card").get_by_text("Live run #7").count() == 1
+    agents = page.locator(".agent-list li")
+    assert "Active" in agents.filter(has_text="QA Execution Agent").inner_text()
+    # Pipeline page: the loop diagram
+    page.goto(f"{server}/#/visualizer")
     page.wait_for_selector(".loop-node.running")
     assert page.locator(".loop .loop-node.running").count() == 1
     assert "AI QA Agent" in page.locator(".loop .loop-node.running").inner_text()
@@ -326,6 +342,9 @@ def test_deployments_show_steps_and_drive_loop_stage_6(server, browser):
     assert [f"{v['id']} {[n['target'] for n in v['nodes']]}" for v in violations] == []
 
     page.goto(f"{server}/#/")
+    page.wait_for_selector(".stage-card")
+    assert "Rolled back" in page.locator(".stage-card").filter(has_text="Verified Deploy").inner_text()
+    page.goto(f"{server}/#/visualizer")
     page.wait_for_selector(".loop .loop-node")
     stage6 = page.locator(".loop .loop-node").filter(has_text="Verified Deploy")
     assert "Rolled back" in stage6.inner_text()
@@ -339,7 +358,7 @@ def test_the_dashboard_runs_under_its_own_content_security_policy(server, browse
     violations: list[str] = []
     page.on("console", lambda m: violations.append(m.text) if "Content Security Policy" in m.text else None)
     page.on("pageerror", lambda e: violations.append(str(e)))
-    for route in ("", "autopilot", "reports", "security/remediation", "visualizer", "privacy"):
+    for route in ("", "autopilot", "runs", "healing", "reports", "security/remediation", "visualizer", "privacy"):
         page.goto(f"{server}/#/{route}")
         page.wait_for_timeout(800)
     assert "content-security-policy" in page.evaluate("() => fetch('/api/health').then(r => [...r.headers.keys()].join(','))")

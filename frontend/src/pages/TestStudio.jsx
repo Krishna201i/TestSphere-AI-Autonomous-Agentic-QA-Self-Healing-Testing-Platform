@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, Download, Play, Plus, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Download, FileCode2, GitBranch, Lightbulb, Play, Plus, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import {
-  draftStudioTest, exportPlaywright, getStudioTests, planAndExecute, saveStudioTest, updateStudioTest, verifyStudioSteps,
+  draftStudioTest, exportPlaywright, getStudioTests, importPlaywright, importPlaywrightRepo, planAndExecute, saveStudioTest,
+  suggestStudioFlows, updateStudioTest, verifyStudioSteps,
 } from '../services/api';
 import { timeAgo } from '../lib/derive';
 
@@ -131,12 +132,36 @@ export default function TestStudio({ onNavigate }) {
     }
   }
 
+  const draftFrom = (text) => act('draft', async () => {
+    const res = await draftStudioTest(project.id, { instruction: text, start_path: startPath || null });
+    setDraft({ ...res, steps: editable(res.steps), editingId: null });
+  });
   const onDraft = (e) => {
     e.preventDefault();
-    act('draft', async () => {
-      const res = await draftStudioTest(project.id, { instruction, start_path: startPath || null });
-      setDraft({ ...res, steps: editable(res.steps), editingId: null });
-    });
+    draftFrom(instruction);
+  };
+
+  const [flows, setFlows] = useState(null);
+  const onSuggest = () => act('suggest', async () => setFlows(await suggestStudioFlows(project.id)));
+  const pickFlow = (f) => {
+    setInstruction(f.instruction);
+    draftFrom(f.instruction);
+    window.scrollTo({ top: 0 });
+  };
+
+  const [imported, setImported] = useState(null);
+  const onImportFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    act('import', async () => setImported(await importPlaywright(project.id, await file.text(), file.name)));
+  };
+  const onImportRepo = () => act('import', async () => setImported(await importPlaywrightRepo(project.id)));
+  const reviewImported = (t) => {
+    setDraft({ name: t.name, instruction: null, steps: editable(t.steps), source: 'import',
+      note: t.not_imported.length ? `${t.not_imported.length} line(s) of the original test could not be imported; add them as steps if they matter.` : null,
+      not_covered: t.not_imported, problems: t.problems, quarantine: t.quarantine, editingId: null });
+    window.scrollTo({ top: 0 });
   };
 
   const onVerify = () => act('verify', async () => {
@@ -232,16 +257,78 @@ export default function TestStudio({ onNavigate }) {
         {error && <div className="alert-banner inline" role="alert">{error}</div>}
       </section>
 
+      <div className="grid-2">
+        <section className="card">
+          <div className="card-head">
+            <h3><Lightbulb size={16} aria-hidden="true" /> Suggested tests</h3>
+            <button type="button" className="btn btn-sm" disabled={!project || busy === 'suggest'} onClick={onSuggest}>
+              {busy === 'suggest' ? 'Reading your code and page…' : flows ? 'Suggest again' : 'Suggest from my code'}
+            </button>
+          </div>
+          <p className="card-sub">The flows your users depend on most, from the project's repository and its live page.</p>
+          {flows?.note && <p className="hint m-0">{flows.note}</p>}
+          {flows && (flows.flows.length === 0 ? <div className="empty">No flows found on this page or in its routes.</div> : (
+            <ul className="feed rich">
+              {flows.flows.map((f) => (
+                <li key={f.name + f.instruction}>
+                  <span className={`pill ${f.risk === 'high' ? 'red' : f.risk === 'medium' ? 'orange' : 'gray'}`}>{f.risk}</span>
+                  <span className="stack-sm">
+                    <b>{f.name}</b>
+                    <span className="hint">{f.why}</span>
+                    <span className="small">“{f.instruction}”</span>
+                  </span>
+                  <button type="button" className="btn btn-sm btn-primary" disabled={busy === 'draft'} onClick={() => pickFlow(f)}
+                    aria-label={`Write the steps for ${f.name}`}>Write steps</button>
+                </li>
+              ))}
+            </ul>
+          ))}
+        </section>
+
+        <section className="card">
+          <div className="card-head"><h3><FileCode2 size={16} aria-hidden="true" /> Import Playwright tests</h3></div>
+          <p className="card-sub">Your existing tests become self-healing TestSphere tests. Files are read as text; nothing in them runs.</p>
+          <div className="row">
+            <label className="btn btn-sm">
+              <Upload size={14} aria-hidden="true" /> Upload a .spec file
+              <input type="file" className="visually-hidden" accept=".ts,.js,.mjs,.cjs,.tsx,.jsx" onChange={onImportFile} disabled={!project || busy === 'import'} />
+            </label>
+            <button type="button" className="btn btn-sm" disabled={!project?.repo_url || busy === 'import'} onClick={onImportRepo}
+              title={project?.repo_url ? project.repo_url : 'Add a repository to the project first'}>
+              <GitBranch size={14} aria-hidden="true" /> {busy === 'import' ? 'Reading…' : 'Import from repository'}
+            </button>
+          </div>
+          {imported && imported.files.map((f) => (
+            <div key={f.file} className="stack-sm">
+              <span className="mono small">{f.file}{f.skipped_tests ? ` · ${f.skipped_tests} skipped test(s) left out` : ''}</span>
+              <ul className="feed rich">
+                {f.tests.map((t) => (
+                  <li key={t.name}>
+                    <FileCode2 size={16} aria-hidden="true" />
+                    <span className="stack-sm">
+                      <b>{t.name}</b>
+                      <span className="hint">{t.steps.length} step(s){t.not_imported.length ? ` · ${t.not_imported.length} line(s) not imported` : ''}
+                        {t.quarantine ? ' · will be quarantined' : ''}</span>
+                    </span>
+                    <button type="button" className="btn btn-sm" onClick={() => reviewImported(t)} aria-label={`Review ${t.name}`}>Review</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </section>
+      </div>
+
       {draft && (
         <section className="card">
           <div className="card-head">
             <h3>{draft.editingId ? 'Edit test' : 'Review the steps'}</h3>
-            {draft.source && <span className={`pill ${draft.source === 'ai' ? 'violet' : 'gray'}`}>{draft.source === 'ai' ? 'Written by AI' : 'Rule-based'}</span>}
+            {draft.source && <span className={`pill ${draft.source === 'ai' ? 'violet' : 'gray'}`}>{{ ai: 'Written by AI', import: 'Imported from Playwright' }[draft.source] || 'Rule-based'}</span>}
           </div>
           {draft.note && <p className="hint m-0">{draft.note}</p>}
           {draft.not_covered?.length > 0 && (
             <div className="alert-banner inline" role="status">
-              <b>Not turned into steps</b> (add them by hand or describe them differently):
+              <b>{draft.source === 'import' ? 'Not imported' : 'Not turned into steps'}</b> (add them by hand or describe them differently):
               <ul className="list">{draft.not_covered.map((p) => <li key={p}>{p}</li>)}</ul>
             </div>
           )}

@@ -13,6 +13,10 @@ locators while the test runs, scans the site for security weaknesses, and turns 
 or a pull request for your repository. Each fix is retested, a verified version can be deployed with automatic
 rollback, and the whole loop runs again on a schedule or on every push.
 
+Write your own tests in plain English in **Test Studio** (or import your Playwright tests), review every heal on
+the **Self-Healing** page, and let the AI agents run on a fallback chain of models (NVIDIA Gemma, Nemotron, Groq,
+Gemini). How each part of the title is delivered: [platform overview](docs/platform-overview.md).
+
 ---
 
 ## The testing loop
@@ -49,12 +53,13 @@ and a dashboard that shows the loop live.
 | Measurement | Result |
 | --- | --- |
 | **Self-healing benchmark** — 277 broken-locator cases (4 pages × every target × 15 mutations), [details](docs/healing-benchmark.md) | Heals **95.7%** of the cases where healing is right with **0 false heals**, and refuses **100%** of the cases where it is wrong. A static fallback chain heals 96.1% but **17.4%** of its heals hit the wrong element. |
+| **Plain-English tests** (Test Studio) — 15 instructions a tester would type, 19 real bugs, [details](docs/studio-eval.md) | **18 of 19** bugs caught with **0 false alarms** (rule-based planner, no AI model); 6 of 7 on held-out instructions it was never tuned on |
 | **Live sites** — the-internet.herokuapp.com, saucedemo.com, practicetestautomation.com, TodoMVC | 4 of 4 run the written goal (log in, add an item) and pass |
 | **Real repositories** — FastAPI, Express and Django RealWorld apps, microblog, Flask | 5 of 5 get a fix patch that applies to a fresh clone and compiles |
 | **Security and robustness** — SSRF, access control, input limits, webhook signatures, rate limits | 52 of 52 checks pass |
 | **Load** — one API worker, [details](docs/load-test.md) | ~600–700 requests/s from 1 to 100 concurrent clients (p95 250 ms, no errors); 8 pipeline runs at once finish in 27 s at ~460 MB |
 | **Accessibility** | WCAG 2.1 AA (axe) on every dashboard page, light and dark |
-| **Automated tests** | 1,900+ backend, engine and end-to-end tests, plus frontend unit tests, in CI; the healing benchmark gates every change (any false heal fails the build), and the AI layer is covered end to end: no false heal through the AI healer, no harm from a page's injected instructions |
+| **Automated tests** | 2,000+ backend, engine and end-to-end tests and 95 frontend unit tests, in CI; the healing and Test Studio benchmarks gate every change (any false heal or false alarm fails the build), and the AI layer is covered end to end: no false heal through the AI healer, no harm from a page's injected instructions |
 
 ---
 
@@ -183,13 +188,15 @@ Every setting, the Dockerfile, the worker, Firestore rules and indexes, and CI a
 
 ## Documentation
 
+- [Platform overview](docs/platform-overview.md): the five pillars, architecture diagram and results
+- [Demo script](docs/demo-script.md): a 10-minute walkthrough
 - [Backend architecture & API](docs/backend-architecture.md)
 - [Browser execution engine](docs/engine-architecture.md)
 - [Self-healing & orchestration](docs/self-healing-orchestration.md)
 - [Integration guide](docs/integration-guide.md)
 - [MCP server for coding agents](docs/mcp-server.md)
 - [Deployment & operations](docs/deployment-operations.md)
-- [Healing benchmark](docs/healing-benchmark.md) · [Load test](docs/load-test.md)
+- [Healing benchmark](docs/healing-benchmark.md) · [Test Studio benchmark](docs/studio-eval.md) · [Load test](docs/load-test.md)
 - [Contributing](docs/CONTRIBUTING.md)
 
 ## Security and privacy

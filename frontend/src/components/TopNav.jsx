@@ -1,43 +1,22 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Bell, ChevronDown, LogOut, Monitor, Moon, Server, Sun, UserRound } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Bell, ChevronDown, Github, LogOut, Menu, Monitor, Moon, Search, Server, Sun, UserRound } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { useAuth } from '../state/Auth';
 import { THEMES, useTheme } from '../state/theme';
 import { API_BASE_LABEL } from '../services/api';
 import { healthStats, pct, timeAgo, toDate } from '../lib/derive';
+import { searchWorkspace } from '../lib/dashboard';
+import { NAV, NAV_SECONDARY } from './Sidebar';
 
+export { Logo } from './Sidebar';
+
+/** Every page and its title (the sidebar's pages, their sub-pages, and pages reached by link). */
 export const PAGES = [
-  { id: 'home', label: 'Home' },
-  { id: 'autopilot', label: 'Autopilot' },
-  { id: 'studio', label: 'Test Studio' },
-  { id: 'reports', label: 'Reports' },
-  { id: 'security', label: 'Security' },
-  { id: 'visualizer', label: 'Visualizer' },
-  { id: 'audit', label: 'Audit' },
-];
+  ...NAV.flatMap((n) => (n.children ? n.children.map((c) => ({ id: c.id, label: c.id === 'agents' ? 'AI Agents' : c.label })) : [n])),
+  ...NAV_SECONDARY,
+].filter((p, i, all) => all.findIndex((q) => q.id === p.id) === i).map(({ id, label }) => ({ id, label }));
 
 const SEEN_KEY = 'testsphere.notifications.seen';
-
-export function Logo({ size = 40 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
-      <defs>
-        <linearGradient id="logoA" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#7c5cf5" />
-          <stop offset="100%" stopColor="#2d2a8c" />
-        </linearGradient>
-        <linearGradient id="logoB" x1="0" y1="1" x2="1" y2="0">
-          <stop offset="0%" stopColor="#4f7df0" />
-          <stop offset="100%" stopColor="#a78bfa" />
-        </linearGradient>
-      </defs>
-      <path d="M24 3 42 13.5v21L24 45 6 34.5v-21Z" fill="url(#logoA)" />
-      <path d="M24 3 42 13.5 24 24 6 13.5Z" fill="url(#logoB)" opacity="0.9" />
-      <path d="M24 24v21L6 34.5v-21Z" fill="#3b2f9e" opacity="0.85" />
-      <path d="M24 13 33 18.2v10.5L24 34l-9-5.3V18.2Z" fill="#fff" opacity="0.92" />
-    </svg>
-  );
-}
 
 /** Menu anchored under its trigger; closes on outside click or Escape. */
 function Popover({ open, onClose, children, label, size = '' }) {
@@ -70,7 +49,73 @@ function loadSeen() {
   }
 }
 
-export default function TopNav({ page, onNavigate }) {
+/** Search projects, runs, tests and findings; Ctrl/Cmd+K focuses it. */
+function SearchBox({ onNavigate }) {
+  const ws = useWorkspace();
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [cursor, setCursor] = useState(0);
+  const input = useRef(null);
+  const hits = useMemo(() => searchWorkspace(ws, query), [ws, query]);
+  const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        input.current?.focus();
+        setOpen(true);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+  useEffect(() => setCursor(0), [query]);
+
+  function choose(hit) {
+    setOpen(false);
+    setQuery('');
+    onNavigate(hit.page, hit.tab ? { tab: hit.tab } : null);
+  }
+
+  function onKeyDown(e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setCursor((c) => Math.min(c + 1, hits.length - 1)); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setCursor((c) => Math.max(c - 1, 0)); }
+    if (e.key === 'Enter' && hits[cursor]) { e.preventDefault(); choose(hits[cursor]); }
+    if (e.key === 'Escape') { setOpen(false); input.current?.blur(); }
+  }
+
+  return (
+    <div className="search-box menu-anchor">
+      <label className="search-field">
+        <Search size={16} aria-hidden="true" />
+        <span className="visually-hidden">Search projects, runs, tests and issues</span>
+        <input ref={input} type="search" value={query} placeholder="Search projects, runs, issues…" role="combobox"
+          aria-expanded={open && query.trim() !== ''} aria-controls="search-results" aria-autocomplete="list"
+          aria-activedescendant={open && hits[cursor] ? `search-hit-${cursor}` : undefined}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)} onKeyDown={onKeyDown} />
+        <span className="kbd" aria-hidden="true">{isMac ? '⌘ K' : 'Ctrl K'}</span>
+      </label>
+      {open && query.trim() !== '' && (
+        <div className="popover search-results" id="search-results" role="listbox" aria-label="Search results">
+          {hits.length === 0 ? <div className="empty">Nothing matches “{query.trim()}”.</div> : hits.map((h, i) => (
+            <button key={`${h.kind}-${h.label}-${i}`} id={`search-hit-${i}`} type="button" role="option" aria-selected={i === cursor}
+              className={`search-hit ${i === cursor ? 'active' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(h)}>
+              <span className="pill gray">{h.kind}</span>
+              <span className="stack-sm">
+                <span>{h.label}</span>
+                {h.detail && <span className="small muted">{h.detail}</span>}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function TopNav({ page, onNavigate, onMenu }) {
   const { health, audit, system, operator, setOperator } = useWorkspace();
   const auth = useAuth();
   const signedIn = auth.mode === 'firebase';
@@ -104,22 +149,18 @@ export default function TopNav({ page, onNavigate }) {
   const status = !h.online ? ['off', 'Offline'] : h.dbDown ? ['warn', 'Degraded'] : ['', 'Operational'];
 
   return (
-    <header className="topbar">
-      <button type="button" className="brand" onClick={() => onNavigate('home')} aria-label="TestSphere AI, home">
-        <Logo size={28} />
-        <span className="brand-name">TestSphere <b>AI</b></span>
+    <header className="topbar shell-top">
+      <button type="button" className="icon-btn menu-btn" aria-label="Open menu" onClick={onMenu}>
+        <Menu size={20} />
       </button>
 
-      <nav className="navpills" aria-label="Main">
-        {PAGES.map((p) => (
-          <button key={p.id} type="button" className={`navpill ${page === p.id ? 'active' : ''}`}
-            aria-current={page === p.id ? 'page' : undefined} onClick={() => onNavigate(p.id)}>
-            {p.label}
-          </button>
-        ))}
-      </nav>
+      <SearchBox onNavigate={onNavigate} />
 
       <div className="topbar-right">
+        <button type="button" className="icon-btn gh-btn" aria-label="GitHub integration" onClick={() => onNavigate('integrations')}>
+          <Github size={18} />
+        </button>
+
         {/* System status and connection details */}
         <div className="menu-anchor" aria-live="polite">
           <button type="button" className="status-chip" aria-expanded={menu.open === 'env'} onClick={() => menu.toggle('env')}

@@ -20,7 +20,7 @@ jobs:
   backend:
     name: Backend (tests, lint, audit)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
@@ -79,6 +79,11 @@ jobs:
       # drop below 90% of the cases it should heal (92.3% today), fails CI
       - name: Healing benchmark gate (quick, 52 cases)
         run: python -m engine.heal_benchmark --quick --gate 0.90
+
+      # Plain-English tests (Test Studio, rule-based planner): any false alarm, or
+      # fewer than 85% of the described bugs caught (95% today), fails CI
+      - name: Test Studio accuracy gate (15 instructions, 19 bugs)
+        run: python -m scripts.studio_eval --rules --gate 0.85 --no-report
 
       - name: Dependency audit
         run: pip-audit -r requirements.txt --require-hashes

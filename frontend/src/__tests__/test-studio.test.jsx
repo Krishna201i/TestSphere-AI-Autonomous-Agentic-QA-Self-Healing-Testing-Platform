@@ -10,6 +10,9 @@ const api = vi.hoisted(() => ({
   updateStudioTest: vi.fn(async () => ({ id: 9 })),
   planAndExecute: vi.fn(),
   exportPlaywright: vi.fn(),
+  suggestStudioFlows: vi.fn(),
+  importPlaywright: vi.fn(),
+  importPlaywrightRepo: vi.fn(),
 }));
 vi.mock('../services/api', async (importOriginal) => ({ ...(await importOriginal()), ...api }));
 
@@ -18,7 +21,7 @@ vi.mock('../state/Workspace', () => ({ useWorkspace: () => ws.current }));
 
 const { default: TestStudio } = await import('../pages/TestStudio');
 
-const SHOP = { id: 1, name: 'Shop', app_url: 'https://shop.example/login' };
+const SHOP = { id: 1, name: 'Shop', app_url: 'https://shop.example/login', repo_url: 'https://github.com/acme/shop' };
 const step = (action, target, value, status) => ({ action, target, value, description: `${action} ${target || ''}`, status, note: null });
 const DRAFT = {
   name: 'Sign in', instruction: 'log in as demo', start_url: SHOP.app_url, source: 'ai', note: null,
@@ -127,5 +130,44 @@ describe('Test Studio', () => {
     fireEvent.change(screen.getByLabelText('What should the test do?'), { target: { value: 'log in' } });
     fireEvent.click(screen.getByRole('button', { name: /write the steps/i }));
     expect((await screen.findByRole('alert')).textContent).toContain('HTTP 503');
+  });
+
+  it('suggests flows from the code and writes the steps for one', async () => {
+    api.suggestStudioFlows.mockResolvedValue({ source: 'ai', note: null, blueprint: { routes: 12 }, flows: [
+      { name: 'Checkout', risk: 'high', why: 'It is where revenue happens.', instruction: 'Add the first product to the cart and check it shows 1 item' },
+    ] });
+    render(<TestStudio onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest from my code' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Write the steps for Checkout' }));
+    await screen.findByText('Review the steps');
+    expect(api.draftStudioTest).toHaveBeenCalledWith(1, { instruction: 'Add the first product to the cart and check it shows 1 item', start_path: null });
+    expect(screen.getByLabelText('What should the test do?').value).toContain('Add the first product');
+  });
+
+  it('imports a Playwright file and opens a test for review, listing what was not imported', async () => {
+    api.importPlaywright.mockResolvedValue({ files: [{ file: 'auth.spec.ts', skipped_tests: 1, tests: [
+      { name: 'signs in', steps: DRAFT.steps, not_imported: ['await helpers.logout(page)'], problems: [], quarantine: false },
+    ] }] });
+    render(<TestStudio onNavigate={vi.fn()} />);
+    const file = new File(["test('signs in', async ({ page }) => {})"], 'auth.spec.ts', { type: 'text/plain' });
+    file.text ??= async () => "test('signs in', async ({ page }) => {})";
+    fireEvent.change(screen.getByLabelText(/Upload a .spec file/), { target: { files: [file] } });
+    expect(await screen.findByText(/1 skipped test/)).toBeTruthy();
+    expect(api.importPlaywright).toHaveBeenCalledWith(1, expect.stringContaining('signs in'), 'auth.spec.ts');
+    fireEvent.click(screen.getByRole('button', { name: 'Review signs in' }));
+    expect(await screen.findByText('Imported from Playwright')).toBeTruthy();
+    expect(screen.getByText('await helpers.logout(page)')).toBeTruthy();
+    expect(screen.getByLabelText('Step 1 element').value).toBe('#user');
+  });
+
+  it('imports every Playwright test of the linked repository', async () => {
+    api.importPlaywrightRepo.mockResolvedValue({ files: [{ file: 'e2e/cart.spec.ts', skipped_tests: 0, tests: [
+      { name: 'adds to cart', steps: DRAFT.steps, not_imported: [], problems: [], quarantine: true },
+    ] }] });
+    render(<TestStudio onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Import from repository/ }));
+    expect(await screen.findByText('adds to cart')).toBeTruthy();
+    expect(screen.getByText(/will be quarantined/)).toBeTruthy();
+    expect(api.importPlaywrightRepo).toHaveBeenCalledWith(1);
   });
 });

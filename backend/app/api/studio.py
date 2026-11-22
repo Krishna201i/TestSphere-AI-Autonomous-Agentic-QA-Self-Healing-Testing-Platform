@@ -279,3 +279,148 @@ def export_playwright(test_id: int, db: Store = Depends(get_db),
     slug = re.sub(r"[^a-z0-9]+", "-", str(tc.get("name") or "test").lower()).strip("-")[:60] or "test"
     return PlainTextResponse(studio.to_playwright(str(tc.get("name") or "Test"), steps),
                              headers={"Content-Disposition": f'attachment; filename="{slug}.spec.ts"'})
+
+
+# ---------------------------------------------------------------------------
+# Codebase-aware: suggested flows and imported Playwright tests
+# ---------------------------------------------------------------------------
+
+
+class SuggestRequest(BaseModel):
+    start_path: str | None = Field(None, max_length=500)
+
+
+class ImportRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=200_000, description="A Playwright test file's contents")
+    filename: str = Field("spec.ts", max_length=200)
+    start_path: str | None = Field(None, max_length=500)
+
+
+MAX_REPO_SPECS = 40
+
+
+def _latest_blueprint(db: Store, project: Record) -> dict[str, Any] | None:
+    from app.models import BLUEPRINTS
+
+    rows = db.find(BLUEPRINTS, project_id=project["id"], order_by="id", descending=True, limit=1)
+    if not rows:
+        return None
+    try:
+        data = json.loads(rows[0].get("data") or "{}")
+    except ValueError:
+        return None
+    return {**data, "_id": rows[0]["id"], "_at": rows[0].get("created_at")} if isinstance(data, dict) else None
+
+
+@router.post("/projects/{project_id}/studio/suggest")
+async def suggest_flows(project_id: int, body: SuggestRequest | None = None, db: Store = Depends(get_db),
+                        user: User = Depends(limit_runs)) -> dict[str, Any]:
+    """The user flows most worth testing, from the project's latest codebase blueprint and its start page."""
+    from app.pipeline.profile import profile_of
+    from app.services import flow_suggest
+
+    project = await asyncio.to_thread(owned_project, db, user, project_id)
+    url = _start_url(project, body.start_path if body else None)
+    analysis = await _analysis(user.uid, url)
+    blueprint = await asyncio.to_thread(_latest_blueprint, db, project)
+
+    source, note, flows = "rules", None, None
+    if _model_enabled():
+        try:
+            from app.orchestration.orchestrator import create_platform_llm_client
+
+            flows = await flow_suggest.model_flows(blueprint, analysis, create_platform_llm_client(),
+                                                   timeout=settings.PIPELINE_AI_PLANNER_TIMEOUT)
+            source = "ai"
+        except Exception as exc:  # noqa: BLE001 - the rules answer instead, and say why
+            logger.warning("Flow suggestions from the model failed: %s", exc)
+            note = f"The AI model could not answer ({type(exc).__name__}); these come from your routes and page."
+    else:
+        note = "No AI model is configured: these come from your routes and the page."
+    if flows is None:
+        flows = flow_suggest.rule_flows(blueprint, analysis, profile_of(project).test_data)
+    if blueprint is None:
+        hint = "Link a repository to the project (Projects, or Integrations) for suggestions from your code too."
+        note = f"{note} {hint}" if note else hint
+    return {"source": source, "note": note, "flows": flows,
+            "blueprint": {"id": blueprint["_id"], "name": blueprint.get("name"), "analyzed_at": blueprint.get("_at"),
+                          "routes": len(blueprint.get("routes") or [])} if blueprint else None}
+
+
+def _imported(parsed: list[dict[str, Any]], analysis: dict[str, Any], url: str) -> list[dict[str, Any]]:
+    """Each parsed file's tests with their steps checked against the start page."""
+    out = []
+    for f in parsed:
+        tests = []
+        for t in f["tests"]:
+            checked = _checked(t["steps"], analysis, url)
+            tests.append({"name": t["name"], "not_imported": t["not_imported"], **checked})
+        out.append({"file": f["file"], "tests": tests, "skipped_tests": f.get("skipped_tests", 0)})
+    return out
+
+
+@router.post("/projects/{project_id}/studio/import")
+async def import_playwright(project_id: int, body: ImportRequest, db: Store = Depends(get_db),
+                            user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """A Playwright test file read as text (never run) and turned into reviewable drafts."""
+    from app.services.playwright_import import parse_spec
+
+    project = await asyncio.to_thread(owned_project, db, user, project_id)
+    url = _start_url(project, body.start_path)
+    parsed = parse_spec(body.text, body.filename.rsplit("/", 1)[-1])
+    if not parsed["tests"]:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="No Playwright tests found: expected test('name', async ({ page }) => { ... }).")
+    return {"files": _imported([parsed], await _analysis(user.uid, url), url)}
+
+
+def _repo_specs(repo_url: str, auth: Any) -> list[dict[str, Any]]:
+    """Clone the repository (the ingestion clone: shallow, limited, no hooks), read its test files, delete it."""
+    from pathlib import Path
+
+    from app.api.ingest import _git_hosts
+    from app.services.playwright_import import MAX_FILE_BYTES, SPEC_FILE, parse_spec
+    from ingestion.source import clone, discard_checkout
+
+    root = clone(repo_url, Path(settings.INGEST_WORKSPACE), _git_hosts(), auth=auth)
+    try:
+        parsed = []
+        for path in sorted(root.rglob("*")):
+            if len(parsed) >= MAX_REPO_SPECS:
+                break
+            rel = path.relative_to(root).as_posix()
+            if not path.is_file() or not SPEC_FILE.search(path.name) or "node_modules/" in rel or path.stat().st_size > MAX_FILE_BYTES:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if "@playwright/test" not in text and "page." not in text:
+                continue  # a Jest or Vitest unit test, not a browser test
+            result = parse_spec(text, rel)
+            if result["tests"]:
+                parsed.append(result)
+        return parsed
+    finally:
+        discard_checkout(root)
+
+
+@router.post("/projects/{project_id}/studio/import-repo")
+async def import_from_repo(project_id: int, body: SuggestRequest | None = None, db: Store = Depends(get_db),
+                           user: User = Depends(limit_runs)) -> dict[str, Any]:
+    """Every Playwright test in the project's repository, as reviewable drafts (nothing in it runs)."""
+    from app.api.integrations import git_auth
+    from ingestion import SourceError
+
+    project = await asyncio.to_thread(owned_project, db, user, project_id)
+    repo = (project.get("repo_url") or "").strip()
+    if not repo:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="This project has no repository: add its Git URL in Projects first.")
+    url = _start_url(project, body.start_path if body else None)
+    try:
+        auth = await asyncio.to_thread(git_auth, db, user.uid, repo)
+        parsed = await asyncio.to_thread(_repo_specs, repo, auth)
+    except SourceError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    if not parsed:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="No Playwright tests found in the repository (*.spec.ts / *.test.js using @playwright/test).")
+    return {"files": _imported(parsed, await _analysis(user.uid, url), url)}
