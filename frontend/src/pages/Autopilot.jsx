@@ -20,15 +20,12 @@ import {
   webhookUrl,
 } from '../services/api';
 import { ResultBadges, ResultDetail, RunSummary } from '../components/TestResult';
-import { timeAgo, timeUntil, urlError } from '../lib/derive';
+import { SCHEDULES, timeAgo, timeUntil, urlError } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
 import { usePaged } from '../lib/usePaged';
 import Pager from '../components/Pager';
 
-export const SCHEDULES = [
-  [null, 'Off'], [15, 'Every 15 min'], [30, 'Every 30 min'], [60, 'Hourly'], [180, 'Every 3 hours'],
-  [360, 'Every 6 hours'], [720, 'Every 12 hours'], [1440, 'Daily'], [10080, 'Weekly'],
-];
+export { SCHEDULES } from '../lib/derive';
 export const TRIGGER_LABEL = { manual: 'Manual', schedule: 'Scheduled', webhook: 'GitHub push' };
 const ACTIVE = ['queued', 'running'];
 

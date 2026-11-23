@@ -1,22 +1,26 @@
 import React, { useEffect, useId, useState } from 'react';
 import {
-  CalendarClock, ChartColumn, ChevronRight, CirclePlay, Github, Layers, LayoutDashboard, Puzzle, ScrollText, Settings,
-  Shield, Sparkles, Wand2,
+  CalendarClock, ChartColumn, ChevronRight, Github, Layers, LayoutDashboard, Puzzle, ScrollText, Settings, Sparkles, Target,
 } from 'lucide-react';
 import { getIntegrations } from '../services/api';
 
 /** The sidebar's pages, in order.  `children` open under their parent. */
 export const NAV = [
+  // Everything starts on the dashboard: add a project, watch each step, act on the results
   { id: 'home', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'autopilot', label: 'Projects', icon: Layers },
-  { id: 'runs', label: 'Test Runs', icon: CirclePlay },
+  { id: 'studio', label: 'Test Studio', icon: Target },
   {
-    id: 'agents', label: 'AI Agents', icon: Sparkles,
-    children: [{ id: 'agents', label: 'Overview' }, { id: 'studio', label: 'Test Studio' }, { id: 'visualizer', label: 'Pipeline' }],
+    id: 'results', label: 'Results', icon: ChartColumn, open: true,
+    children: [
+      { id: 'runs', label: 'Test Runs' }, { id: 'healing', label: 'Self-Healing' }, { id: 'security', label: 'Security' },
+      { id: 'reports', label: 'Reports' },
+    ],
   },
-  { id: 'security', label: 'Security', icon: Shield },
-  { id: 'healing', label: 'Self-Healing', icon: Wand2 },
-  { id: 'reports', label: 'Reports', icon: ChartColumn },
+  {
+    id: 'insights', label: 'Insights', icon: Sparkles,
+    children: [{ id: 'overview', label: 'Overview' }, { id: 'agents', label: 'AI Agents' }, { id: 'visualizer', label: 'Pipeline' }],
+  },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
 ];
 export const NAV_SECONDARY = [
@@ -77,7 +81,7 @@ function Link({ item, page, onNavigate, sub = false }) {
 export default function Sidebar({ page, onNavigate, open, onClose }) {
   const github = useGitHub();
   const inGroup = (item) => item.children?.some((c) => c.id === page);
-  const [expanded, setExpanded] = useState(() => NAV.filter(inGroup).map((i) => i.id));
+  const [expanded, setExpanded] = useState(() => NAV.filter((i) => i.open || inGroup(i)).map((i) => i.id));
   useEffect(() => {
     const group = NAV.find(inGroup);
     if (group) setExpanded((cur) => (cur.includes(group.id) ? cur : [...cur, group.id]));

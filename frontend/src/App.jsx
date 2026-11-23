@@ -5,13 +5,14 @@ import { AuthProvider, useAuth } from './state/Auth';
 import { healthStats } from './lib/derive';
 import TopNav, { PAGES } from './components/TopNav';
 import Sidebar from './components/Sidebar';
-import CommandCenter from './pages/CommandCenter';
+import Home from './pages/Home';
 import Privacy, { PrivacyStandalone } from './pages/Privacy';
 import { AuthGate } from './pages/Login';
 
 // The home page and Privacy (also shown signed out) come with the app; the
 // other pages load when first opened, so the first visit downloads less
 const Autopilot = lazy(() => import('./pages/Autopilot'));
+const CommandCenter = lazy(() => import('./pages/CommandCenter'));
 const TestStudio = lazy(() => import('./pages/TestStudio'));
 const Reports = lazy(() => import('./pages/Reports'));
 const Security = lazy(() => import('./pages/Security'));
@@ -83,7 +84,8 @@ class PageErrorBoundary extends React.Component {
 }
 
 const VIEWS = {
-  home: CommandCenter,
+  home: Home,
+  overview: CommandCenter,
   autopilot: Autopilot,
   studio: TestStudio,
   reports: Reports,

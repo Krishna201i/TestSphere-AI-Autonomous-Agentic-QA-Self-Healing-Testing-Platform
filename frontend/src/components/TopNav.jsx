@@ -12,7 +12,7 @@ export { Logo } from './Sidebar';
 
 /** Every page and its title (the sidebar's pages, their sub-pages, and pages reached by link). */
 export const PAGES = [
-  ...NAV.flatMap((n) => (n.children ? n.children.map((c) => ({ id: c.id, label: c.id === 'agents' ? 'AI Agents' : c.label })) : [n])),
+  ...NAV.flatMap((n) => (n.children ? n.children : [n])),
   ...NAV_SECONDARY,
 ].filter((p, i, all) => all.findIndex((q) => q.id === p.id) === i).map(({ id, label }) => ({ id, label }));
 

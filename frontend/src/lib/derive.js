@@ -351,3 +351,9 @@ export function groupedResults(tests = []) {
       .sort((a, b) => (rank[resultLabel(a)] ?? 1) - (rank[resultLabel(b)] ?? 1) || a.execution_id - b.execution_id),
   })).filter((g) => g.tests.length);
 }
+
+/** How often a project runs again by itself: [minutes, label]. */
+export const SCHEDULES = [
+  [null, 'Off'], [15, 'Every 15 min'], [30, 'Every 30 min'], [60, 'Hourly'], [180, 'Every 3 hours'],
+  [360, 'Every 6 hours'], [720, 'Every 12 hours'], [1440, 'Daily'], [10080, 'Weekly'],
+];

@@ -27,7 +27,8 @@ WCAG_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]
 pytestmark = pytest.mark.skipif(not DIST.exists(), reason="dashboard not built (cd frontend && npm run build)")
 
 PAGES = [
-    ("", "h1.hero-title"),
+    ("", "h1.home-title"),
+    ("overview", "h1.hero-title"),
     ("autopilot", "h1:has-text('Autopilot')"),
     ("runs", "h1:has-text('Test Runs')"),
     ("agents", "h1:has-text('AI Agents')"),
@@ -216,7 +217,7 @@ def test_loop_follows_a_running_pipeline(server, browser):
     page = browser.new_page(bypass_csp=True, viewport={"width": 1280, "height": 900})
     page.route("**/api/pipelines/runs?*", lambda r: r.fulfill(json=[run]))
     # Dashboard: the running stage, the run and its agents
-    page.goto(server)
+    page.goto(f"{server}/#/overview")
     page.wait_for_selector(".stage-card.running")
     assert page.locator(".stage-card.running").count() == 1
     assert "AI QA Agent" in page.locator(".stage-card.running").inner_text()
@@ -341,7 +342,7 @@ def test_deployments_show_steps_and_drive_loop_stage_6(server, browser):
     violations = page.evaluate("tags => axe.run(document, {runOnly: {type: 'tag', values: tags}}).then(r => r.violations)", WCAG_AA)
     assert [f"{v['id']} {[n['target'] for n in v['nodes']]}" for v in violations] == []
 
-    page.goto(f"{server}/#/")
+    page.goto(f"{server}/#/overview")
     page.wait_for_selector(".stage-card")
     assert "Rolled back" in page.locator(".stage-card").filter(has_text="Verified Deploy").inner_text()
     page.goto(f"{server}/#/visualizer")
