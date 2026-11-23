@@ -46,6 +46,7 @@ from backend.models import (
 from backend.models.test_execution import TestExecutionStatus
 from backend.notify import notify_run
 from backend.pipeline import ai_plan, suite
+from backend.pipeline.flakiness import FlakinessClassification, analyze_flakiness
 from backend.services.security_service import record_audit
 from backend.services.test_case_service import TestCaseService
 from backend.services.test_execution_service import TestExecutionService
@@ -557,9 +558,14 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
                                    limit=FLAKY_WINDOW + 5)
                 if r["id"] < state.id and r["status"] in ("passed", "failed")]
     previous = finished[0] if finished else None
-    flaky = flaky_tests([r.get("tests") or [] for r in reversed(finished[:FLAKY_WINDOW])], results)
+    reports = analyze_flakiness([r.get("tests") or [] for r in reversed(finished[:FLAKY_WINDOW])], results)
+    flaky = {tc for tc, rep in reports.items() if rep.classification == FlakinessClassification.LIKELY_FLAKY}
     for r in results:
-        r["flaky"] = r["test_case_id"] in flaky
+        tc_id = r["test_case_id"]
+        rep = reports.get(tc_id)
+        r["flaky"] = tc_id in flaky
+        if rep and rep.classification == FlakinessClassification.LIKELY_FLAKY:
+            r["flaky_explanation"] = rep.explanation
     before = {t["test_case_id"]: t["status"] for t in (previous or {}).get("tests", [])}
     regressions = [
         {"kind": "test", "name": r["name"], "test_case_id": r["test_case_id"], "was": before[r["test_case_id"]],
