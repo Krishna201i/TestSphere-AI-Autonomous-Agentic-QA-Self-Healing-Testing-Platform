@@ -203,12 +203,12 @@ def test_test_studio_review_is_accessible_and_fits_a_phone(server, browser, sche
         page.close()
 
 
-STAGE_KEYS = ["codebase", "analyze", "plan", "execute", "heal", "security", "report"]
+STAGE_KEYS = ["codebase", "analyze", "plan", "execute", "heal", "security", "fix", "report"]
 
 
 def test_loop_follows_a_running_pipeline(server, browser):
     """The loop marks the running stage, the done ones before it, and shows the run in its hub."""
-    statuses = ["done", "done", "done", "running", "pending", "pending", "pending"]
+    statuses = ["done", "done", "done", "running", "pending", "pending", "pending", "pending"]
     run = {"id": 7, "project_id": 1, "project_name": "Shop", "status": "running", "trigger": "manual",
            "created_at": "2026-10-24T10:00:00Z", "started_at": "2026-10-24T10:00:00Z", "finished_at": None,
            "stages": [{"key": k, "label": k.title(), "status": st, "detail": None} for k, st in zip(STAGE_KEYS, statuses, strict=True)],

@@ -6,6 +6,7 @@ scheduler loop and the GitHub push webhook.
 
 import asyncio
 import json
+import textwrap
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -15,7 +16,7 @@ from fastapi.testclient import TestClient
 from app.api.webhooks import signature_for
 from app.config import settings
 from app.main import app
-from app.models import BLUEPRINTS, PIPELINE_RUNS, PROJECTS, TEST_CASES
+from app.models import BLUEPRINTS, FIX_PATCHES, PIPELINE_RUNS, PROJECTS, TEST_CASES
 from app.pipeline import runner, scheduler, suite
 from app.services.project_service import ProjectService
 from security import OutOfScopeError, PassiveScanner, ScopePolicy
@@ -110,9 +111,23 @@ def stub_network(monkeypatch):
     async def no_fallback(base_url):
         return state.get("fallback", set())
 
+    from app.api import patches
+    from ingestion import SourceError, is_git_url
+
+    real_generate = patches.generate
+
+    def offline_generate(repo, *args, **kwargs):
+        # The fix stage clones the project's repository: never over the network
+        # in tests (a local folder still builds a real patch)
+        if is_git_url(repo):
+            state.setdefault("clones", []).append(repo)
+            raise SourceError(f"offline in tests: {repo}")
+        return real_generate(repo, *args, **kwargs)
+
     monkeypatch.setattr("app.pipeline.runner.URLAnalyzerService.analyze_live_website", analyze)
     monkeypatch.setattr(runner, "_reachable", reachable)
     monkeypatch.setattr(runner, "_fallback_digests", no_fallback)
+    monkeypatch.setattr(patches, "generate", offline_generate)
     return state
 
 
@@ -152,7 +167,10 @@ def test_full_run_chains_every_stage(fresh_store, stub_network):
     # Missing headers are hardening suggestions: listed, never counted as security findings
     assert run["summary"]["findings"] == {} and run["summary"]["hardening"] > 0
     assert any("hardening suggestion" in line for line in run["summary"]["narrative"])
-    assert all(s["status"] in ("done", "skipped") for s in run["stages"])
+    # The fix stage tried the project's repository (offline here) without failing the run
+    assert stub_network["clones"] == ["https://github.com/acme/shop"]
+    assert stage(run, "fix")["status"] == "failed" and "offline in tests" in stage(run, "fix")["detail"]
+    assert all(s["status"] in ("done", "skipped") for s in run["stages"] if s["key"] != "fix")
 
     refreshed = fresh_store.get(PROJECTS, project["id"])
     assert refreshed["last_run_id"] == run["id"] and refreshed["last_run_status"] == "passed"
@@ -725,3 +743,206 @@ def test_the_pipeline_adds_ai_triage_to_its_findings(fresh_store, stub_network, 
     assert rows and all(r.get("ai", {}).get("summary", "").startswith("note:") for r in rows)
     stage = next(s for s in fresh_store.find(PIPELINE_RUNS)[0]["stages"] if s["key"] == "security")
     assert "AI triage added" in stage["detail"]
+
+
+# ── fix proposals: each run turns its open findings into a patch for review ──
+
+
+FIX_APP = textwrap.dedent("""
+    from fastapi import FastAPI
+
+    app = FastAPI()
+""").lstrip()
+
+
+@pytest.fixture
+def fix_repo(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "INGEST_ALLOW_LOCAL_PATHS", True)
+    monkeypatch.setattr(settings, "INGEST_WORKSPACE", str(tmp_path / "ws"))
+    root = tmp_path / "shop"
+    root.mkdir()
+    (root / "main.py").write_text(FIX_APP, encoding="utf-8")
+    return root
+
+
+def bare_site():
+    # No security headers at all: the scan finds them missing
+    return scanner_for({"content-type": "text/html"})
+
+
+def test_the_stage_sits_between_the_scan_and_the_report():
+    keys = [k for k, _ in runner.STAGES]
+    assert keys.index("security") + 1 == keys.index("fix") == keys.index("report") - 1
+
+
+def test_a_run_proposes_a_patch_for_its_findings_and_links_it(fresh_store, stub_network, fix_repo):
+    project = make_project(fresh_store, repo_url=str(fix_repo))
+    run = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
+
+    fix = stage(run, "fix")
+    assert fix["status"] == "done", fix
+    assert "ready for review" in fix["detail"]
+    proposal = run["fix_patch"]
+    assert proposal["id"] and proposal["files"] == 1 and proposal["fixes"] >= 1 and proposal["pull_request"] is None
+
+    patch = fresh_store.get(FIX_PATCHES, proposal["id"])
+    assert patch["run_id"] == run["id"] and patch["project_id"] == project["id"]
+    assert '"X-Frame-Options"' in patch["patch"]
+    assert (fix_repo / "main.py").read_text(encoding="utf-8") == FIX_APP  # the repository is never changed
+
+    # The run page loads the proposal by id
+    body = TestClient(app).get(f"/api/security/patches/{proposal['id']}").json()
+    assert body["run_id"] == run["id"] and body["files"][0]["path"] == "main.py"
+    assert "contents" not in body  # file contents stay on the server
+
+
+def test_an_unchanged_proposal_is_not_stored_again(fresh_store, stub_network, fix_repo):
+    project = make_project(fresh_store, repo_url=str(fix_repo))
+    first = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
+    second = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
+
+    assert second["fix_patch"]["id"] == first["fix_patch"]["id"]
+    assert len(fresh_store.find(FIX_PATCHES)) == 1
+    assert f"unchanged since run #{first['id']}" in stage(second, "fix")["detail"]
+
+
+def test_a_proposal_already_in_a_pull_request_says_so(fresh_store, stub_network, fix_repo):
+    project = make_project(fresh_store, repo_url=str(fix_repo))
+    first = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
+    fresh_store.update(FIX_PATCHES, first["fix_patch"]["id"], pull_request={"number": 7, "url": "https://x/pull/7"})
+
+    second = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
+    assert second["fix_patch"]["pull_request"]["number"] == 7
+    assert "already proposed in pull request #7" in stage(second, "fix")["detail"]
+
+
+def test_without_a_repository_the_stage_is_skipped(fresh_store, stub_network):
+    run = run_once(fresh_store, make_project(fresh_store), FakeOrchestrator({}), bare_site())
+    assert stage(run, "fix")["status"] == "skipped"
+    assert "No repository linked" in stage(run, "fix")["detail"]
+    assert run.get("fix_patch") is None
+
+
+def test_without_a_scan_the_stage_is_skipped(fresh_store, stub_network, fix_repo):
+    run = run_once(fresh_store, make_project(fresh_store, repo_url=str(fix_repo)), FakeOrchestrator({}), OutOfScope())
+    assert stage(run, "security")["status"] == "skipped"
+    assert stage(run, "fix")["status"] == "skipped"
+    assert stage(run, "fix")["detail"] == "No security scan in this run"
+
+
+def test_without_open_findings_the_stage_is_skipped(fresh_store, stub_network, fix_repo, monkeypatch):
+    monkeypatch.setattr("app.services.security_service.list_findings", lambda *a, **k: [])
+    run = run_once(fresh_store, make_project(fresh_store, repo_url=str(fix_repo)), FakeOrchestrator({}), bare_site())
+    assert stage(run, "fix")["status"] == "skipped"
+    assert stage(run, "fix")["detail"] == "No open findings to fix"
+    assert fresh_store.find(FIX_PATCHES) == []
+
+
+def test_a_repository_that_cannot_be_read_never_fails_the_run(fresh_store, stub_network, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "INGEST_ALLOW_LOCAL_PATHS", True)
+    project = make_project(fresh_store, repo_url=str(tmp_path / "missing"))
+    run = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
+
+    assert stage(run, "fix")["status"] == "failed"
+    assert "Could not" in stage(run, "fix")["detail"]
+    assert run["status"] == "passed"  # the tests passed; the proposal is extra
+    assert stage(run, "report")["status"] == "done"
+
+
+# ── the repository's own Playwright tests: read at ingestion, replayed every run ──
+
+
+REPO_SPEC = """import { test, expect } from '@playwright/test';
+test('logs in', async ({ page }) => {
+  await page.goto('http://app.test/login');
+  await page.fill('#username', 'tom');
+  await page.click('button.radius');
+  await expect(page.locator('body')).toContainText('Welcome back');
+});
+test('no check', async ({ page }) => {
+  await page.goto('http://app.test/login');
+});
+"""
+
+
+def test_ingestion_reads_the_repositorys_playwright_tests_without_running_them(tmp_path, monkeypatch):
+    from app.api.ingest import ingest_source
+
+    monkeypatch.setattr(settings, "INGEST_ALLOW_LOCAL_PATHS", True)
+    monkeypatch.setattr(settings, "DEPENDENCY_SCAN", False)
+    (tmp_path / "e2e").mkdir()
+    (tmp_path / "e2e" / "login.spec.ts").write_text(REPO_SPEC, encoding="utf-8")
+    (tmp_path / "sum.test.js").write_text("test('adds', () => { expect(1 + 1).toBe(2); });", encoding="utf-8")
+
+    specs = ingest_source(str(tmp_path))["playwright_specs"]
+    assert [s["file"] for s in specs] == ["e2e/login.spec.ts"]  # the Jest unit test is not a browser test
+    assert [t["name"] for t in specs[0]["tests"]] == ["logs in", "no check"]
+
+
+def repo_blueprint(db, project, spec_text=REPO_SPEC):
+    from app.services.playwright_import import parse_spec
+
+    specs = [parse_spec(spec_text, "e2e/login.spec.ts")] if spec_text else []
+    db.insert(BLUEPRINTS, source=project["repo_url"], name="shop", project_id=project["id"], owner_uid="local-dev",
+              data=json.dumps({**BLUEPRINT, "analyzed_at": "2026-10-20T10:00:00+00:00", "playwright_specs": specs}))
+
+
+def repo_tests(db):
+    return [t for t in db.find(TEST_CASES, order_by="id") if t["external_id"].startswith(runner.REPO_PREFIX)]
+
+
+def test_each_run_replays_the_repositorys_playwright_tests(fresh_store, stub_network):
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    repo_blueprint(fresh_store, project)
+    orch = FakeOrchestrator({})
+    run = run_once(fresh_store, project, orch, scanner_for({"content-type": "text/html"}))
+
+    [imported] = repo_tests(fresh_store)
+    assert imported["name"] == "logs in (e2e/login.spec.ts)" and imported["category"] == "repository"
+    steps = json.loads(imported["description"])["steps"]
+    assert [s["action"] for s in steps] == ["NAVIGATE", "FILL", "CLICK", "ASSERT_CONTAINS_TEXT"]
+    # Its selectors are not on the analyzed page: it runs, but cannot fail the run until trusted
+    assert imported["quarantined"] is True
+    assert "logs in (e2e/login.spec.ts)" in orch.ran
+    plan = stage(run, "plan")["detail"]
+    assert "1 from the repository's Playwright tests" in plan
+    assert "1 new, 0 updated from the repository's Playwright tests" in plan
+    assert "1 repository test(s) left out" in plan  # 'no check' has nothing that can fail
+
+
+def test_repository_tests_follow_the_repository(fresh_store, stub_network):
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    repo_blueprint(fresh_store, project)
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    [first] = repo_tests(fresh_store)
+    fresh_store.update(TEST_CASES, first["id"], quarantined=False)  # someone trusted it
+
+    # Unchanged: the same test, and the lifted quarantine stays lifted
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    [same] = repo_tests(fresh_store)
+    assert same["id"] == first["id"] and same["quarantined"] is False and same.get("version", 1) == first.get("version", 1)
+
+    # Changed in the repository: updated in place, quarantined again
+    repo_blueprint(fresh_store, project, REPO_SPEC.replace("'tom'", "'ann'"))
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    [changed] = repo_tests(fresh_store)
+    assert changed["id"] == first["id"] and "'ann'" not in changed["name"]
+    assert any(s.get("value") == "ann" for s in json.loads(changed["description"])["steps"])
+    assert changed["quarantined"] is True and changed["version"] == 2
+
+    # Deleted from the repository: retired, and no longer run
+    repo_blueprint(fresh_store, project, None)
+    orch = FakeOrchestrator({})
+    run = run_once(fresh_store, project, orch, scanner_for({"content-type": "text/html"}))
+    assert repo_tests(fresh_store)[0]["retired"] is True
+    assert not any("e2e/login.spec.ts" in name for name in orch.ran)
+    assert "retired 1 repository test(s) no longer in it" in stage(run, "plan")["detail"]
+
+
+def test_a_blueprint_from_before_specs_were_read_changes_nothing(fresh_store, stub_network):
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    fresh_store.insert(BLUEPRINTS, source=project["repo_url"], name="shop", project_id=project["id"], owner_uid="local-dev",
+                       data=json.dumps({**BLUEPRINT, "analyzed_at": "2026-10-20T10:00:00+00:00"}))
+    run = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert repo_tests(fresh_store) == []
+    assert "repository" not in stage(run, "plan")["detail"]

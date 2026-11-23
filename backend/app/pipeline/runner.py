@@ -43,6 +43,7 @@ from app.database.store import Record, Store, StoreUnavailableError, now_iso
 from app.models import (
     APPLICATIONS,
     BLUEPRINTS,
+    FIX_PATCHES,
     PIPELINE_RUNS,
     PROJECTS,
     TEST_CASES,
@@ -54,6 +55,7 @@ from app.pipeline import ai_plan, explore, suite
 from app.pipeline.profile import profile_of
 from app.pipeline.profile import select as select_by_profile
 from app.reporting.summary import run_summary
+from app.services import test_studio as studio
 from app.services.security_service import record_audit
 from app.services.test_case_service import TestCaseService
 from app.services.test_execution_service import TestExecutionService
@@ -68,11 +70,13 @@ STAGES = (
     ("execute", "Test execution"),
     ("heal", "Self-healing"),
     ("security", "Security scan"),
+    ("fix", "Fix proposals"),
     ("report", "Report"),
 )
 ACTIVE = ("queued", "running")
 TRIGGERS = ("manual", "schedule", "webhook")
 GENERATED_PREFIX = "pipe-"
+REPO_PREFIX = "repo-"  # tests imported from the repository's own Playwright files
 
 
 def _retire_unplanned(db: Store, rows: list[Record], planned_ids: set[int]) -> int:
@@ -429,6 +433,9 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
                                      pages=_tested_pages(test_cases, app_url),
                                      routes=(blueprint or {}).get("routes"))
 
+    # ── fix proposals: a patch for the open findings, for a human to approve ──
+    await _stage_fix(state, project, security)
+
     # ── report ──
     _report(state, project, results, security)
 
@@ -611,12 +618,18 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
     if explored is not None:
         generated.append(explored)
 
+    repo_note = _sync_repo_tests(db, project, application, analysis, blueprint)
+
     all_rows = db.find(TEST_CASES, application_id=application["id"], order_by="id")
     retired = _retire_unplanned(db, all_rows, {row["id"] for row in generated})
-    saved = [tc for tc in all_rows if not str(tc.get("external_id") or "").startswith(GENERATED_PREFIX)]
+    saved = [tc for tc in all_rows
+             if not str(tc.get("external_id") or "").startswith(GENERATED_PREFIX) and not tc.get("retired")]
+    from_repo = sum(1 for tc in saved if str(tc.get("external_id") or "").startswith(REPO_PREFIX))
     detail = f"{len(generated) + len(saved)} tests: {len(generated)} generated ({created} new)"
     if saved:
-        detail += f", {len(saved)} saved"
+        detail += f", {len(saved)} saved" + (f" ({from_repo} from the repository's Playwright tests)" if from_repo else "")
+    if repo_note:
+        detail += f" · {repo_note}"
     if retired:
         detail += f" · retired {retired} generated test(s) no longer planned"
     if left_out:
@@ -632,6 +645,67 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
     if explore_note:
         detail += f" · {explore_note}"
     return application, generated + saved, detail
+
+
+def _sync_repo_tests(db: Store, project: Record, application: Record, analysis: dict[str, Any],
+                     blueprint: dict[str, Any] | None) -> str | None:
+    """Keep the repository's own Playwright tests as saved tests of the project.
+
+    Ingestion reads them (never runs them) into the blueprint's
+    ``playwright_specs``; here each becomes a test the run replays, with its
+    steps checked against the analyzed page as Test Studio checks them.  A test
+    with a step that cannot be checked is quarantined (it runs and reports but
+    cannot fail the run) until someone trusts it, and keeps a lifted quarantine
+    while it is unchanged.  A test that cannot be saved (a step Studio would
+    refuse, or no check at all) is left out and counted.  Tests no longer in
+    the repository are retired.  A blueprint from before specs were read
+    changes nothing.  Returns a note for the plan stage, or None.
+    """
+    specs = (blueprint or {}).get("playwright_specs")
+    if specs is None:
+        return None
+    owner = project.get("owner_uid")
+    app_url = project["app_url"]
+    prefix = f"{REPO_PREFIX}{project['id']}-"
+    seen: set[str] = set()
+    created = updated = left_out = 0
+    for spec in specs:
+        for test in spec.get("tests") or []:
+            key = hashlib.sha1(f"{spec['file']}::{test['name']}".encode()).hexdigest()[:16]
+            external_id = prefix + key
+            checked = studio.check_steps(test.get("steps") or [], analysis, app_url)
+            if studio.blocking(checked):
+                left_out += 1
+                continue
+            seen.add(external_id)
+            name = f"{test['name']} ({spec['file']})"[:255]
+            description = json.dumps({"steps": studio.stored_steps(checked, app_url), "generated_by": "repository",
+                                      "file": spec["file"], "start_url": app_url})
+            quarantine = studio.needs_quarantine(checked)
+            row = db.find_one(TEST_CASES, application_id=application["id"], external_id=external_id)
+            if row is None:
+                row = TestCaseService.create_test_case(
+                    db, application_id=application["id"], external_id=external_id, name=name,
+                    description=description, category="repository", priority="normal", owner_uid=owner)
+                db.update(TEST_CASES, row["id"], quarantined=quarantine)
+                created += 1
+            elif row.get("description") != description or row.get("name") != name or row.get("retired"):
+                db.update(TEST_CASES, row["id"], name=name, description=description, retired=False,
+                          quarantined=quarantine, version=int(row.get("version") or 1) + 1)
+                updated += 1
+    retired = 0
+    for row in db.find(TEST_CASES, application_id=application["id"], order_by="id"):
+        if str(row.get("external_id") or "").startswith(prefix) and row["external_id"] not in seen                 and not row.get("retired"):
+            db.update(TEST_CASES, row["id"], retired=True)
+            retired += 1
+    parts = []
+    if created or updated:
+        parts.append(f"{created} new, {updated} updated from the repository's Playwright tests")
+    if left_out:
+        parts.append(f"{left_out} repository test(s) left out (a step that cannot run here, or no check)")
+    if retired:
+        parts.append(f"retired {retired} repository test(s) no longer in it")
+    return " · ".join(parts) or None
 
 
 def _is_sign_in(tc: Record) -> bool:
@@ -862,6 +936,84 @@ def flaky_tests(history: list[list[dict[str, Any]]], current: list[dict[str, Any
             outcomes.setdefault(t["test_case_id"], []).append(t["status"] != TestExecutionStatus.FAILED.value)
     return {tc for tc, seq in outcomes.items()
             if sum(1 for a, b in zip(seq, seq[1:], strict=False) if a != b) >= FLAKY_FLIPS}
+
+
+async def _stage_fix(state: _RunState, project: Record, security: dict[str, Any] | None) -> None:
+    """Build a fix patch for the open findings this run's scan left, against the
+    project's repository, and link it to the run (``fix_patch``).
+
+    Nothing is changed in the repository: the patch is a proposal that the run
+    page shows for review, and a pull request is opened only when a person
+    approves it.  A patch identical to the newest one already proposed for this
+    project is not stored again (scheduled runs would pile up copies); the run
+    links that one instead, with its pull request if one was opened.  Failing to
+    build a patch never fails the run.
+    """
+    from app.api import patches
+    from app.api.integrations import git_auth
+    from app.services import security_service as findings_store
+    from ingestion import SourceError
+
+    db = state.db
+    owner = project.get("owner_uid")
+    repo = (project.get("repo_url") or "").strip()
+    if security is None:
+        state.stage("fix", "skipped", "No security scan in this run")
+        return
+    if not repo:
+        state.stage("fix", "skipped", "No repository linked to the project: add it to propose code fixes")
+        return
+    owned = {"owner_uid": owner} if owner else {}
+    findings = [
+        findings_store.serialize(row)
+        for url in security.get("pages") or [project["app_url"]]
+        for row in findings_store.list_findings(db, target_url=url, **owned)
+        if row["status"] == "open"
+    ]
+    findings = list({f["key"]: f for f in findings}.values())
+    if not findings:
+        state.stage("fix", "skipped", "No open findings to fix")
+        return
+
+    state.stage("fix", "running")
+    try:
+        auth = await asyncio.to_thread(git_auth, db, owner, repo)
+        built = await asyncio.to_thread(patches.generate, repo, findings, project["app_url"], auth)
+    except SourceError as exc:
+        state.stage("fix", "failed", f"Could not read the repository: {exc}")
+        return
+    except Exception as exc:  # a proposal is extra: the run's results stand without it
+        logger.exception("Pipeline #%s: fix proposal failed", state.id)
+        state.stage("fix", "failed", f"Could not build a fix patch: {exc}")
+        return
+
+    if not built["files"]:
+        why = f"{len(built['manual'])} finding(s) need a change by hand" if built["manual"] else "no automatic fix applies"
+        state.stage("fix", "done", f"No code change proposed: {why}")
+        state.save(fix_patch={"id": None, "fixes": 0, "files": 0, "manual": len(built["manual"]), "pull_request": None})
+        return
+
+    previous = db.find(FIX_PATCHES, project_id=project["id"], order_by="id", descending=True, limit=1, **owned)
+    if previous and previous[0].get("patch") == built["patch"] and previous[0].get("repo") == repo:
+        row = previous[0]
+        reused = True
+    else:
+        row = await asyncio.to_thread(
+            patches.store_patch, db, built, target_url=project["app_url"], repo=repo, findings=findings,
+            actor=state.doc["actor"], owner_uid=owner, run_id=state.id, project_id=project["id"])
+        reused = False
+    pr = row.get("pull_request")
+    detail = f"{len(built['applied'])} fix(es) in {len(built['files'])} file(s)"
+    if pr:
+        detail += f" · already proposed in pull request #{pr.get('number')}"
+    else:
+        detail += " · ready for review" + (f" (unchanged since run #{row.get('run_id')})"
+                                          if reused and row.get("run_id") else "")
+    if built["manual"]:
+        detail += f" · {len(built['manual'])} need a change by hand"
+    state.stage("fix", "done", detail)
+    state.save(fix_patch={"id": row["id"], "fixes": len(built["applied"]), "files": len(built["files"]),
+                          "manual": len(built["manual"]), "pull_request": pr})
 
 
 def _report(state: _RunState, project: Record, results: list[dict[str, Any]], security: dict[str, Any] | None) -> None:

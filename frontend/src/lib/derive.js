@@ -151,8 +151,8 @@ export const LOOP_STAGES = [
     about: 'Passive, scope-checked security scan: headers, cookies, CORS, TLS and forms. No payloads are sent.' },
   { id: 'report', num: '3', title: 'Unified Reporting', short: 'Report', runKeys: ['report'], built: 'built', page: 'reports',
     about: 'Test results, regressions since the previous run and security findings in one report.' },
-  { id: 'remediate', num: '4', title: 'AI Remediation', short: 'Fix', runKeys: [], built: 'partial', page: 'remediation',
-    about: 'Proposes fixes for a human to approve, and turns header, CORS and cookie findings into a patch against your repository.' },
+  { id: 'remediate', num: '4', title: 'AI Remediation', short: 'Fix', runKeys: ['fix'], built: 'built', page: 'remediation',
+    about: 'Every run turns its open findings into a patch against your repository (headers, CORS, cookies); you review it and approve it as a pull request.' },
   { id: 'validate', num: '5', title: 'Validation Engine', short: 'Verify', runKeys: [], built: 'built', page: 'validation',
     about: 'Re-runs the original check after a fix. A failed retest goes back to remediation.' },
   { id: 'deploy', num: '6', title: 'Verified Deploy', short: 'Deploy', runKeys: [], built: 'built', page: 'validation',
@@ -218,7 +218,9 @@ export function loopModel(ws) {
     if (st.id === 'qa' && ws.running) { state = 'running'; note = 'Running tests'; }
     if (st.id === 'attack' && ws.scanning) { state = 'running'; note = 'Scanning'; }
     if (st.id === 'remediate') {
-      if (awaitingApproval) { state = 'waiting'; note = `${awaitingApproval} fix${awaitingApproval === 1 ? '' : 'es'} to approve`; }
+      const proposal = run?.fix_patch;
+      if (proposal?.id && !proposal.pull_request && !active) { state = 'waiting'; note = `${proposal.fixes} fix${proposal.fixes === 1 ? '' : 'es'} to review`; }
+      else if (awaitingApproval) { state = 'waiting'; note = `${awaitingApproval} fix${awaitingApproval === 1 ? '' : 'es'} to approve`; }
       else if (approved.length) { state = 'done'; note = `${approved.length} approved`; }
     }
     if (st.id === 'validate') {

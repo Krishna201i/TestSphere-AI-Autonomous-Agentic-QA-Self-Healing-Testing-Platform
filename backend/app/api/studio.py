@@ -296,7 +296,6 @@ class ImportRequest(BaseModel):
     start_path: str | None = Field(None, max_length=500)
 
 
-MAX_REPO_SPECS = 40
 
 
 def _latest_blueprint(db: Store, project: Record) -> dict[str, Any] | None:
@@ -379,25 +378,12 @@ def _repo_specs(repo_url: str, auth: Any) -> list[dict[str, Any]]:
     from pathlib import Path
 
     from app.api.ingest import _git_hosts
-    from app.services.playwright_import import MAX_FILE_BYTES, SPEC_FILE, parse_spec
+    from app.services.playwright_import import repo_specs
     from ingestion.source import clone, discard_checkout
 
     root = clone(repo_url, Path(settings.INGEST_WORKSPACE), _git_hosts(), auth=auth)
     try:
-        parsed = []
-        for path in sorted(root.rglob("*")):
-            if len(parsed) >= MAX_REPO_SPECS:
-                break
-            rel = path.relative_to(root).as_posix()
-            if not path.is_file() or not SPEC_FILE.search(path.name) or "node_modules/" in rel or path.stat().st_size > MAX_FILE_BYTES:
-                continue
-            text = path.read_text(encoding="utf-8", errors="replace")
-            if "@playwright/test" not in text and "page." not in text:
-                continue  # a Jest or Vitest unit test, not a browser test
-            result = parse_spec(text, rel)
-            if result["tests"]:
-                parsed.append(result)
-        return parsed
+        return repo_specs(root)
     finally:
         discard_checkout(root)
 

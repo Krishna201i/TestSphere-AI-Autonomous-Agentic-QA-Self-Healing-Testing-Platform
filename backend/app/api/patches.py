@@ -88,7 +88,8 @@ def _commit(root: Path) -> str | None:
         return None
 
 
-def _generate(repo: str, findings: list[dict[str, Any]], site_url: str, auth: GitAuth | None = None) -> dict[str, Any]:
+def generate(repo: str, findings: list[dict[str, Any]], site_url: str, auth: GitAuth | None = None) -> dict[str, Any]:
+    """Clone *repo* into a temporary folder, build the patch for *findings*, delete the clone."""
     root, tmp = _checkout(repo, auth)
     try:
         result = build_patch(root, findings, site_url)
@@ -108,7 +109,8 @@ def _generate(repo: str, findings: list[dict[str, Any]], site_url: str, auth: Gi
 
 def _public(row: Record) -> dict[str, Any]:
     out = {k: row.get(k) for k in ("id", "target_url", "repo", "commit", "frameworks", "files", "applied",
-                                    "manual", "patch", "finding_keys", "actor", "created_at", "pull_request")}
+                                    "manual", "patch", "finding_keys", "actor", "created_at", "pull_request",
+                                    "run_id", "project_id")}
     forge = "github" if parse_repo(row.get("repo")) else (parse_forge_repo(row.get("repo")) or (None,))[0]
     out["forge"] = forge if row.get("contents") else None
     out["github"] = out["forge"] is not None  # the dashboard's "can open a pull request" flag (any host)
@@ -142,20 +144,28 @@ async def create_patch(
                             detail="No repository is linked to this site. Add the repository to its project in "
                                    "Autopilot (Settings → Git repository), or enter one here.")
     try:
-        built = await asyncio.to_thread(_generate, repo, findings, payload.target_url, git_auth(db, user.uid, repo))
+        built = await asyncio.to_thread(generate, repo, findings, payload.target_url, git_auth(db, user.uid, repo))
     except SourceError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
-    actor = actor_for(user, payload.actor)
-    row = db.insert(FIX_PATCHES, target_url=payload.target_url, repo=repo, actor=actor, owner_uid=user.uid,
-                    finding_keys=[f["key"] for f in findings], **built)
+    row = store_patch(db, built, target_url=payload.target_url, repo=repo, findings=findings,
+                      actor=actor_for(user, payload.actor), owner_uid=user.uid)
+    return _public(row)
+
+
+def store_patch(db: Store, built: dict[str, Any], *, target_url: str, repo: str, findings: list[dict[str, Any]],
+                actor: str, owner_uid: str | None, **extra: Any) -> Record:
+    """Save a built patch (from the API or a pipeline run) and record it in the audit trail."""
+    row = db.insert(FIX_PATCHES, target_url=target_url, repo=repo, actor=actor, owner_uid=owner_uid,
+                    finding_keys=[f["key"] for f in findings], **extra, **built)
     changed = len(built["files"])
-    record_audit(db, actor=actor, kind="patch", ref=str(row["id"]), owner_uid=user.uid,
+    record_audit(db, actor=actor, kind="patch", ref=str(row["id"]), owner_uid=owner_uid,
                  level="info" if changed else "warn",
-                 message=(f"Fix patch #{row['id']} for {payload.target_url}: {len(built['applied'])} fix(es) in "
+                 message=(f"Fix patch #{row['id']} for {target_url}: {len(built['applied'])} fix(es) in "
                           f"{changed} file(s) of {repo}" + (f", {len(built['manual'])} need a manual change"
                                                             if built["manual"] else "")))
-    return _public(row)
+    return row
+
 
 
 @router.get("")
@@ -169,6 +179,12 @@ def list_patches(
     if target_url:
         filters["target_url"] = target_url
     return [_public(r) for r in db.find(FIX_PATCHES, order_by="id", descending=True, limit=limit, **filters)]
+
+
+@router.get("/{patch_id}")
+def get_patch(patch_id: int, db: Store = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """One patch: the proposal a pipeline run links to (``fix_patch.id``), for review."""
+    return _public(ensure_owned(user, db.get(FIX_PATCHES, patch_id), "Fix patch"))
 
 
 @router.get("/{patch_id}/download")

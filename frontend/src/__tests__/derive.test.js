@@ -44,7 +44,7 @@ describe('mergeStageStatus', () => {
 });
 
 describe('loopModel', () => {
-  const KEYS = ['codebase', 'analyze', 'plan', 'execute', 'heal', 'security', 'report'];
+  const KEYS = ['codebase', 'analyze', 'plan', 'execute', 'heal', 'security', 'fix', 'report'];
   const pipelineRun = (id, status, statuses) => ({
     id, status, project_name: 'Shop', stages: KEYS.map((key, i) => ({ key, label: key, status: statuses[i] })),
   });
@@ -52,7 +52,7 @@ describe('loopModel', () => {
   const state = (m, id) => m.stages.find((s) => s.id === id).state;
 
   it('follows the active run: done, running, then queued stages', () => {
-    const run = pipelineRun(2, 'running', ['done', 'done', 'done', 'running', 'pending', 'pending', 'pending']);
+    const run = pipelineRun(2, 'running', ['done', 'done', 'done', 'running', 'pending', 'pending', 'pending', 'pending']);
     const m = loopModel(ws({ pipelineRuns: [run, pipelineRun(1, 'passed', KEYS.map(() => 'done'))] }));
     expect(m.active).toBe(true);
     expect(m.run.id).toBe(2);
@@ -60,17 +60,28 @@ describe('loopModel', () => {
     expect(state(m, 'qa')).toBe('running');
     expect(m.running.id).toBe('qa');
     expect(state(m, 'attack')).toBe('pending');
-    expect(m.progress).toBeCloseTo(3 / 7);
+    expect(m.progress).toBeCloseTo(3 / 8);
     expect(m.cycles).toBe(1);
   });
 
   it('shows a finished run as idle-safe: no queued stages, no running token', () => {
-    const run = pipelineRun(1, 'failed', ['skipped', 'done', 'done', 'failed', 'pending', 'pending', 'pending']);
+    const run = pipelineRun(1, 'failed', ['skipped', 'done', 'done', 'failed', 'pending', 'pending', 'pending', 'pending']);
     const m = loopModel(ws({ pipelineRuns: [run] }));
     expect(m.active).toBe(false);
     expect(m.running).toBeNull();
     expect(state(m, 'qa')).toBe('failed');
     expect(state(m, 'attack')).toBe('idle');
+  });
+
+  it("asks for a review of the run's fix proposal until a pull request is opened", () => {
+    const run = { ...pipelineRun(3, 'passed', KEYS.map(() => 'done')), fix_patch: { id: 9, fixes: 2, pull_request: null } };
+    let m = loopModel(ws({ pipelineRuns: [run] }));
+    expect(state(m, 'remediate')).toBe('waiting');
+    expect(m.stages.find((s) => s.id === 'remediate').note).toBe('2 fixes to review');
+    expect(m.attention.map((s) => s.id)).toContain('remediate');
+
+    m = loopModel(ws({ pipelineRuns: [{ ...run, fix_patch: { ...run.fix_patch, pull_request: { number: 4 } } }] }));
+    expect(state(m, 'remediate')).toBe('done');
   });
 
   it('asks for approval and retests, and asks for a deploy hook', () => {

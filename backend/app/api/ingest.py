@@ -21,6 +21,7 @@ from app.database.session import get_db
 from app.database.store import Record, Store
 from app.models import BLUEPRINTS
 from app.ratelimit import limit_runs
+from app.services.playwright_import import repo_specs
 from app.services.security_service import record_audit, save_scan
 from ingestion import (
     GitAuth,
@@ -78,6 +79,8 @@ def ingest_source(source: str, auth: GitAuth | None = None) -> dict[str, Any]:
         raise SourceError("Local folder paths are disabled on this server; use a public https Git URL.")
     try:
         blueprint = analyze_repo(root, source=source, name=repo_name(source)).model_dump(mode="json")
+        # The repository's own Playwright tests, read (never run): each pipeline run replays them
+        blueprint["playwright_specs"] = repo_specs(root)
         if settings.DEPENDENCY_SCAN:
             packages = pinned_packages(root)
             blueprint["dependency_scan"] = check_dependencies(packages) | {"packages": packages[:200]}

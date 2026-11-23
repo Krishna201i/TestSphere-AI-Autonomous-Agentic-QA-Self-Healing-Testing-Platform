@@ -157,6 +157,7 @@ export const retestFinding = (key, actor) =>
   request(`/api/security/findings/${encodeURIComponent(key)}/retest`, { method: 'POST', body: { actor } });
 /** Fix patch: open findings of a site as a diff against its repository. */
 export const createFixPatch = (payload) => request('/api/security/patches', { method: 'POST', body: payload });
+export const getFixPatch = (id) => request(`/api/security/patches/${id}`);
 export const getFixPatches = (targetUrl) => request(`/api/security/patches?target_url=${encodeURIComponent(targetUrl)}`);
 export const downloadFixPatch = (id) => request(`/api/security/patches/${id}/download`, { raw: true });
 /** Integrations: GitHub token (stored encrypted on the server, never returned). */

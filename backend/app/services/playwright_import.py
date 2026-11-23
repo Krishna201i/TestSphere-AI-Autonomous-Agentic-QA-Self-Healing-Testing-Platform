@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 MAX_FILE_BYTES = 200_000
@@ -377,3 +378,29 @@ def parse_spec(text: str, filename: str = "spec.ts") -> dict[str, Any]:
 
 
 SPEC_FILE = re.compile(r"\.(?:spec|test|e2e)\.(?:ts|js|mjs|cjs|tsx|jsx)$", re.IGNORECASE)
+
+
+MAX_REPO_SPECS = 40
+
+
+def repo_specs(root: Path) -> list[dict[str, Any]]:
+    """Every Playwright test file under *root* (a checkout), parsed; nothing in it runs.
+
+    Jest or Vitest unit tests that share the ``*.spec.*`` naming are left out,
+    as are dependencies and files over ``MAX_FILE_BYTES``.  At most
+    ``MAX_REPO_SPECS`` files with tests are returned.
+    """
+    parsed: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        if len(parsed) >= MAX_REPO_SPECS:
+            break
+        rel = path.relative_to(root).as_posix()
+        if not path.is_file() or not SPEC_FILE.search(path.name) or "node_modules/" in rel                 or path.stat().st_size > MAX_FILE_BYTES:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "@playwright/test" not in text and "page." not in text:
+            continue  # a Jest or Vitest unit test, not a browser test
+        result = parse_spec(text, rel)
+        if result["tests"]:
+            parsed.append(result)
+    return parsed

@@ -5,7 +5,7 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, Copy, Download, ExternalLink, FileDiff, GitBranch, GitPullRequest, TriangleAlert } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
-import { createFixPatch, downloadFixPatch, getFixPatches, openPullRequest } from '../services/api';
+import { createFixPatch, downloadFixPatch, getFixPatch, getFixPatches, openPullRequest } from '../services/api';
 import { timeAgo } from '../lib/derive';
 
 const hostOf = (url) => {
@@ -38,7 +38,7 @@ function saveBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-function PullRequestButton({ patch, onOpened }) {
+function PullRequestButton({ patch, onOpened, label = 'Open pull request' }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   if (patch.pull_request) {
@@ -68,14 +68,14 @@ function PullRequestButton({ patch, onOpened }) {
   return (
     <>
       <button type="button" className="btn btn-sm btn-primary" onClick={open} disabled={busy}>
-        <GitPullRequest size={14} /> {busy ? 'Opening…' : 'Open pull request'}
+        <GitPullRequest size={14} /> {busy ? 'Opening…' : label}
       </button>
       {error && <span className="error-text" role="alert">{error}</span>}
     </>
   );
 }
 
-function PatchView({ patch, onPullRequest }) {
+export function PatchView({ patch, onPullRequest, approveLabel }) {
   const [copied, setCopied] = useState(false);
   const [downloadError, setDownloadError] = useState(null);
   const file = `testsphere-fix-${patch.id}.patch`;
@@ -88,7 +88,7 @@ function PatchView({ patch, onPullRequest }) {
         </span>
         {patch.files.length > 0 && (
           <span className="row">
-            <PullRequestButton patch={patch} onOpened={onPullRequest} />
+            <PullRequestButton patch={patch} onOpened={onPullRequest} label={approveLabel} />
             <button type="button" className="btn btn-sm" onClick={() => { setDownloadError(null); downloadFixPatch(patch.id).then((b) => saveBlob(b, file)).catch((err) => setDownloadError(`Download failed: ${err.message}`)); }}><Download size={14} /> Download .patch</button>
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => navigator.clipboard?.writeText(patch.patch).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}>
               <Copy size={14} /> {copied ? 'Copied' : 'Copy'}
@@ -203,6 +203,54 @@ export default function FixPatchCard({ targetUrl }) {
             ))}
           </ul>
         </details>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The fix proposal a pipeline run built for its open findings: the diff for a
+ * person to review, and one button that approves it and opens the pull request.
+ */
+export function RunFixProposal({ patchId }) {
+  const [patch, setPatch] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    setPatch(null);
+    setError(null);
+    getFixPatch(patchId).then(setPatch).catch((err) => setError(err.message));
+  }, [patchId]);
+
+  const opened = patch?.pull_request;
+  return (
+    <section className="card" aria-labelledby="run-fix-title">
+      <div className="card-head">
+        <h3 id="run-fix-title"><FileDiff size={18} aria-hidden="true" />{opened ? 'Fixes proposed' : 'Fixes ready for review'}</h3>
+        <span className="pill violet">4 · Remediation</span>
+      </div>
+      {error && <div className="error-text" role="alert">Could not load the proposed fixes: {error}</div>}
+      {!patch && !error && <div className="hint">Loading the proposed fixes…</div>}
+      {patch && (
+        <>
+          <p className="card-sub">
+            {opened
+              ? 'You approved these changes; they are in the pull request below. Merge and deploy it, then retest the findings in Validation.'
+              : <>This run turned its open findings into changes to <span className="mono">{patch.repo}</span>. Nothing has been
+                changed yet: review the diff, and approve it to open a pull request.</>}
+          </p>
+          {!patch.github && patch.files.length > 0 && (
+            <div className="hint">
+              A pull request can be opened on GitHub, GitLab or Bitbucket repositories only. Download the patch and apply it
+              with <code>git apply</code> instead.
+            </div>
+          )}
+          <PatchView
+            patch={patch}
+            approveLabel="Approve and open pull request"
+            onPullRequest={(pr) => setPatch((prev) => ({ ...prev, pull_request: pr }))}
+          />
+        </>
       )}
     </section>
   );
