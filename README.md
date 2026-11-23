@@ -116,7 +116,7 @@ Work is merged into `main` through pull requests that pass CI.
 | --- | --- |
 | **Vinamra Bhatnagar** | Founded the AI agent layer: the shared agent schemas and contracts, the provider-independent LLM client (mock provider, response parser, `LLMClientSession` with validation and retry), the Test Planner Agent (schemas, prompt architecture, mock scenarios, generation pipeline), the failure classifier and Failure Analysis Agent, the self-healing contracts, test prioritization, their tests. |
 | **Krishna Singh** | The Playwright engine and locator healing with its benchmark, the passive and active security scanner and AI triage, codebase ingestion, fix patches and pull requests, verified deploy, the real LLM providers, persistent healing memory, the AI explorer, failure reports and PDF export, Firestore storage, CI and security scanning, hosting, and most of the current backend and dashboard. |
-| **Prashansha Maheshwari** | The first backend platform and workflow orchestration, the plan-and-execute API with live SSE events, the first React dashboard and its connection to the backend, the Vercel and Render deployment setup, and the architecture, API, engine, integration and operations documentation, plus [`CONTRIBUTING.md`](docs/CONTRIBUTING.md). |
+| **Prashansha Maheshwari** | The first backend platform and workflow orchestration, the plan-and-execute API with live SSE events, the first React dashboard and its connection to the backend, the Vercel and Render deployment setup, the two-container Docker setup (frontend on nginx, backend) with its CI smoke tests and continuous deployment to AWS, and the architecture, API, engine, integration and operations documentation, plus [`CONTRIBUTING.md`](docs/CONTRIBUTING.md). |
 
 ---
 

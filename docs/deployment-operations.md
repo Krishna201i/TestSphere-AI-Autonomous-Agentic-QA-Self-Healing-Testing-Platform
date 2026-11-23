@@ -2,7 +2,7 @@
 
 ## 1. System Requirements & Environment
 
-TestSphere-AI runs on a developer machine or as a container. Production runs on one AWS EC2 instance with Docker Compose (API, worker, Caddy; see [`deploy/aws-ec2`](../deploy/aws-ec2/README.md)); the same image runs on any container host.
+TestSphere-AI runs on a developer machine or as a container. Containers come as two images, the backend and the frontend (section 3). Production runs them on one AWS EC2 instance with Docker Compose (Caddy, frontend, backend, worker; see [`deploy/aws-ec2`](../deploy/aws-ec2/README.md)); the same images run on any container host.
 
 ### Minimum Requirements:
 - **Operating System**: Linux (Ubuntu 22.04+ recommended), macOS, or Windows 10/11
@@ -26,7 +26,7 @@ All settings can be configured via environment variables or a `.env` file at rep
 | `API_HOST` | `0.0.0.0` | Host binding interface for FastAPI |
 | `API_PORT` | `8000` | Port for FastAPI server |
 | `DEBUG` | `False` | Enable detailed stack traces and auto-reloading |
-| `CORS_ORIGINS` | Vite dev servers (`localhost`/`127.0.0.1` on 3000 and 5173) locally; none when hosted | Comma-separated origins of a dashboard hosted elsewhere (e.g. `https://dashboard.example.com`). Not needed when the API serves the dashboard itself |
+| `CORS_ORIGINS` | Vite dev servers (`localhost`/`127.0.0.1` on 3000 and 5173) locally; none when hosted | Comma-separated origins of a dashboard hosted elsewhere (e.g. `https://dashboard.example.com`). Not needed when the dashboard is on the API's origin (the frontend container's proxy, or the API serving a local build) |
 
 ### 2.1a Sign-in & Automated Pipeline
 | Variable | Default Value | Description |
@@ -41,7 +41,8 @@ All settings can be configured via environment variables or a `.env` file at rep
 Firebase console setup for sign-in: **Authentication → Get started**, enable **Email/Password** (and **Google** if wanted)
 under *Sign-in method*, and add the dashboard's domain under *Settings → Authorized domains*.
 
-**Dashboard hosted apart from the API.** The API serves the built dashboard itself, which needs no extra settings.
+**Dashboard hosted apart from the API.** In Docker the frontend container serves the dashboard and proxies `/api` on the
+same origin; run from source, the API serves `frontend/dist` itself once it is built. Neither needs extra settings.
 To host the dashboard elsewhere instead, build it with `VITE_API_URL` set to the backend's URL (e.g.
 `https://api.example.com`), and set `CORS_ORIGINS` on the backend to the dashboard's origin. Without `VITE_API_URL` the dashboard
 calls its own host, which answers with the app's HTML page; the dashboard then says so instead of failing to parse
@@ -80,7 +81,7 @@ GitHub push webhooks are per project: the Automation page shows each project's p
 | `RATE_LIMIT_RUNS_PER_MINUTE` | `10` | Runs, scans and clones each user may start per minute (`0` disables); over it the API answers 429 |
 | `RATE_LIMIT_BACKEND` | `memory` | `memory` counts per process (right for one instance); `database` shares the count between instances, at one read and one write per run start. With several API instances, also route each `/api/workflow/stream` client back to the instance running its workflow (sticky sessions): live run events stay in that instance's memory |
 | `ENGINE_MAX_BROWSERS` | `2` | Browser instances that may run at once; further runs wait for a slot |
-| `ENGINE_BROWSER` | `chromium` | Browser tests run in: `chromium`, `firefox` or `webkit` (Safari's engine). The image installs Chromium only; another browser is downloaded on its first run, or add `python -m playwright install --with-deps <browser>` to the build. The outbound request guard covers all three |
+| `ENGINE_BROWSER` | `chromium` | Browser tests run in: `chromium`, `firefox` or `webkit` (Safari's engine). The backend image installs Chromium only; another browser is downloaded on its first run, or add `python -m playwright install --with-deps <browser>` to the build. The outbound request guard covers all three |
 | `ENGINE_VIEWPORT` | `1280x720` | Browser window as WIDTHxHEIGHT (e.g. `390x844` for a phone). Changing it changes screenshots, so visual baselines are taken again |
 | `VISUAL_REGRESSION` / `VISUAL_DIFF_THRESHOLD` | `true` / `0.02` | Compare each passing run's screenshot with the test's approved baseline; more than this share of changed pixels is a visual change to review |
 | `VISUAL_FULL_PAGE` | `false` | Screenshot the whole page instead of the window, so changes below the fold count; a page that grows or shrinks is compared over the shared rows, the added or removed rows counting as changed |
