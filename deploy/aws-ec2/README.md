@@ -1,14 +1,21 @@
 # Deploying on AWS EC2
 
-One EC2 instance runs three containers from [`docker-compose.yml`](docker-compose.yml):
+One EC2 instance runs four containers from two images (the **backend** and the **frontend**), with
+[`docker-compose.yml`](docker-compose.yml):
 
-| Container | Role |
-| --- | --- |
-| `api` | API and the built dashboard, behind Caddy (port 8000 is not published) |
-| `worker` | Pipeline runs (`PIPELINE_EXECUTION=worker`) and the scheduler, so an API restart never interrupts a scan |
-| `caddy` | HTTPS on 80/443 with an automatic Let's Encrypt certificate for `$DOMAIN` |
+```
+internet ─▶ caddy :443 ─▶ frontend :8080 ─┬─ dashboard files (nginx)
+                                          └─ /api ─▶ backend :8000      worker (same image as backend)
+```
 
-Firestore is the shared database (worker mode requires it). Both app containers run with
+| Container | Image | Role |
+| --- | --- | --- |
+| `caddy` | `caddy` | HTTPS on 80/443 with an automatic Let's Encrypt certificate for `$DOMAIN`; the only published ports |
+| `frontend` | `testsphere-frontend` ([`frontend/Dockerfile`](../../frontend/Dockerfile)) | The dashboard on nginx; proxies `/api` to the backend |
+| `backend` | `testsphere` ([`backend/Dockerfile`](../../backend/Dockerfile)) | The API (port 8000, reachable only from the frontend) |
+| `worker` | `testsphere` (same as `backend`) | Pipeline runs (`PIPELINE_EXECUTION=worker`) and the scheduler, so an API restart never interrupts a scan |
+
+Firestore is the shared database (worker mode requires it). The backend and worker run with
 `ENGINE_MAX_BROWSERS=1`, sized for a 2 GB instance; raise it on a larger one.
 
 ## Secrets
@@ -98,12 +105,19 @@ Pull-based, so no AWS credentials leave AWS (this AWS project's managed policies
 federate into the account with OIDC, and a long-lived access key in GitHub would be the weaker option):
 
 1. [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) runs after CI passes on `main`. It builds
-   the image and publishes it to GitHub's container registry as `ghcr.io/krishna201i/testsphere:<commit>` and
-   `:main`, with the workflow's own token. Nothing builds on the instance.
+   both images and publishes them to GitHub's container registry, with the workflow's own token:
+   `ghcr.io/krishna201i/testsphere` (backend) and `ghcr.io/krishna201i/testsphere-frontend`, each as `:<commit>`,
+   `:<short commit>` and `:main`. The backend's `:main` moves last. Nothing builds on the instance.
 2. On the instance, `testsphere-deploy.timer` runs [`cd/pull-deploy.sh`](cd/pull-deploy.sh) every 2 minutes. When
-   `:main` points at a new image it checks out that commit (for its compose file and Caddyfile), starts it, and waits
-   for `https://$DOMAIN/api/health`. If the new version is not healthy within 5 minutes, it puts the previous image
-   and commit back. Log: `journalctl -u testsphere-deploy`.
+   the backend's `:main` points at a new image it checks out that commit (for its compose file and Caddyfile), pulls
+   the frontend image of **the same commit**, starts both, and waits for `https://$DOMAIN/api/health` (through
+   Caddy, the frontend and the backend, so all three must work). If the new version is not healthy within 5
+   minutes, it puts the previous images and commit back. Log: `journalctl -u testsphere-deploy`.
+
+The instance pulls without a token, so both packages must be **public**. GitHub creates a new package as
+private, so the first run that publishes `testsphere-frontend` stops before moving `:main` (the instance keeps
+running the current version) and says so. Then, once: the repository owner's Packages → `testsphere-frontend` →
+Package settings → Change visibility → Public, and re-run the failed Deploy run.
 
 It stays off until the repository variable `DEPLOY_ENABLED` is `true`. One-time setup on the instance (as root,
 for example through SSM Run Command):
@@ -124,24 +138,24 @@ Without CD, run on the instance (Session Manager, or `AWS-RunShellScript` throug
 
 ```sh
 cd /opt/testsphere/app && git fetch && git checkout --detach origin/main
-cd deploy/aws-ec2 && ./fetch-env.sh && GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
+cd deploy/aws-ec2 && ./fetch-env.sh && GIT_COMMIT=$(git rev-parse --short=7 HEAD) docker compose up -d --build
 docker compose ps
 ```
 
 Rollback: `git checkout --detach <previous-sha>` in `/opt/testsphere/app`, then the same `docker compose` command.
-Once CD has run, `TESTSPHERE_IMAGE` in this folder's `.env` points at the ECR image; delete that line to build on
-the instance again.
+Once CD has run, `TESTSPHERE_IMAGE` and `TESTSPHERE_FRONTEND_IMAGE` in this folder's `.env` point at the published
+ghcr.io images; delete those lines to build both on the instance again.
 
 ## Checking
 
 ```sh
-docker compose ps                       # all three Up; api and worker (healthy)
-docker compose logs --tail 50 api worker
+docker compose ps                       # all four Up; backend, worker and frontend (healthy)
+docker compose logs --tail 50 backend worker frontend
 curl -s https://$DOMAIN/api/health      # {"status":"ok",...,"database":"ok","queued":0,"worker":"ok"}
 ```
 
-After the first deploy, add the domain to Firebase → Authentication → Settings → Authorised domains. The API serves
-the dashboard on the same origin, so `VITE_API_URL` and `CORS_ORIGINS` stay unset.
+After the first deploy, add the domain to Firebase → Authentication → Settings → Authorised domains. The frontend
+container serves the dashboard and proxies the API on the same origin, so `VITE_API_URL` and `CORS_ORIGINS` stay unset.
 
 ## Moving from another host
 

@@ -81,8 +81,9 @@ frontend/  React dashboard ──────────────▶ backend
 ```
 
 The repository has three parts: **`backend/`** (all Python: `pyproject.toml`, the dependency lock and tests live
-there, and every Python command runs from it), **`frontend/`** (the dashboard) and **`docs/`**. Deployment files
-(`Dockerfile`, [`deploy/aws-ec2`](deploy/aws-ec2/README.md), Firestore rules) stay at the root.
+there, and every Python command runs from it), **`frontend/`** (the dashboard) and **`docs/`**. Each of `backend/` and `frontend/` has
+its own `Dockerfile` (two containers); [`docker-compose.yml`](docker-compose.yml), [`deploy/aws-ec2`](deploy/aws-ec2/README.md) and the
+Firestore rules stay at the root.
 
 | Folder | Contents |
 | --- | --- |
@@ -145,6 +146,12 @@ cd backend && python -m uvicorn app.main:app --port 8000   # API on http://127.0
 cd frontend && npm run dev                                 # dashboard (second terminal) on http://localhost:3000
 ```
 
+Or in Docker, as two containers (dashboard on nginx, backend with Chromium):
+
+```bash
+docker compose up --build   # http://localhost:8080
+```
+
 Run the tests:
 
 ```bash
@@ -181,7 +188,7 @@ Production runs on one AWS EC2 instance (API with the dashboard, a pipeline work
 | `PIPELINE_EXECUTION=worker` | Run pipelines in a separate worker service |
 | `DASHBOARD_URL` | Links in Slack alerts and GitHub commit statuses |
 
-Every setting, the Dockerfile, the worker, Firestore rules and indexes, and CI are described in the
+Every setting, the two Docker images, the worker, Firestore rules and indexes, and CI are described in the
 [Deployment & Operations Guide](docs/deployment-operations.md).
 
 ---

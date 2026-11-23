@@ -1,8 +1,9 @@
 # Continuous deployment, pull-based: after CI passes on main this builds the
-# image and publishes it to GitHub's container registry (ghcr.io) as
-# :<commit> and :main.  The EC2 instance pulls it: a systemd timer there
-# (deploy/aws-ec2/cd/pull-deploy.sh) sees the new :main, starts it, waits for
-# /api/health and rolls back to the previous image if it is not healthy.
+# backend and frontend images and publishes them to GitHub's container
+# registry (ghcr.io) as :<commit> and :main.  The EC2 instance pulls them: a
+# systemd timer there (deploy/aws-ec2/cd/pull-deploy.sh) sees the new :main,
+# starts both, waits for /api/health and rolls back to the previous images if
+# they are not healthy.
 #
 # No AWS credentials are stored here or needed: the AWS project's managed
 # policies do not allow GitHub to federate into the account (OIDC), and a
@@ -62,25 +63,53 @@ jobs:
         with:
           ref: ${{ steps.commit.outputs.sha }}
 
-      - name: Build (or reuse) the commit's image and publish it as :main
+      # Two images per commit: the backend (ghcr.io/<owner>/testsphere, the API
+      # and the worker) and the frontend (ghcr.io/<owner>/testsphere-frontend,
+      # the dashboard on nginx). Both are tagged :<sha> and :<sha:0:7>; the
+      # backend's :main moves last, because it is what the instance watches,
+      # and the instance then pulls the frontend of that same commit.
+      - name: Build (or reuse) the commit's images and publish them as :main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
         run: |
           set -eu
           sha=$(git rev-parse HEAD)
-          short=$(git rev-parse --short HEAD)
-          repo="ghcr.io/$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/testsphere"
+          short=${sha:0:7}
+          owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-          if docker pull -q "$repo:$sha" >/dev/null 2>&1; then
-            echo "Image for $sha already published (rollback or rerun): not rebuilding"
-          else
-            docker build --build-arg GIT_COMMIT="$short" \
-              --label org.opencontainers.image.revision="$sha" \
-              --label org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY}" \
-              -t "$repo:$sha" .
-            docker push -q "$repo:$sha"
-          fi
-          docker tag "$repo:$sha" "$repo:main"
-          docker push -q "$repo:main"
-          echo "Published $repo:main = $sha; the instance picks it up within a few minutes." >> "$GITHUB_STEP_SUMMARY"
+          publish() {  # publish REPO CONTEXT
+            local repo=$1 context=$2
+            if docker pull -q "$repo:$sha" >/dev/null 2>&1; then
+              echo "$repo:$sha already published (rollback or rerun): not rebuilding"
+            else
+              docker build --build-arg GIT_COMMIT="$short" \
+                --label org.opencontainers.image.revision="$sha" \
+                --label org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY}" \
+                -t "$repo:$sha" "$context"
+              docker push -q "$repo:$sha"
+            fi
+            docker tag "$repo:$sha" "$repo:$short"
+            docker push -q "$repo:$short"
+          }
+          publish "ghcr.io/$owner/testsphere-frontend" frontend
+          publish "ghcr.io/$owner/testsphere" backend
+          # The instance pulls without a token. GitHub creates a new package as
+          # private, so moving :main before both are public would make the
+          # instance try (and roll back) a version it cannot pull
+          for repo in "ghcr.io/$owner/testsphere-frontend" "ghcr.io/$owner/testsphere"; do
+            if ! DOCKER_CONFIG=$(mktemp -d) docker manifest inspect "$repo:$sha" >/dev/null 2>&1; then
+              echo "::error::$repo is not public. Package settings → Change visibility → Public, then re-run this workflow."
+              exit 1
+            fi
+          done
+          for repo in "ghcr.io/$owner/testsphere-frontend" "ghcr.io/$owner/testsphere"; do
+            docker tag "$repo:$sha" "$repo:main"
+            docker push -q "$repo:main"
+          done
+          {
+            echo "Published for $sha:"
+            echo "- ghcr.io/$owner/testsphere:main (backend)"
+            echo "- ghcr.io/$owner/testsphere-frontend:main (frontend)"
+            echo "The instance picks them up within a few minutes."
+          } >> "$GITHUB_STEP_SUMMARY"
