@@ -110,7 +110,7 @@ def generate(repo: str, findings: list[dict[str, Any]], site_url: str, auth: Git
 def _public(row: Record) -> dict[str, Any]:
     out = {k: row.get(k) for k in ("id", "target_url", "repo", "commit", "frameworks", "files", "applied",
                                     "manual", "patch", "finding_keys", "actor", "created_at", "pull_request",
-                                    "run_id", "project_id")}
+                                    "run_id", "project_id", "kind", "verification", "explanation")}
     forge = "github" if parse_repo(row.get("repo")) else (parse_forge_repo(row.get("repo")) or (None,))[0]
     out["forge"] = forge if row.get("contents") else None
     out["github"] = out["forge"] is not None  # the dashboard's "can open a pull request" flag (any host)
@@ -207,7 +207,24 @@ def _check_text(file: dict[str, Any]) -> str:
     return "not syntax-checked"
 
 
+def _tests_pr_body(row: Record) -> str:
+    """A verified AI fix for the repository's failing tests."""
+    v = row.get("verification") or {}
+    before, after = v.get("before") or {}, v.get("after") or {}
+    lines = ["A fix proposed by **TestSphere AI** for tests that failed in this repository, approved by a person.",
+             "", "### Why", row.get("explanation") or "(no explanation given)", "", "### Verified",
+             f"The repository's tests ran again with this change in TestSphere's sandbox ({v.get('framework') or 'tests'}): "
+             f"{before.get('failed', '?')} failing before, all {after.get('passed', '?')} passing after. "
+             "No test file was changed.", "", "### Files"]
+    lines += [f"- `{f['path']}`" for f in row.get("files") or []]
+    lines += ["", "Review it as you would any change: passing tests show it fixes what they check, not that it is "
+              "right for everything else."]
+    return "\n".join(lines)
+
+
 def _pr_body(row: Record) -> str:
+    if row.get("kind") == "tests":
+        return _tests_pr_body(row)
     lines = ["Security fixes proposed by **TestSphere AI** for issues its security scan found on "
              f"{row['target_url']}.", "", "### What changes"]
     lines += [f"- `{a['check_id']}`: {a['how']} (`{a['file']}`)" for a in row.get("applied") or []]
@@ -257,8 +274,10 @@ async def open_pull_request(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail=f"Save a {host} credential with write access first "
                                    "(Profile → Integrations → Git credentials).")
-    title = (payload.title if payload and payload.title else None) or \
-        f"Security headers and cookie fixes from TestSphere ({', '.join(sorted({a['check_id'] for a in row.get('applied') or []}))})"[:200]
+    default_title = ("Fix failing tests (verified by TestSphere)" if row.get("kind") == "tests" else
+                     "Security headers and cookie fixes from TestSphere "
+                     f"({', '.join(sorted({a['check_id'] for a in row.get('applied') or []}))})")
+    title = ((payload.title if payload and payload.title else None) or default_title)[:200]
 
     def open_pr() -> dict[str, Any]:
         args = {"base_sha": row["commit"], "files": sorted(contents.items()), "branch": f"testsphere/fix-{patch_id}",

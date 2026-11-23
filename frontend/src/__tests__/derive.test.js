@@ -82,6 +82,10 @@ describe('loopModel', () => {
 
     m = loopModel(ws({ pipelineRuns: [{ ...run, fix_patch: { ...run.fix_patch, pull_request: { number: 4 } } }] }));
     expect(state(m, 'remediate')).toBe('done');
+
+    m = loopModel(ws({ pipelineRuns: [{ ...run, fix_patch: null, ai_fix: { id: 5, pull_request: null } }] }));
+    expect(state(m, 'remediate')).toBe('waiting');
+    expect(m.stages.find((s) => s.id === 'remediate').note).toBe('AI fix for failing tests to review');
   });
 
   it('asks for approval and retests, and asks for a deploy hook', () => {

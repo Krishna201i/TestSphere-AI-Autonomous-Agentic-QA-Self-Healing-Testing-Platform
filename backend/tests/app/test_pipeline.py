@@ -1038,3 +1038,112 @@ def test_without_ci_the_sandbox_runs_the_repositorys_tests(fresh_store, stub_net
     assert stage(run, "unit")["status"] == "failed" and run["status"] == "failed"
     assert run["unit_tests"]["output"] == "1 failed"
     assert tmp_path.exists()  # a local folder is never deleted (only a clone is)
+
+
+# ── AI fixes for the repository's failing tests (verified in the sandbox) ──
+
+
+def git_repo(path):
+    import subprocess
+
+    path.mkdir(parents=True)
+    (path / "test_a.py").write_text("from a import f\n\ndef test_f():\n    assert f() == 1\n", encoding="utf-8")
+    (path / "a.py").write_text("def f():\n    return 0\n", encoding="utf-8")
+    for cmd in (["init", "-q"], ["add", "."], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"]):
+        subprocess.run(["git", "-C", str(path), *cmd], check=True, capture_output=True)
+    return path
+
+
+@pytest.fixture
+def sandbox_fails(monkeypatch, tmp_path):
+    """The sandbox runs (faked): the repository's tests fail; AI fixes are on (faked)."""
+    from app.pipeline import ai_fix, unit_tests
+
+    monkeypatch.setattr(settings, "INGEST_ALLOW_LOCAL_PATHS", True)
+    monkeypatch.setattr(settings, "INGEST_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setattr(unit_tests, "unavailable_reason", lambda: None)
+    calls = {"sandbox": 0, "propose": 0}
+
+    def sandbox(root, plan):
+        calls["sandbox"] += 1
+        return {"source": "sandbox", "framework": "pytest", "status": calls.get("status", "failed"),
+                "passed": 2, "failed": 1, "exit_code": 1, "output": "FAILED test_a.py::test_f",
+                "detail": "Sandbox (pytest): 2 passed, 1 failed"}
+
+    async def propose(root, plan, failing):
+        calls["propose"] += 1
+        return calls.get("proposal") or {
+            "status": "verified", "attempts": 1, "explanation": "f() returned 0.", "framework": "pytest",
+            "before": {"passed": 2, "failed": 1}, "after": {"passed": 3, "failed": 0},
+            "files": [{"path": "a.py", "diff": "--- a/a.py\n+++ b/a.py\n-    return 0\n+    return 1\n",
+                       "verified": True, "content": "def f():\n    return 1\n"}]}
+
+    monkeypatch.setattr(unit_tests, "run_in_sandbox", sandbox)
+    monkeypatch.setattr(ai_fix, "enabled", lambda: True)
+    monkeypatch.setattr(ai_fix, "propose", propose)
+    return calls
+
+
+def test_a_verified_ai_fix_is_proposed_for_failing_repository_tests(fresh_store, stub_network, sandbox_fails, tmp_path):
+    repo = git_repo(tmp_path / "shop")
+    project = make_project(fresh_store, repo_url=str(repo))
+    run = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+
+    detail = stage(run, "unit")["detail"]
+    assert detail.startswith("Sandbox (pytest): 2 passed, 1 failed")
+    assert "AI fix verified in the sandbox (1 failing → all 3 passing), ready for review" in detail
+    assert run["status"] == "failed"  # the repository's tests still fail until the fix is merged
+    [patch] = [p for p in fresh_store.find(FIX_PATCHES) if p.get("kind") == "tests"]
+    assert run["ai_fix"]["id"] == patch["id"] and patch["run_id"] == run["id"]
+    assert patch["contents"] == {"a.py": "def f():\n    return 1\n"} and patch["commit"]
+    assert patch["verification"]["after"] == {"passed": 3, "failed": 0}
+
+    from app.api.patches import _pr_body, _public
+
+    body = _pr_body(patch)
+    assert "1 failing before, all 3 passing after" in body and "No test file was changed" in body
+    assert "f() returned 0." in body
+    assert _public(patch)["kind"] == "tests" and _public(patch)["github"] is False  # a local folder: no pull request
+
+
+def test_the_same_commit_is_not_sent_to_the_model_twice(fresh_store, stub_network, sandbox_fails, tmp_path):
+    project = make_project(fresh_store, repo_url=str(git_repo(tmp_path / "shop")))
+    first = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    second = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+
+    assert sandbox_fails["propose"] == 1
+    assert second["ai_fix"]["id"] == first["ai_fix"]["id"]
+    assert f"AI fix from run #{first['id']} (same commit) ready for review" in stage(second, "unit")["detail"]
+
+    sandbox_fails["proposal"] = {"status": "not_found", "attempts": 2, "note": "no change made every test pass"}
+    other = ProjectService.create_project(fresh_store, name="Other", owner_uid="local-dev", app_url=URL,
+                                          repo_url=str(git_repo(tmp_path / "other")))
+    run_once(fresh_store, other, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    again = run_once(fresh_store, other, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert sandbox_fails["propose"] == 2
+    assert "no AI fix for this commit (tried in run #" in stage(again, "unit")["detail"]
+
+
+def test_a_ci_failure_is_reproduced_in_the_sandbox_before_an_ai_fix(fresh_store, stub_network, sandbox_fails, tmp_path):
+    project = make_project(fresh_store, repo_url=str(git_repo(tmp_path / "shop")))
+    stub_network["ci"] = ci_result("failed", failed=1)
+    run = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert sandbox_fails["sandbox"] == 1 and sandbox_fails["propose"] == 1
+    assert stage(run, "unit")["detail"].startswith("CI on aaaaaaa: 3 passed, 1 failed · AI fix verified")
+    assert run["unit_tests"]["source"] == "ci"  # the stage reports CI's result
+
+    sandbox_fails["status"] = "passed"  # fails in CI, passes in the sandbox: nothing to verify a fix against
+    other = ProjectService.create_project(fresh_store, name="Other", owner_uid="local-dev", app_url=URL,
+                                          repo_url=str(git_repo(tmp_path / "other")))
+    run = run_once(fresh_store, other, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert "AI fix not tried: the CI failure did not reproduce in the sandbox" in stage(run, "unit")["detail"]
+    assert sandbox_fails["propose"] == 1
+
+
+def test_security_proposals_ignore_test_fix_patches(fresh_store, stub_network, fix_repo):
+    project = make_project(fresh_store, repo_url=str(fix_repo))
+    first = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
+    fresh_store.insert(FIX_PATCHES, project_id=project["id"], kind="tests", patch="other", repo=str(fix_repo),
+                       owner_uid="local-dev")
+    second = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
+    assert second["fix_patch"]["id"] == first["fix_patch"]["id"]

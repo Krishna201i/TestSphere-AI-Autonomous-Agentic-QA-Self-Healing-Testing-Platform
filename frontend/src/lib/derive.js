@@ -219,7 +219,9 @@ export function loopModel(ws) {
     if (st.id === 'attack' && ws.scanning) { state = 'running'; note = 'Scanning'; }
     if (st.id === 'remediate') {
       const proposal = run?.fix_patch;
+      const aiFix = run?.ai_fix;
       if (proposal?.id && !proposal.pull_request && !active) { state = 'waiting'; note = `${proposal.fixes} fix${proposal.fixes === 1 ? '' : 'es'} to review`; }
+      else if (aiFix?.id && !aiFix.pull_request && !active) { state = 'waiting'; note = 'AI fix for failing tests to review'; }
       else if (awaitingApproval) { state = 'waiting'; note = `${awaitingApproval} fix${awaitingApproval === 1 ? '' : 'es'} to approve`; }
       else if (approved.length) { state = 'done'; note = `${approved.length} approved`; }
     }

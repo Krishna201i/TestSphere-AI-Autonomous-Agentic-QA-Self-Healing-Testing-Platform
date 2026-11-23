@@ -676,7 +676,7 @@ def _sync_repo_tests(db: Store, project: Record, application: Record, analysis: 
     created = updated = left_out = 0
     for spec in specs:
         for test in spec.get("tests") or []:
-            key = hashlib.sha1(f"{spec['file']}::{test['name']}".encode()).hexdigest()[:16]
+            key = hashlib.sha256(f"{spec['file']}::{test['name']}".encode()).hexdigest()[:16]
             external_id = prefix + key
             checked = studio.check_steps(test.get("steps") or [], analysis, app_url)
             if studio.blocking(checked):
@@ -950,7 +950,7 @@ async def _stage_unit(state: _RunState, project: Record, blueprint: dict[str, An
     is kept on the run as ``unit_tests``."""
     from app.api.integrations import git_auth, github_token
     from app.github import GitHubError
-    from app.pipeline import unit_tests
+    from app.pipeline import ai_fix, unit_tests
     from ingestion import (
         SourceError,
         clone,
@@ -985,31 +985,50 @@ async def _stage_unit(state: _RunState, project: Record, blueprint: dict[str, An
             ci_note = f"CI results not readable: {exc}"
         if result is None and not ci_note:
             ci_note = "No CI checks on this commit" if "github.com" in repo else "CI results are read from GitHub only"
-    if result is None and mode in ("auto", "sandbox"):
+    # The sandbox: the tests themselves when CI has no results, and to reproduce a
+    # CI failure for an AI fix (a fix is kept only when the sandbox shows it works)
+    want_tests = result is None and mode in ("auto", "sandbox")
+    want_fix = result is not None and result["status"] == "failed" and mode != "ci" and ai_fix.enabled()
+    fix_note = ""
+    if want_tests or want_fix:
         reason = await asyncio.to_thread(unit_tests.unavailable_reason)
-        if reason:
+        if reason and want_tests:
             state.stage("unit", "skipped", (f"{ci_note}; " if ci_note else "") + f"sandbox not used: {reason}")
             return
+        if reason:
+            fix_note = f"AI fix not tried: {reason}"
         root = None
         try:
-            if is_git_url(repo):
-                auth = await asyncio.to_thread(git_auth, db, owner, repo)
-                from app.api.ingest import _git_hosts
+            if not reason:
+                if is_git_url(repo):
+                    auth = await asyncio.to_thread(git_auth, db, owner, repo)
+                    from app.api.ingest import _git_hosts
 
-                root = await asyncio.to_thread(clone, repo, Path(settings.INGEST_WORKSPACE), _git_hosts(), auth=auth)
-            elif settings.INGEST_ALLOW_LOCAL_PATHS:
-                root = resolve_local(repo)
-            else:
-                raise SourceError("Local folder paths are disabled on this server")
-            plan = unit_tests.plan_for(root)
-            if plan is None:
-                state.stage("unit", "skipped", (f"{ci_note}; " if ci_note else "")
-                            + "no pytest, npm/yarn/pnpm test script or go test found to run")
-                return
-            result = await asyncio.to_thread(unit_tests.run_in_sandbox, root, plan)
+                    root = await asyncio.to_thread(clone, repo, Path(settings.INGEST_WORKSPACE), _git_hosts(), auth=auth)
+                elif settings.INGEST_ALLOW_LOCAL_PATHS:
+                    root = resolve_local(repo)
+                else:
+                    raise SourceError("Local folder paths are disabled on this server")
+                plan = unit_tests.plan_for(root)
+                if plan is None and want_tests:
+                    state.stage("unit", "skipped", (f"{ci_note}; " if ci_note else "")
+                                + "no pytest, npm/yarn/pnpm test script or go test found to run")
+                    return
+                if plan is None:
+                    fix_note = "AI fix not tried: no test command the sandbox can run"
+                else:
+                    sandboxed = await asyncio.to_thread(unit_tests.run_in_sandbox, root, plan)
+                    if want_tests:
+                        result = sandboxed
+                    if sandboxed["status"] == "failed" and ai_fix.enabled():
+                        fix_note = await _ai_fix(state, project, root, plan, sandboxed)
+                    elif want_fix:
+                        fix_note = "AI fix not tried: the CI failure did not reproduce in the sandbox"
         except (SourceError, unit_tests.SandboxError) as exc:
-            state.stage("unit", "failed", f"Sandbox: {exc}")
-            return
+            if want_tests:
+                state.stage("unit", "failed", f"Sandbox: {exc}")
+                return
+            fix_note = f"AI fix not tried: {exc}"
         finally:
             if root is not None and is_git_url(repo):
                 discard_checkout(root)
@@ -1019,7 +1038,49 @@ async def _stage_unit(state: _RunState, project: Record, blueprint: dict[str, An
 
     state.save(unit_tests=result)
     status = {"passed": "done", "failed": "failed", "pending": "done", "none": "done", "error": "failed"}[result["status"]]
-    state.stage("unit", status, result["detail"])
+    state.stage("unit", status, result["detail"] + (f" · {fix_note}" if fix_note else ""))
+
+
+async def _ai_fix(state: _RunState, project: Record, root: Path, plan: Any, failing: dict[str, Any]) -> str:
+    """Ask for a verified AI fix of the failing tests (``app.pipeline.ai_fix``) and,
+    when there is one, store it as a fix patch for review (``ai_fix`` on the run).
+    A commit already tried by an earlier run is not tried again: that run's fix
+    (or its "no fix") is reused, so a schedule does not ask the model every time.
+    Returns a note for the stage."""
+    from app.api import patches
+    from app.pipeline import ai_fix
+
+    db = state.db
+    commit = await asyncio.to_thread(patches._commit, root)
+    if commit:
+        for earlier in db.find(PIPELINE_RUNS, project_id=project["id"], order_by="id", descending=True, limit=20):
+            tried = earlier.get("ai_fix") or {}
+            if earlier["id"] < state.id and tried.get("commit") == commit:
+                state.save(ai_fix=tried)
+                return (f"AI fix from run #{earlier['id']} (same commit) ready for review" if tried.get("id")
+                        else f"no AI fix for this commit (tried in run #{earlier['id']})")
+    proposal = await ai_fix.propose(root, plan, failing)
+    if proposal["status"] != "verified":
+        state.save(ai_fix={"id": None, "commit": commit, "note": proposal["note"]})
+        return f"no AI fix: {proposal['note']}"
+
+    files = proposal["files"]
+    built = {
+        "commit": commit, "frameworks": [plan.framework],
+        "files": [{"path": f["path"], "diff": f["diff"], "verified": True, "check_note": None} for f in files],
+        "contents": {f["path"]: f["content"] for f in files},  # stays on the server, for the pull request
+        "applied": [{"check_id": "TESTS", "how": proposal["explanation"] or "AI fix", "file": f["path"]} for f in files],
+        "manual": [], "patch": "".join(f["diff"] for f in files),
+    }
+    verification = {"framework": plan.framework, "before": proposal["before"], "after": proposal["after"]}
+    row = await asyncio.to_thread(
+        patches.store_patch, db, built, target_url=project["app_url"], repo=project["repo_url"], findings=[],
+        actor=state.doc["actor"], owner_uid=project.get("owner_uid"), run_id=state.id, project_id=project["id"],
+        kind="tests", explanation=proposal["explanation"], verification=verification)
+    state.save(ai_fix={"id": row["id"], "commit": commit, "files": len(files), "attempts": proposal["attempts"],
+                       "pull_request": None})
+    return (f"AI fix verified in the sandbox ({proposal['before']['failed']} failing → all "
+            f"{proposal['after']['passed']} passing), ready for review")
 
 
 async def _stage_fix(state: _RunState, project: Record, security: dict[str, Any] | None) -> None:
@@ -1077,7 +1138,8 @@ async def _stage_fix(state: _RunState, project: Record, security: dict[str, Any]
         state.save(fix_patch={"id": None, "fixes": 0, "files": 0, "manual": len(built["manual"]), "pull_request": None})
         return
 
-    previous = db.find(FIX_PATCHES, project_id=project["id"], order_by="id", descending=True, limit=1, **owned)
+    previous = [r for r in db.find(FIX_PATCHES, project_id=project["id"], order_by="id", descending=True, limit=10,
+                                   **owned) if r.get("kind") != "tests"][:1]
     if previous and previous[0].get("patch") == built["patch"] and previous[0].get("repo") == repo:
         row = previous[0]
         reused = True
