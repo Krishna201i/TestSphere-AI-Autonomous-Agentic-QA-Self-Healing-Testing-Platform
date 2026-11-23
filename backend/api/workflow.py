@@ -261,3 +261,15 @@ async def stream_workflow_events(
         (format_sse_event(event) for event in events),
         media_type="text/event-stream",
     )
+
+
+@router.get("/timeline/{execution_id}")
+async def get_execution_timeline(
+    execution_id: int,
+    db: Store = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Retrieve structured agent decision timeline for a test execution."""
+    execution = db.get(TEST_EXECUTIONS, execution_id)
+    ensure_owned(user, execution, f"TestExecution #{execution_id}")
+    return _workflow_orchestrator.execution_timeline(execution_id)

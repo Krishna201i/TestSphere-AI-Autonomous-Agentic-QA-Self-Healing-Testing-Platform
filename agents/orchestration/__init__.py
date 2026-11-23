@@ -23,6 +23,12 @@ from agents.orchestration.recovery_policy import (
     RecoveryPolicy,
     RecoveryPolicyConfig,
 )
+from agents.orchestration.timeline import (
+    AgentExecutionTimeline,
+    TimelineStage,
+    build_agent_timeline,
+    sanitize_observability_data,
+)
 from agents.orchestration.workflow_schemas import (
     VALID_TRANSITIONS,
     AgentState,
@@ -53,5 +59,10 @@ __all__ = [
     "RecoveryPolicyConfig",
     "RecoveryDecision",
     "RecoveryAction",
+    # Agent Observability & Timeline
+    "AgentExecutionTimeline",
+    "TimelineStage",
+    "build_agent_timeline",
+    "sanitize_observability_data",
 ]
 

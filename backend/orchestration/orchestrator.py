@@ -26,6 +26,7 @@ from agents.orchestration.recovery_policy import (
     RecoveryPolicy,
     RecoveryPolicyConfig,
 )
+from agents.orchestration.timeline import build_agent_timeline
 from agents.orchestration.workflow_schemas import (
     AgentState,
     ExecutionResult,
@@ -578,13 +579,22 @@ class PlatformWorkflowOrchestrator:
             )
         )
 
+        events_list = list(state.events) if state else []
+        timeline = build_agent_timeline(
+            workflow_id=workflow_id,
+            execution_id=execution.id,
+            events=events_list,
+            final_status=final_status,
+        )
+
         return {
             "execution_id": execution.id,
             "status": final_status,
             "duration_ms": duration_ms,
             "error_message": error_msg,
             "dashboard_summary": dashboard_summary.model_dump(),
-            "events": [e.model_dump() for e in (state.events if state else [])],
+            "events": [e.model_dump() for e in events_list],
+            "timeline": timeline.to_dict(),
             "engine_steps": [st.model_dump(mode="json") for st in shown_result.steps],
             "visual": visual,
             "analysis": analysis_data,
@@ -861,3 +871,13 @@ class PlatformWorkflowOrchestrator:
         state = (self.ai_orchestrator.get_state(f"wf-exec-{execution_id}")
                  or self.ai_orchestrator.get_state(str(execution_id)))
         return list(state.events) if state else []
+
+    def execution_timeline(self, execution_id: int) -> dict[str, Any]:
+        """Recorded events of the workflow run for *execution_id* structured as an agent timeline."""
+        events = self.execution_events(execution_id)
+        timeline = build_agent_timeline(
+            workflow_id=f"wf-exec-{execution_id}",
+            execution_id=execution_id,
+            events=events,
+        )
+        return timeline.to_dict()
