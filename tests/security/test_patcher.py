@@ -600,3 +600,34 @@ def test_package_bump_refuses_duplicate_json_keys(original):
     from security.patcher import _patch_package_json
 
     assert _patch_package_json(original, "axios", "1.8.2") == (original, False)
+
+
+@pytest.mark.parametrize("malformed", [None, [], "bad", {}, {"check_id": None}, {"check_id": []}, {"check_id": ""}])
+def test_malformed_findings_do_not_block_valid_repairs(tmp_path, malformed):
+    root = write(tmp_path / "repo", {"main.py": FASTAPI_APP})
+
+    result = build_patch(root, [malformed, finding("SEC-HDR-FRAME")], SITE)
+
+    assert len(result.manual) == 1
+    assert result.manual[0].check_id == "INVALID-FINDING"
+    assert "manual review" in result.manual[0].reason.lower()
+    assert {item.check_id for item in result.applied} == {"SEC-HDR-FRAME"}
+    assert result.files[0].verified is True
+
+
+@pytest.mark.parametrize("field", ["recommendation", "component", "title"])
+@pytest.mark.parametrize("value", [42, ["value"], {"value": "text"}])
+def test_malformed_finding_text_fields_require_manual_review(field, value):
+    fix, manual = fixes_for([finding("SEC-DEP-BAD", **{field: value})])
+
+    assert fix.dependencies == []
+    assert len(manual) == 1
+    assert manual[0].check_id == "SEC-DEP-BAD"
+    assert field in manual[0].reason
+
+
+def test_whitespace_dependency_title_requires_manual_review():
+    fix, manual = fixes_for([finding("SEC-DEP-BAD", title="   ", fixed_in="1.2.3")])
+
+    assert fix.dependencies == []
+    assert len(manual) == 1

@@ -104,7 +104,17 @@ def fixes_for(findings: list[dict]) -> tuple[Fix, list[Manual]]:
     """Group findings into one Fix; the ones no patch can address go to manual."""
     fix, manual = Fix(), []
     for f in findings:
+        if not isinstance(f, dict) or not isinstance(f.get("check_id"), str) or not f["check_id"].strip():
+            manual.append(Manual("INVALID-FINDING", "Finding needs a non-empty string check_id; manual review is required."))
+            continue
         cid = f["check_id"]
+        invalid_fields = [
+            name for name in ("recommendation", "component", "title")
+            if f.get(name) is not None and not isinstance(f[name], str)
+        ]
+        if invalid_fields:
+            manual.append(Manual(cid, f"Invalid text field(s): {', '.join(invalid_fields)}; manual review is required."))
+            continue
         if cid == "SEC-CORS":
             fix.cors = True
             fix.sources["cors"] = cid
@@ -149,7 +159,8 @@ def fixes_for(findings: list[dict]) -> tuple[Fix, list[Manual]]:
                 if m_comp:
                     pkg_name = m_comp.group(1)
                 elif f.get("title"):
-                    pkg_name = f["title"].split()[0]
+                    words = f["title"].split()
+                    pkg_name = words[0] if words else None
 
             if fixed_version and pkg_name:
                 if not (
