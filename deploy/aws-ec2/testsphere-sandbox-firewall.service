@@ -1,0 +1,12 @@
+[Unit]
+Description=TestSphere sandbox firewall (repository tests cannot reach the metadata service, the VPC or this host)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/testsphere/app/deploy/aws-ec2/sandbox-firewall.sh
+
+[Install]
+WantedBy=multi-user.target

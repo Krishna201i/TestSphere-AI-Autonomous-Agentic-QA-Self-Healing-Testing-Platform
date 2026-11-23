@@ -27,6 +27,11 @@ RUN python -m playwright install --with-deps chromium \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
+# The Docker CLI (static binary, no daemon): the worker starts the sandbox
+# containers that run a repository's own tests (app/pipeline/unit_tests.py),
+# through the host's Docker socket when it is mounted (it is not by default)
+COPY --from=docker:27.5.1-cli /usr/local/bin/docker /usr/local/bin/docker
+
 COPY pyproject.toml ./
 COPY app/ app/
 COPY agents/ agents/

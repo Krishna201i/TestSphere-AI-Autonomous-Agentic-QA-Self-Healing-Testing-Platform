@@ -30,6 +30,7 @@ import logging
 import re
 from collections import Counter
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -70,6 +71,7 @@ STAGES = (
     ("execute", "Test execution"),
     ("heal", "Self-healing"),
     ("security", "Security scan"),
+    ("unit", "Repository tests"),
     ("fix", "Fix proposals"),
     ("report", "Report"),
 )
@@ -432,6 +434,9 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
     security = await _stage_security(state, app_url, owner, scanner, active=bool(project.get("active_scan")),
                                      pages=_tested_pages(test_cases, app_url),
                                      routes=(blueprint or {}).get("routes"))
+
+    # ── the repository's own unit tests: its CI results, or the sandbox ──
+    await _stage_unit(state, project, blueprint)
 
     # ── fix proposals: a patch for the open findings, for a human to approve ──
     await _stage_fix(state, project, security)
@@ -938,6 +943,85 @@ def flaky_tests(history: list[list[dict[str, Any]]], current: list[dict[str, Any
             if sum(1 for a, b in zip(seq, seq[1:], strict=False) if a != b) >= FLAKY_FLIPS}
 
 
+async def _stage_unit(state: _RunState, project: Record, blueprint: dict[str, Any] | None) -> None:
+    """The repository's own unit tests (see ``app.pipeline.unit_tests``): its CI
+    checks on the run's commit, else a sandboxed run.  Failing tests fail the
+    run; CI still running, or a sandbox that cannot run, never does.  The result
+    is kept on the run as ``unit_tests``."""
+    from app.api.integrations import git_auth, github_token
+    from app.github import GitHubError
+    from app.pipeline import unit_tests
+    from ingestion import (
+        SourceError,
+        clone,
+        discard_checkout,
+        is_git_url,
+        resolve_local,
+    )
+
+    db = state.db
+    owner = project.get("owner_uid")
+    repo = (project.get("repo_url") or "").strip()
+    mode = settings.UNIT_TESTS
+    if mode == "off":
+        state.stage("unit", "skipped", "Off on this server (UNIT_TESTS=off)")
+        return
+    if not repo:
+        state.stage("unit", "skipped", "No repository linked to this project")
+        return
+    if blueprint is not None and "test_suites" in blueprint and not blueprint["test_suites"]:
+        state.stage("unit", "skipped", "The repository has no unit tests")
+        return
+
+    state.stage("unit", "running")
+    result: dict[str, Any] | None = None
+    ci_note = ""
+    if mode in ("auto", "ci"):
+        try:
+            token = await asyncio.to_thread(github_token, db, owner)
+            result = await unit_tests.from_ci(repo, token, state.doc.get("commit_sha"),
+                                              wait=settings.UNIT_TESTS_CI_WAIT)
+        except GitHubError as exc:
+            ci_note = f"CI results not readable: {exc}"
+        if result is None and not ci_note:
+            ci_note = "No CI checks on this commit" if "github.com" in repo else "CI results are read from GitHub only"
+    if result is None and mode in ("auto", "sandbox"):
+        reason = await asyncio.to_thread(unit_tests.unavailable_reason)
+        if reason:
+            state.stage("unit", "skipped", (f"{ci_note}; " if ci_note else "") + f"sandbox not used: {reason}")
+            return
+        root = None
+        try:
+            if is_git_url(repo):
+                auth = await asyncio.to_thread(git_auth, db, owner, repo)
+                from app.api.ingest import _git_hosts
+
+                root = await asyncio.to_thread(clone, repo, Path(settings.INGEST_WORKSPACE), _git_hosts(), auth=auth)
+            elif settings.INGEST_ALLOW_LOCAL_PATHS:
+                root = resolve_local(repo)
+            else:
+                raise SourceError("Local folder paths are disabled on this server")
+            plan = unit_tests.plan_for(root)
+            if plan is None:
+                state.stage("unit", "skipped", (f"{ci_note}; " if ci_note else "")
+                            + "no pytest, npm/yarn/pnpm test script or go test found to run")
+                return
+            result = await asyncio.to_thread(unit_tests.run_in_sandbox, root, plan)
+        except (SourceError, unit_tests.SandboxError) as exc:
+            state.stage("unit", "failed", f"Sandbox: {exc}")
+            return
+        finally:
+            if root is not None and is_git_url(repo):
+                discard_checkout(root)
+    if result is None:
+        state.stage("unit", "skipped", ci_note)
+        return
+
+    state.save(unit_tests=result)
+    status = {"passed": "done", "failed": "failed", "pending": "done", "none": "done", "error": "failed"}[result["status"]]
+    state.stage("unit", status, result["detail"])
+
+
 async def _stage_fix(state: _RunState, project: Record, security: dict[str, Any] | None) -> None:
     """Build a fix patch for the open findings this run's scan left, against the
     project's repository, and link it to the run (``fix_patch``).
@@ -1062,8 +1146,12 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
         "database": state.doc.get("database"),
     }
     summary["narrative"] = run_summary(summary, results, regressions)
-    status = "failed" if failed else "passed"
+    unit = state.doc.get("unit_tests") or {}
+    summary["unit_tests"] = ({k: unit.get(k) for k in ("source", "status", "passed", "failed", "running", "framework")}
+                             if unit else None)
+    status = "failed" if failed or unit.get("status") == "failed" else "passed"
     state.stage("report", "done", f"{summary['passed']}/{summary['total']} passed"
+                                  + (f" · repository tests failed ({unit.get('detail')})" if unit.get("status") == "failed" else "")
                                   + (f" · {len(regressions)} regression(s)" if regressions else "")
                                   + (f" · {summary['visual_changes']} visual change(s) to review"
                                      if summary["visual_changes"] else "")

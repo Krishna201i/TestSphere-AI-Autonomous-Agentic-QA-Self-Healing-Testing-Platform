@@ -13,7 +13,7 @@ internet ─▶ caddy :443 ─▶ frontend :8080 ─┬─ dashboard files (ngin
 | `caddy` | `caddy` | HTTPS on 80/443 with an automatic Let's Encrypt certificate for `$DOMAIN`; the only published ports |
 | `frontend` | `testsphere-frontend` ([`frontend/Dockerfile`](../../frontend/Dockerfile)) | The dashboard on nginx; proxies `/api` to the backend |
 | `backend` | `testsphere` ([`backend/Dockerfile`](../../backend/Dockerfile)) | The API (port 8000, reachable only from the frontend) |
-| `worker` | `testsphere` (same as `backend`) | Pipeline runs (`PIPELINE_EXECUTION=worker`) and the scheduler, so an API restart never interrupts a scan |
+| `worker` | `testsphere` (same as `backend`) | Pipeline runs (`PIPELINE_EXECUTION=worker`) and the scheduler, so an API restart never interrupts a scan; starts the sandbox for repository tests |
 
 Firestore is the shared database (worker mode requires it). The backend and worker run with
 `ENGINE_MAX_BROWSERS=1`, sized for a 2 GB instance; raise it on a larger one.
@@ -35,6 +35,37 @@ To add a secret, add its name to `KEYS` in `store-secrets.py`, run it, then reru
 - IMDSv2 required; t3 CPU credits on *standard*, so bursts throttle instead of billing extra.
 - `deploy/aws-ec2/.env` on the instance holds `DOMAIN=<elastic-ip-with-dashes>.sslip.io`, or your own domain once DNS points at the Elastic IP.
   It may also hold `SECURITY_ACTIVE_SCAN_USERS=<firebase-uid>,…` to narrow active (DAST) scans to those accounts. Without it, any account may actively scan the sites whose ownership it verified (Security → Sites for active testing).
+
+## Repository tests (CI and sandbox)
+
+Each run reports the repository's own unit tests (stage *Repository tests*). For a GitHub repository it reads
+the results of its CI on the run's commit, waiting up to `UNIT_TESTS_CI_WAIT` seconds; nothing runs here. When
+there are no CI results, the **worker** runs the tests in a sandbox: throwaway Docker containers started through
+the host's Docker socket (mounted into the worker only). Dependencies install on the `testsphere-sandbox`
+network (bridge `ts-sandbox0`); the tests run with no network. Each container is capped (`SANDBOX_MEMORY`,
+`SANDBOX_CPUS`, 512 processes), runs as nobody with every capability dropped and a read-only root filesystem,
+and gets none of the server's settings or secrets.
+
+**Before it runs anything, the worker checks that the sandbox network cannot reach the instance metadata service**
+(where the instance role's credentials come from), and refuses until it cannot. Install the firewall once (as root,
+for example through SSM Run Command); a unit re-applies it at every boot:
+
+```sh
+install -m 644 /opt/testsphere/app/deploy/aws-ec2/testsphere-sandbox-firewall.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now testsphere-sandbox-firewall
+iptables -S DOCKER-USER | grep ts-sandbox0   # 5 rules: metadata, VPC and private ranges dropped
+```
+
+It also drops what the sandbox sends to private ranges (the VPC, other containers) and to this host. The worker's
+access to the Docker socket is the cost of this feature: it can control Docker on the host (the repository code
+itself only ever runs in the sandbox containers). To turn the sandbox off, add `SANDBOX_ENABLED=false` to this
+folder's `.env` and run `docker compose up -d`; CI results are still read. The worker joins the host's `docker`
+group, whose id `cd/pull-deploy.sh` writes to `.env` as `DOCKER_GID` (set it by hand when updating without CD:
+`getent group docker | cut -d: -f3`).
+
+A 2 GB instance runs the sandbox (768 MB by default) or a browser test at a time, not both comfortably; on a
+larger instance raise `SANDBOX_MEMORY`. The first sandbox run of each kind pulls its image
+(`python:3.12-slim`, `node:22-slim` or `golang:1.23`).
 
 ## Artifacts in S3 (optional)
 

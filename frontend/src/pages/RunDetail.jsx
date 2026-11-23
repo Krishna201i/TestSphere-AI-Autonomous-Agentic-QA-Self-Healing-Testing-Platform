@@ -19,6 +19,7 @@ import { Skeleton } from '../components/charts';
 import { Diagnosis, RunSummary } from '../components/TestResult';
 import ShareReport from '../components/ShareReport';
 import { RunFixProposal } from '../components/FixPatch';
+import RepositoryTests from '../components/RepositoryTests';
 import Pager from '../components/Pager';
 import { usePaged } from '../lib/usePaged';
 import { RunStatus, StageIcon } from './Autopilot';
@@ -427,7 +428,10 @@ export default function RunDetail({ params, onNavigate }) {
 
       {!ACTIVE.includes(run.status) && <ShareReport runId={run.id} />}
 
+      <RepositoryTests result={run.unit_tests} />
+
       {run.fix_patch?.id && <RunFixProposal patchId={run.fix_patch.id} />}
+      {run.ai_fix?.id && <RunFixProposal patchId={run.ai_fix.id} />}
 
       <div className={selected ? 'grid-side-main' : ''}>
         <section className="card">

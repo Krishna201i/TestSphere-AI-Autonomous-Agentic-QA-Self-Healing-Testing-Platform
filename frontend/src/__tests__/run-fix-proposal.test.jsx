@@ -51,6 +51,21 @@ describe('RunFixProposal', () => {
     expect(view.queryByRole('button', { name: /Approve/ })).toBeNull();
   });
 
+  it("shows an AI fix for failing tests with how it was verified", async () => {
+    api.getFixPatch.mockResolvedValue({
+      ...PATCH, kind: 'tests', manual: [], explanation: 'add() subtracted instead of adding.',
+      applied: [{ check_id: 'TESTS', how: 'add() subtracted instead of adding.', file: 'calc.py' }],
+      verification: { before: { passed: 3, failed: 1 }, after: { passed: 4, failed: 0 } },
+    });
+    const view = render(<RunFixProposal patchId={9} />);
+    await flush();
+    expect(view.getByRole('heading', { name: /AI fix for failing tests: ready for review/ })).toBeTruthy();
+    const text = view.container.textContent;
+    expect(text).toContain('1 failing before, all 4 passing with this change. Test files were not changed.');
+    expect(text).toContain('add() subtracted instead of adding.');
+    expect(view.getByRole('button', { name: /Approve and open pull request/ })).toBeTruthy();
+  });
+
   it('explains when a pull request cannot be opened for the repository', async () => {
     api.getFixPatch.mockResolvedValue({ ...PATCH, github: false, repo: '/srv/shop' });
     const view = render(<RunFixProposal patchId={9} />);

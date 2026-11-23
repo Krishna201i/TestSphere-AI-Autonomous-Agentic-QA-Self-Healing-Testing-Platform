@@ -262,6 +262,26 @@ class Settings(BaseSettings):
     # Check pinned dependency versions against OSV.dev (sends package names and versions, never code)
     DEPENDENCY_SCAN: bool = Field(default_factory=lambda: os.getenv("DEPENDENCY_SCAN", "true").lower() in ("true", "1"))
 
+    # The repository's own unit tests (pipeline stage "unit"): "auto" reads its CI
+    # results (GitHub checks) and falls back to the sandbox; "ci", "sandbox" or "off"
+    UNIT_TESTS: str = Field(default_factory=lambda: os.getenv("UNIT_TESTS", "auto").lower())
+    # How long a run waits for the repository's CI checks to finish (seconds; the worker runs
+    # one run at a time, so a long wait holds up the next run)
+    UNIT_TESTS_CI_WAIT: int = Field(default_factory=lambda: max(0, int(os.getenv("UNIT_TESTS_CI_WAIT", "300"))))
+    # AI fixes for the repository's failing tests, kept only when the sandbox shows every
+    # test passing with them: "auto" = on with a real (non-mock) model, "on" or "off"
+    AI_TEST_FIX: str = Field(default_factory=lambda: os.getenv("AI_TEST_FIX", "auto").lower())
+    AI_FIX_TIMEOUT: float = Field(default_factory=lambda: float(os.getenv("AI_FIX_TIMEOUT", "120")))
+    # The sandbox runs untrusted repository code in throwaway Docker containers:
+    # off unless enabled, and it refuses to run when its network can reach the
+    # cloud metadata service (deploy/aws-ec2/sandbox-firewall.sh blocks it)
+    SANDBOX_ENABLED: bool = Field(default_factory=lambda: os.getenv("SANDBOX_ENABLED", "false").lower() in ("true", "1"))
+    SANDBOX_NETWORK: str = Field(default_factory=lambda: os.getenv("SANDBOX_NETWORK", "testsphere-sandbox"))
+    SANDBOX_MEMORY: str = Field(default_factory=lambda: os.getenv("SANDBOX_MEMORY", "768m"))
+    SANDBOX_CPUS: str = Field(default_factory=lambda: os.getenv("SANDBOX_CPUS", "1"))
+    # Seconds for installing dependencies, and again for running the tests
+    SANDBOX_TIMEOUT: int = Field(default_factory=lambda: max(30, int(os.getenv("SANDBOX_TIMEOUT", "600"))))
+
     # Whether tests and page analysis may target private/internal addresses
     # (localhost, 10.x, 169.254.x ...). Off on hosted servers (SSRF), on in local development.
     ALLOW_PRIVATE_TARGETS: bool = Field(default_factory=lambda: _default_allow_private_targets())

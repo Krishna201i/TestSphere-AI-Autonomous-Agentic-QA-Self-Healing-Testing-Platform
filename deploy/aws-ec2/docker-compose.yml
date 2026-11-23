@@ -28,7 +28,7 @@ x-backend: &backend
   restart: unless-stopped
   logging: *logging
   env_file: /opt/testsphere/secrets.env
-  environment:
+  environment: &backend-env
     APP_ENV: production
     # Runs are queued by the API and executed by the worker, so an API restart
     # never interrupts a scan
@@ -66,6 +66,18 @@ services:
   worker:
     <<: *backend
     command: ["python", "-m", "app.worker"]
+    # The sandbox for a repository's own tests (when its CI has no results):
+    # the worker starts throwaway containers through the host's Docker.  This
+    # socket gives the worker control of Docker, so only the worker gets it;
+    # the repository code runs in the sandbox containers, never here.  It
+    # refuses to run until sandbox-firewall.sh blocks the metadata service.
+    environment:
+      <<: *backend-env
+      SANDBOX_ENABLED: ${SANDBOX_ENABLED:-true}
+    volumes:
+      - testsphere-data:/app/backend/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add: ["${DOCKER_GID:-999}"]   # the host's docker group (pull-deploy.sh records it in .env)
     healthcheck:
       # The image's check probes the API's HTTP port, which the worker has none
       # of; this one fails when the worker loop stops (no database read)

@@ -26,6 +26,11 @@ def test_the_backend_image_installs_chromium():
     assert "playwright install --with-deps chromium" in _runtime_stage(BACKEND_DOCKERFILE)
 
 
+def test_the_backend_image_has_the_docker_cli_for_the_sandbox():
+    assert re.search(r"(?m)^COPY --from=docker:[\d.]+-cli /usr/local/bin/docker /usr/local/bin/docker$",
+                     _runtime_stage(BACKEND_DOCKERFILE))
+
+
 def test_the_backend_image_runs_unprivileged():
     assert re.search(r"(?m)^USER testsphere$", _runtime_stage(BACKEND_DOCKERFILE))
 

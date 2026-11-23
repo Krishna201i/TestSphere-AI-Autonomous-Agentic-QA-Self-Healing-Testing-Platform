@@ -223,20 +223,33 @@ export function RunFixProposal({ patchId }) {
   }, [patchId]);
 
   const opened = patch?.pull_request;
+  const forTests = patch?.kind === 'tests';
+  const titleId = `run-fix-title-${patchId}`;
+  const title = forTests
+    ? (opened ? 'AI fix for failing tests, proposed' : 'AI fix for failing tests: ready for review')
+    : (opened ? 'Fixes proposed' : 'Fixes ready for review');
+  const v = patch?.verification;
   return (
-    <section className="card" aria-labelledby="run-fix-title">
+    <section className="card" aria-labelledby={titleId}>
       <div className="card-head">
-        <h3 id="run-fix-title"><FileDiff size={18} aria-hidden="true" />{opened ? 'Fixes proposed' : 'Fixes ready for review'}</h3>
+        <h3 id={titleId}><FileDiff size={18} aria-hidden="true" />{title}</h3>
         <span className="pill violet">4 · Remediation</span>
       </div>
       {error && <div className="error-text" role="alert">Could not load the proposed fixes: {error}</div>}
       {!patch && !error && <div className="hint">Loading the proposed fixes…</div>}
       {patch && (
         <>
+          {forTests && v && (
+            <p className="card-sub">
+              TestSphere&apos;s AI changed the code, then ran the repository&apos;s tests again in the sandbox: {v.before.failed} failing
+              before, <b>all {v.after.passed} passing</b> with this change. Test files were not changed.
+              {patch.explanation && <> <span className="muted">{patch.explanation}</span></>}
+            </p>
+          )}
           <p className="card-sub">
             {opened
-              ? 'You approved these changes; they are in the pull request below. Merge and deploy it, then retest the findings in Validation.'
-              : <>This run turned its open findings into changes to <span className="mono">{patch.repo}</span>. Nothing has been
+              ? `You approved ${forTests ? 'this change' : 'these changes'}; ${forTests ? 'it is' : 'they are'} in the pull request below. Merge and deploy it${forTests ? '' : ', then retest the findings in Validation'}.`
+              : <>{forTests ? 'The change is to' : 'This run turned its open findings into changes to'} <span className="mono">{patch.repo}</span>. Nothing has been
                 changed yet: review the diff, and approve it to open a pull request.</>}
           </p>
           {!patch.github && patch.files.length > 0 && (

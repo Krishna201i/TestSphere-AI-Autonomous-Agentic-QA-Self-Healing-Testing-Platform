@@ -145,8 +145,8 @@ export const pct = (v, digits = 1) => (v == null ? '—' : `${(v * 100).toFixed(
 export const LOOP_STAGES = [
   { id: 'ingest', num: '1', title: 'Codebase Ingestion', short: 'Ingest', runKeys: ['codebase'], built: 'built', page: 'visualizer',
     about: 'Reads the repository: languages, frameworks, routes, existing tests and committed secrets. Nothing in it is executed.' },
-  { id: 'qa', num: '2A', title: 'AI QA Agent', short: 'Test', runKeys: ['analyze', 'plan', 'execute', 'heal'], built: 'built', page: 'autopilot',
-    about: 'Analyzes the live page, plans tests, runs them in Playwright and self-heals broken locators.' },
+  { id: 'qa', num: '2A', title: 'AI QA Agent', short: 'Test', runKeys: ['analyze', 'plan', 'execute', 'heal', 'unit'], built: 'built', page: 'autopilot',
+    about: 'Analyzes the live page, plans tests, runs them in Playwright and self-heals broken locators; also runs the tests in the repository itself (through its CI, or in a sandbox).' },
   { id: 'attack', num: '2B', title: 'AI Attacker Agent', short: 'Attack', runKeys: ['security'], built: 'built', page: 'attacker',
     about: 'Passive, scope-checked security scan: headers, cookies, CORS, TLS and forms. No payloads are sent.' },
   { id: 'report', num: '3', title: 'Unified Reporting', short: 'Report', runKeys: ['report'], built: 'built', page: 'reports',

@@ -12,6 +12,9 @@ TestSphere-AI — GitHub REST client for the integrations a team uses daily.
   do not own.
 * ``set_commit_status``: TestSphere's result on a pushed commit, shown on
   the commit and its pull requests.
+* ``check_runs`` / ``head_commit``: the repository's own CI results for a
+  commit (read only), so a run can report the project's unit tests without
+  running its code.
 
 Only https://api.github.com is ever called, with the user's own token.
 """
@@ -44,14 +47,16 @@ def parse_repo(url: str | None) -> tuple[str, str] | None:
 
 
 class GitHubClient:
-    def __init__(self, token: str, transport: httpx.BaseTransport | None = None,
+    def __init__(self, token: str | None, transport: httpx.BaseTransport | None = None,
                  sleep: Callable[[float], None] = time.sleep) -> None:
+        """*token* None reads public repositories anonymously (a lower rate limit)."""
         self._sleep = sleep  # waiting for a new fork to be ready (tests pass a no-op)
-        self._http = httpx.Client(
-            base_url=API, timeout=20, transport=transport, follow_redirects=False,
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-                     "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "TestSphere-AI"},
-        )
+        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+                   "User-Agent": "TestSphere-AI"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        self._http = httpx.Client(base_url=API, timeout=20, transport=transport, follow_redirects=False,
+                                  headers=headers)
 
     def close(self) -> None:
         self._http.close()
@@ -152,3 +157,14 @@ class GitHubClient:
         if target_url:
             payload["target_url"] = target_url
         self._call("POST", f"/repos/{owner}/{repo}/statuses/{sha}", json=payload)
+
+    # ── CI results (read only) ──────────────────────────────────────────
+    def head_commit(self, owner: str, repo: str) -> str:
+        """The newest commit on the repository's default branch."""
+        branch = self._call("GET", f"/repos/{owner}/{repo}")["default_branch"]
+        return self._call("GET", f"/repos/{owner}/{repo}/commits/{branch}")["sha"]
+
+    def check_runs(self, owner: str, repo: str, sha: str) -> list[dict[str, Any]]:
+        """The CI check runs on commit *sha* (GitHub Actions jobs and other apps' checks)."""
+        body = self._call("GET", f"/repos/{owner}/{repo}/commits/{sha}/check-runs", params={"per_page": 100})
+        return list((body or {}).get("check_runs") or [])

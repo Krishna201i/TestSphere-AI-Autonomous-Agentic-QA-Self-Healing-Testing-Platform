@@ -44,7 +44,7 @@ describe('mergeStageStatus', () => {
 });
 
 describe('loopModel', () => {
-  const KEYS = ['codebase', 'analyze', 'plan', 'execute', 'heal', 'security', 'fix', 'report'];
+  const KEYS = ['codebase', 'analyze', 'plan', 'execute', 'heal', 'security', 'unit', 'fix', 'report'];
   const pipelineRun = (id, status, statuses) => ({
     id, status, project_name: 'Shop', stages: KEYS.map((key, i) => ({ key, label: key, status: statuses[i] })),
   });
@@ -52,7 +52,7 @@ describe('loopModel', () => {
   const state = (m, id) => m.stages.find((s) => s.id === id).state;
 
   it('follows the active run: done, running, then queued stages', () => {
-    const run = pipelineRun(2, 'running', ['done', 'done', 'done', 'running', 'pending', 'pending', 'pending', 'pending']);
+    const run = pipelineRun(2, 'running', ['done', 'done', 'done', 'running', 'pending', 'pending', 'pending', 'pending', 'pending']);
     const m = loopModel(ws({ pipelineRuns: [run, pipelineRun(1, 'passed', KEYS.map(() => 'done'))] }));
     expect(m.active).toBe(true);
     expect(m.run.id).toBe(2);
@@ -60,12 +60,12 @@ describe('loopModel', () => {
     expect(state(m, 'qa')).toBe('running');
     expect(m.running.id).toBe('qa');
     expect(state(m, 'attack')).toBe('pending');
-    expect(m.progress).toBeCloseTo(3 / 8);
+    expect(m.progress).toBeCloseTo(3 / 9);
     expect(m.cycles).toBe(1);
   });
 
   it('shows a finished run as idle-safe: no queued stages, no running token', () => {
-    const run = pipelineRun(1, 'failed', ['skipped', 'done', 'done', 'failed', 'pending', 'pending', 'pending', 'pending']);
+    const run = pipelineRun(1, 'failed', ['skipped', 'done', 'done', 'failed', 'pending', 'pending', 'pending', 'pending', 'pending']);
     const m = loopModel(ws({ pipelineRuns: [run] }));
     expect(m.active).toBe(false);
     expect(m.running).toBeNull();

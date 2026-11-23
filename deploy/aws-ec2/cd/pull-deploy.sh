@@ -42,7 +42,13 @@ set_env() {  # set_env BACKEND_IMAGE FRONTEND_IMAGE COMMIT: what compose runs, k
   [ -n "$2" ] && printf 'TESTSPHERE_FRONTEND_IMAGE=%s\n' "$2" >> "$DIR/.env"
   return 0
 }
-start() { (cd "$DIR" && ./fetch-env.sh >/dev/null && docker compose up -d --no-build --remove-orphans); }
+docker_gid() {  # the host's docker group, so the worker may use the Docker socket (the sandbox)
+  local gid; gid=$(getent group docker | cut -d: -f3)
+  [ -n "$gid" ] || return 0
+  sed -i '/^DOCKER_GID=/d' "$DIR/.env"
+  echo "DOCKER_GID=$gid" >> "$DIR/.env"
+}
+start() { (cd "$DIR" && ./fetch-env.sh >/dev/null && docker_gid && docker compose up -d --no-build --remove-orphans); }
 healthy() {
   local domain; domain=$(env_value DOMAIN)
   for _ in $(seq 1 $((HEALTH_SECONDS / 10))); do

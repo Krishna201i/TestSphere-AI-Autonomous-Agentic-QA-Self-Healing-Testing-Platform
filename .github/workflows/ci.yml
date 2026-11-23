@@ -193,6 +193,8 @@ jobs:
           run() { docker run --rm testsphere-backend:local "$@"; }
           test "$(run id -u)" = 10001 || { echo "the backend image must run as uid 10001"; exit 1; }
           run git --version
+          # The sandbox for a repository's own tests is driven with the Docker CLI
+          run docker --version
           # Ingestion clones repositories with git
           run sh -c 'git clone -q --depth 1 https://github.com/octocat/Hello-World.git /tmp/repo && test -f /tmp/repo/README'
           # Headless Chromium starts (browser and system libraries present)

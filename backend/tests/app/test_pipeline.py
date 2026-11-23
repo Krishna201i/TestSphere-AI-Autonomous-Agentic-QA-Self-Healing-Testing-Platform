@@ -128,6 +128,15 @@ def stub_network(monkeypatch):
     monkeypatch.setattr(runner, "_reachable", reachable)
     monkeypatch.setattr(runner, "_fallback_digests", no_fallback)
     monkeypatch.setattr(patches, "generate", offline_generate)
+
+    from app.pipeline import unit_tests
+
+    async def ci_results(repo_url, token, sha, *, wait, **_):
+        # The repository's CI checks: whatever the test put in state["ci"] (none by default)
+        state.setdefault("ci_reads", []).append((repo_url, sha))
+        return state.get("ci")
+
+    monkeypatch.setattr(unit_tests, "from_ci", ci_results)
     return state
 
 
@@ -770,9 +779,9 @@ def bare_site():
     return scanner_for({"content-type": "text/html"})
 
 
-def test_the_stage_sits_between_the_scan_and_the_report():
+def test_after_the_scan_come_repository_tests_fix_proposals_and_the_report():
     keys = [k for k, _ in runner.STAGES]
-    assert keys.index("security") + 1 == keys.index("fix") == keys.index("report") - 1
+    assert keys[keys.index("security"):] == ["security", "unit", "fix", "report"]
 
 
 def test_a_run_proposes_a_patch_for_its_findings_and_links_it(fresh_store, stub_network, fix_repo):
@@ -946,3 +955,86 @@ def test_a_blueprint_from_before_specs_were_read_changes_nothing(fresh_store, st
     run = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
     assert repo_tests(fresh_store) == []
     assert "repository" not in stage(run, "plan")["detail"]
+
+
+# ── the repository's own unit tests (stage "unit") ──
+
+
+def ci_result(status, failed=0):
+    return {"source": "ci", "commit": "a" * 40, "status": status, "passed": 3, "failed": failed, "running": 0,
+            "checks": [], "detail": f"CI on aaaaaaa: 3 passed, {failed} failed"}
+
+
+def test_failing_repository_ci_fails_the_run(fresh_store, stub_network):
+    stub_network["ci"] = ci_result("failed", failed=1)
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    run = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+
+    assert stub_network["ci_reads"] == [("https://github.com/acme/shop", None)]
+    assert stage(run, "unit")["status"] == "failed" and stage(run, "unit")["detail"] == "CI on aaaaaaa: 3 passed, 1 failed"
+    assert run["status"] == "failed"  # every browser test passed; the project's own tests did not
+    assert run["summary"]["unit_tests"] == {"source": "ci", "status": "failed", "passed": 3, "failed": 1,
+                                            "running": 0, "framework": None}
+    assert "repository tests failed" in stage(run, "report")["detail"]
+
+
+def test_passing_or_still_running_ci_does_not_fail_the_run(fresh_store, stub_network):
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    for status in ("passed", "pending"):
+        stub_network["ci"] = ci_result(status)
+        run = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+        assert stage(run, "unit")["status"] == "done" and run["status"] == "passed"
+
+
+def test_a_pushed_commits_ci_is_read(fresh_store, stub_network):
+    stub_network["ci"] = ci_result("passed")
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    run = runner.create_run(fresh_store, project, trigger="webhook", actor="github", commit_sha="c" * 40)
+    asyncio.run(runner.execute_run(run["id"], orchestrator=FakeOrchestrator({}),
+                                   scanner=scanner_for({"content-type": "text/html"})))
+    assert stub_network["ci_reads"][-1] == ("https://github.com/acme/shop", "c" * 40)
+
+
+def test_without_ci_or_sandbox_the_stage_says_why(fresh_store, stub_network, monkeypatch):
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    run = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert stage(run, "unit")["status"] == "skipped"
+    assert stage(run, "unit")["detail"] == ("No CI checks on this commit; sandbox not used: "
+                                           "the sandbox is off (SANDBOX_ENABLED)")
+    assert run["status"] == "passed"
+
+    monkeypatch.setattr(settings, "UNIT_TESTS", "off")
+    run = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert stage(run, "unit")["detail"] == "Off on this server (UNIT_TESTS=off)"
+
+
+def test_a_repository_without_unit_tests_is_not_cloned(fresh_store, stub_network):
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    fresh_store.insert(BLUEPRINTS, source=project["repo_url"], name="shop", project_id=project["id"], owner_uid="local-dev",
+                       data=json.dumps({**BLUEPRINT, "analyzed_at": "2026-10-20T10:00:00+00:00", "test_suites": []}))
+    run = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert stage(run, "unit") == stage(run, "unit") | {"status": "skipped", "detail": "The repository has no unit tests"}
+    assert "ci_reads" not in stub_network
+
+
+def test_without_ci_the_sandbox_runs_the_repositorys_tests(fresh_store, stub_network, tmp_path, monkeypatch):
+    from app.pipeline import unit_tests
+
+    monkeypatch.setattr(settings, "INGEST_ALLOW_LOCAL_PATHS", True)
+    (tmp_path / "test_a.py").write_text("def test_a():\n    assert False\n", encoding="utf-8")
+    ran = []
+    monkeypatch.setattr(unit_tests, "unavailable_reason", lambda: None)
+
+    def fake_sandbox(root, plan):
+        ran.append((root, plan.framework))
+        return {"source": "sandbox", "framework": "pytest", "status": "failed", "passed": 0, "failed": 1,
+                "exit_code": 1, "output": "1 failed", "detail": "Sandbox (pytest): 0 passed, 1 failed"}
+
+    monkeypatch.setattr(unit_tests, "run_in_sandbox", fake_sandbox)
+    project = make_project(fresh_store, repo_url=str(tmp_path))
+    run = run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+
+    assert ran == [(tmp_path, "pytest")]
+    assert stage(run, "unit")["status"] == "failed" and run["status"] == "failed"
+    assert run["unit_tests"]["output"] == "1 failed"
+    assert tmp_path.exists()  # a local folder is never deleted (only a clone is)
