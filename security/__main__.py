@@ -18,6 +18,7 @@ import sys
 
 from security.findings import Severity
 from security.passive_scanner import PassiveScanner, ScanError
+from security.sarif import findings_to_sarif
 from security.scope import LOOPBACK_HOSTS, OutOfScopeError, ScopePolicy
 
 
@@ -29,6 +30,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Authorize an additional host (repeatable). Only scan hosts you own or may test.",
     )
     parser.add_argument("--json", action="store_true", help="Print findings as JSON")
+    parser.add_argument(
+        "--sarif", metavar="FILE", nargs="?", const="-",
+        help="Output findings as SARIF v2.1.0 to FILE (or stdout if -)",
+    )
     args = parser.parse_args(argv)
 
     scanner = PassiveScanner(ScopePolicy.of(*LOOPBACK_HOSTS, *args.allow))
@@ -38,7 +43,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Scan refused/failed: {exc}", file=sys.stderr)
         return 2
 
-    if args.json:
+    if args.sarif:
+        sarif_doc = findings_to_sarif(findings)
+        sarif_json = json.dumps(sarif_doc, indent=2)
+        if args.sarif == "-":
+            print(sarif_json)
+        else:
+            with open(args.sarif, "w", encoding="utf-8") as f:
+                f.write(sarif_json)
+    elif args.json:
         print(json.dumps([f.model_dump(mode="json") for f in findings], indent=2))
     else:
         print(f"{len(findings)} finding(s) for {args.url}\n")

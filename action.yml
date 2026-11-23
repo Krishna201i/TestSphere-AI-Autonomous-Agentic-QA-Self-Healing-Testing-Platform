@@ -1,0 +1,40 @@
+name: 'TestSphere AI Security Scan'
+description: 'Autonomous passive security scanner and SARIF v2.1.0 exporter for GitHub Code Scanning'
+author: 'TestSphere AI'
+
+inputs:
+  target-url:
+    description: 'The target web page URL to scan (e.g. http://localhost:8000/)'
+    required: true
+  allow-hosts:
+    description: 'Additional authorized hosts beyond loopback (space-separated)'
+    required: false
+    default: ''
+  sarif-file:
+    description: 'Path where SARIF v2.1.0 report will be saved'
+    required: false
+    default: 'testsphere-security.sarif'
+  upload-sarif:
+    description: 'Upload generated SARIF to GitHub Code Scanning'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run TestSphere AI Security Scanner
+      shell: bash
+      run: |
+        ARGS=("${{ inputs.target-url }}" "--sarif" "${{ inputs.sarif-file }}")
+        if [ -n "${{ inputs.allow-hosts }}" ]; then
+          for host in ${{ inputs.allow-hosts }}; do
+            ARGS+=("--allow" "$host")
+          done
+        fi
+        python -m security "${ARGS[@]}" || true
+
+    - name: Upload SARIF to GitHub Code Scanning
+      if: inputs.upload-sarif == 'true'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-file }}

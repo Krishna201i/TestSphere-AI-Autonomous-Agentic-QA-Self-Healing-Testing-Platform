@@ -150,3 +150,40 @@ def test_api_security_findings_sarif_endpoint():
         assert all("ruleId" in r and "level" in r for r in run["results"])
     finally:
         app.dependency_overrides.clear()
+
+
+def test_cli_sarif_export(tmp_path, monkeypatch, capsys):
+    from security.__main__ import main as cli_main
+
+    dummy_findings = [
+        Finding(
+            check_id="SEC-HDR-CSP",
+            source=FindingSource.SECURITY,
+            title="Missing CSP",
+            severity=Severity.HIGH,
+            component="http://127.0.0.1:8000/",
+            target_url="http://127.0.0.1:8000/",
+        )
+    ]
+
+    async def fake_scan(self, url):
+        return dummy_findings
+
+    monkeypatch.setattr(PassiveScanner, "scan", fake_scan)
+
+    # 1. Output to file
+    out_file = tmp_path / "test.sarif"
+    code = cli_main(["http://127.0.0.1:8000/", "--sarif", str(out_file)])
+    assert code == 1  # HIGH severity finding present
+    assert out_file.exists()
+    import json
+    data = json.loads(out_file.read_text(encoding="utf-8"))
+    assert data["version"] == "2.1.0"
+    assert data["runs"][0]["results"][0]["ruleId"] == "SEC-HDR-CSP"
+
+    # 2. Output to stdout with '-'
+    code2 = cli_main(["http://127.0.0.1:8000/", "--sarif", "-"])
+    assert code2 == 1
+    stdout_sarif = capsys.readouterr().out
+    data2 = json.loads(stdout_sarif)
+    assert data2["runs"][0]["results"][0]["ruleId"] == "SEC-HDR-CSP"
