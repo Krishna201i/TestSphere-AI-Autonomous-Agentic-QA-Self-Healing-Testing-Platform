@@ -27,6 +27,7 @@ from backend.ratelimit import limit_runs
 from backend.services import security_service as store
 from security import Finding, OutOfScopeError, PassiveScanner, ScanError, ScopePolicy
 from security.remediation import propose, redact_headers
+from security.sarif import findings_to_sarif
 from security.scope import LOOPBACK_HOSTS
 
 router = APIRouter(prefix="/security", tags=["Security Testing"])
@@ -124,6 +125,17 @@ def list_findings(
 ) -> list[dict[str, Any]]:
     """The caller's tracked findings (optionally for one target), most recently seen first."""
     return [store.serialize(row) for row in store.list_findings(db, target_url, **scope(user))]
+
+
+@router.get("/findings/sarif", status_code=status.HTTP_200_OK)
+def export_sarif(
+    target_url: str | None = None,
+    db: Store = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Export the caller's tracked security findings in standard SARIF v2.1.0 format."""
+    findings = [store.serialize(row) for row in store.list_findings(db, target_url, **scope(user))]
+    return findings_to_sarif(findings)
 
 
 @router.post("/findings/{key}/approve", status_code=status.HTTP_200_OK)

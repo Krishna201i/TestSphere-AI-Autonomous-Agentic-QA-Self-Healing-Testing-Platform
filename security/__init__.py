@@ -12,9 +12,11 @@ from security.findings import (
     dedupe,
 )
 from security.passive_scanner import PassiveScanner, ScanError
+from security.sarif import SARIF_SCHEMA, SARIF_VERSION, findings_to_sarif
 from security.scope import OutOfScopeError, ScopePolicy
 
 __all__ = [
     "Finding", "FindingSource", "FindingStatus", "RetestResult", "Severity", "dedupe",
     "PassiveScanner", "ScanError", "OutOfScopeError", "ScopePolicy",
+    "findings_to_sarif", "SARIF_SCHEMA", "SARIF_VERSION",
 ]
