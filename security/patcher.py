@@ -47,6 +47,11 @@ SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "env", "site-packages", "d
 MAX_FILE_BYTES = 512 * 1024
 MAX_FILES = 5000
 LEAKY_HEADERS = ("Server", "X-Powered-By", "X-AspNet-Version")
+# Conservative tokens for generated dependency edits, not ecosystem version
+# validation. URLs, local paths, requirement markers and installer options must
+# never be interpolated from scanner evidence into an installable manifest.
+_PACKAGE_TOKEN = re.compile(r"(?:@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*")
+_VERSION_TOKEN = re.compile(r"v?[0-9][A-Za-z0-9.!+_-]*")
 
 
 @dataclass
@@ -147,7 +152,13 @@ def fixes_for(findings: list[dict]) -> tuple[Fix, list[Manual]]:
                     pkg_name = f["title"].split()[0]
 
             if fixed_version and pkg_name:
-                fix.dependencies.append((cid, pkg_name, str(fixed_version)))
+                if not (
+                    isinstance(pkg_name, str) and _PACKAGE_TOKEN.fullmatch(pkg_name)
+                    and isinstance(fixed_version, str) and _VERSION_TOKEN.fullmatch(fixed_version)
+                ):
+                    manual.append(Manual(cid, "Unsupported dependency name or version; manual review is required."))
+                    continue
+                fix.dependencies.append((cid, pkg_name, fixed_version))
                 fix.sources[cid] = cid
             else:
                 manual.append(Manual(cid, rec or f"No fixed version for {cid} is published yet; see advisory for workarounds."))

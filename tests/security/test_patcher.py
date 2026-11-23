@@ -488,3 +488,47 @@ def test_patch_scan_ignores_special_files(tmp_path):
     os.mkfifo(tmp_path / "main.py")
 
     assert _files(tmp_path, (".py",)) == []
+
+
+@pytest.mark.parametrize("version", [
+    "2.2.5\n--extra-index-url https://untrusted.example/simple",
+    "2.2.5;python_version<'0'", "https://untrusted.example/pkg.tgz",
+    "file:../outside", "2.2.5\\g<1>", '2.2.5"', "2.2.5\x00", {"version": "2.2.5"},
+])
+def test_unsafe_dependency_versions_require_manual_review(tmp_path, version):
+    root = write(tmp_path / "repo", {"requirements.txt": "Flask==2.2.2\n"})
+    result = build_patch(root, [finding("SEC-DEP-FLASK", package="Flask", fixed_in=version)], SITE)
+
+    assert result.files == []
+    assert result.applied == []
+    assert len(result.manual) == 1
+    assert "manual review" in result.manual[0].reason.lower()
+
+
+@pytest.mark.parametrize("package", ["../Flask", "Flask\nother", ["Flask"]])
+def test_unsafe_dependency_names_require_manual_review(package):
+    fix, manual = fixes_for([finding("SEC-DEP-FLASK", package=package, fixed_in="2.2.5")])
+
+    assert fix.dependencies == []
+    assert len(manual) == 1
+    assert "manual review" in manual[0].reason.lower()
+
+
+def test_dependency_recommendation_cannot_introduce_a_remote_package():
+    fix, manual = fixes_for([finding(
+        "SEC-DEP-FLASK", recommendation="Upgrade Flask to https://untrusted.example/pkg.tgz or later.",
+    )])
+
+    assert fix.dependencies == []
+    assert len(manual) == 1
+
+
+@pytest.mark.parametrize(("package", "version"), [
+    ("Flask", "2.2.5"), ("@scope/package", "1.2.3-beta.1+build.7"),
+    ("my_package", "1!2.3.4.post1"), ("my-package", "v1.2.3"),
+])
+def test_supported_dependency_name_and_version_tokens(package, version):
+    fix, manual = fixes_for([finding("SEC-DEP-VALID", package=package, fixed_in=version)])
+
+    assert fix.dependencies == [("SEC-DEP-VALID", package, version)]
+    assert manual == []
