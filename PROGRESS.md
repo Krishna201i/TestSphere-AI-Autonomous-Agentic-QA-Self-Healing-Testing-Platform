@@ -29,11 +29,11 @@
 | **T13** | Editor extension (minimal VS Code / Antigravity side panel) | [ ] pending | | |
 | **T14** | Terminal deploy with log monitoring (optional) | [ ] pending | | |
 | **T15** | Clean-up and docs (replace AWS rules, derive.js labels, full counts) | [ ] pending | | |
-| **S1** | SARIF export & reusable GitHub Action | [ ] pending | | |
+| **S1** | SARIF export & reusable GitHub Action | [x] done | `508f87a`, `dd8dc47` | `security/sarif.py`, `security/__main__.py`, `backend/api/security.py`, `action.yml`, `tests/security/test_sarif.py` |
 | **S2** | "Explain this failure / finding" UI buttons | [ ] pending | | |
 | **S3** | Risk-based prioritization & scheduling | [x] done | `95a5579` | `agents/planner/prioritization.py`, `agents/planner/__init__.py`, `tests/test_planner_prioritization.py` |
-| **S4** | `make demo` (vulnerable demo app, full loop) | [ ] pending | | |
-| **S5** | docs/DEMO.md with Mermaid architecture & script | [ ] pending | | |
+| **S4** | `make demo` (vulnerable demo app, full loop) | [x] done | `52af9aa` | `Makefile`, `scripts/run_demo.py` |
+| **S5** | docs/DEMO.md with Mermaid architecture & script | [x] done | `52af9aa` | `docs/DEMO.md` |
 | **S6** | Flaky-test detection with stability classification | [x] done | `14e11dc` | `backend/pipeline/flakiness.py`, `backend/pipeline/runner.py`, `tests/backend/test_flakiness.py` |
 | **S7** | Multi-tenant memory read isolation | [x] done | `22665ec` | `agents/memory/persistent_store.py`, `tests/test_persistent_memory.py` |
 | **S8** | Execution concurrency & duplicate request rejection | [x] done | `c17dca3` | `backend/orchestration/orchestrator.py`, `tests/backend/test_workflow_orchestrator.py` |
@@ -106,3 +106,24 @@
 - **Files touched**: `engine/healer.py`, `tests/engine/test_healer.py`
 - **Tests passing**: 15/15 unit tests in test_healer.py
 - **Commit hash**: c255120
+
+### PEP 503 Canonical Package Matching in Dependency Patcher
+- **Status**: [x] done
+- **What changed**: In `security/patcher.py`, implemented `_pep503_pattern` to canonicalize Python package names across hyphens, underscores, dots, and casing in `requirements*.txt` and `pyproject.toml` (both PEP 621 dependencies array and Poetry table). Added unit tests in `tests/security/test_patcher.py`.
+- **Files touched**: `security/patcher.py`, `tests/security/test_patcher.py`
+- **Tests passing**: 75/75 in test_patcher.py
+- **Commit hash**: 065944c
+
+### S1: SARIF v2.1.0 Export & Reusable GitHub Action
+- **Status**: [x] done
+- **What changed**: Implemented `security/sarif.py` converting security findings to OASIS SARIF v2.1.0 standard for GitHub Code Scanning and GitLab Security Dashboard. Added `GET /api/security/findings/sarif` REST endpoint in `backend/api/security.py`. Added `--sarif [FILE]` CLI flag in `security/__main__.py`. Created root `action.yml` composite GitHub Action with automatic CodeQL SARIF upload.
+- **Files touched**: `security/sarif.py`, `security/__init__.py`, `backend/api/security.py`, `security/__main__.py`, `action.yml`, `tests/security/test_sarif.py`
+- **Tests passing**: 5/5 in test_sarif.py, 33/33 in test_passive_scanner.py, 13/13 in test_security_api.py
+- **Commit hash**: 508f87a, dd8dc47
+
+### S4 & S5: Demo Loop, Makefile & docs/DEMO.md Architecture Guide
+- **Status**: [x] done
+- **What changed**: Created `scripts/run_demo.py` orchestrating local demo web application, passive security audit, SARIF v2.1.0 generation, and autonomous remediation patch building. Added developer-friendly `Makefile` with `demo`, `test`, `test-backend`, `lint`, and `sarif` targets. Authored `docs/DEMO.md` with complete Mermaid architecture diagram, step-by-step verification commands, and CI integration instructions.
+- **Files touched**: `Makefile`, `scripts/run_demo.py`, `docs/DEMO.md`, `.gitignore`
+- **Tests passing**: Full loop verified via `make demo`
+- **Commit hash**: 52af9aa
