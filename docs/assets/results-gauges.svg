@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="Headline results: 95.7% locators healed, 18 of 19 bugs caught, 52 of 52 security checks passed, 8 of 8 concurrent runs passed">
+  <defs>
+    <linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4cc38a"/><stop offset="1" stop-color="#1f7a4d"/></linearGradient>
+    <linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4d58d"/><stop offset="1" stop-color="#d99a1f"/></linearGradient>
+    <linearGradient id="c" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7aa7f0"/><stop offset="1" stop-color="#2f62bd"/></linearGradient>
+    <linearGradient id="d" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f09a6b"/><stop offset="1" stop-color="#c2531a"/></linearGradient>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#17402c" flood-opacity=".12"/></filter>
+  </defs>
+  <style>
+    text{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;text-anchor:middle}
+    .big{font-size:30px;font-weight:800;fill:#17402c}
+    .lab{font-size:15px;font-weight:700;fill:#1c1e2a}
+    .sub{font-size:12.5px;fill:#63646d}
+    .ring{fill:none;stroke-width:14;stroke-linecap:round;transform:rotate(-90deg);animation:draw 1.6s cubic-bezier(.2,.8,.2,1) both}
+    @keyframes draw{from{stroke-dashoffset:314}}
+  </style>
+
+  <!-- card 1 : 95.7 -->
+  <g transform="translate(12 12)" filter="url(#sh)">
+    <rect width="276" height="276" rx="24" fill="#fbfaf7" stroke="#e6e0d8"/>
+    <g transform="translate(138 100)">
+      <circle r="50" fill="none" stroke="#e4f1e8" stroke-width="14"/>
+      <circle class="ring" r="50" stroke="url(#a)" stroke-dasharray="314" stroke-dashoffset="13.5"/>
+      <text y="10" class="big">95.7%</text>
+    </g>
+    <text x="138" y="200" class="lab">Locators healed correctly</text>
+    <text x="138" y="222" class="sub">277 broken-locator cases</text>
+    <text x="138" y="242" class="sub">0 false heals · 100% correct refusals</text>
+  </g>
+  <!-- card 2 : 18/19 -->
+  <g transform="translate(312 12)" filter="url(#sh)">
+    <rect width="276" height="276" rx="24" fill="#fbfaf7" stroke="#e6e0d8"/>
+    <g transform="translate(138 100)">
+      <circle r="50" fill="none" stroke="#fbf0d4" stroke-width="14"/>
+      <circle class="ring" r="50" stroke="url(#b)" stroke-dasharray="314" stroke-dashoffset="16.5" style="animation-delay:.15s"/>
+      <text y="10" class="big">18/19</text>
+    </g>
+    <text x="138" y="200" class="lab">Real bugs caught</text>
+    <text x="138" y="222" class="sub">Plain-English tests, no AI model</text>
+    <text x="138" y="242" class="sub">0 false alarms</text>
+  </g>
+  <!-- card 3 : 52/52 -->
+  <g transform="translate(612 12)" filter="url(#sh)">
+    <rect width="276" height="276" rx="24" fill="#fbfaf7" stroke="#e6e0d8"/>
+    <g transform="translate(138 100)">
+      <circle r="50" fill="none" stroke="#e4ecfa" stroke-width="14"/>
+      <circle class="ring" r="50" stroke="url(#c)" stroke-dasharray="314" stroke-dashoffset="0" style="animation-delay:.3s"/>
+      <text y="10" class="big">52/52</text>
+    </g>
+    <text x="138" y="200" class="lab">Security checks passed</text>
+    <text x="138" y="222" class="sub">SSRF, access control, input limits</text>
+    <text x="138" y="242" class="sub">webhook signatures, rate limits</text>
+  </g>
+  <!-- card 4 : 8/8 -->
+  <g transform="translate(912 12)" filter="url(#sh)">
+    <rect width="276" height="276" rx="24" fill="#fbfaf7" stroke="#e6e0d8"/>
+    <g transform="translate(138 100)">
+      <circle r="50" fill="none" stroke="#fbe6da" stroke-width="14"/>
+      <circle class="ring" r="50" stroke="url(#d)" stroke-dasharray="314" stroke-dashoffset="0" style="animation-delay:.45s"/>
+      <text y="10" class="big">8/8</text>
+    </g>
+    <text x="138" y="200" class="lab">Concurrent runs passed</text>
+    <text x="138" y="222" class="sub">All finished in 27 s</text>
+    <text x="138" y="242" class="sub">~460 MB peak, server + Chromium</text>
+  </g>
+</svg>

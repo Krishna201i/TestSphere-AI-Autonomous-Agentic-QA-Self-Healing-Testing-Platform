@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-label="Load test: requests per second and p95 latency from 1 to 100 concurrent clients">
+  <defs>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4cc38a" stop-opacity=".35"/><stop offset="1" stop-color="#4cc38a" stop-opacity="0"/></linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4d58d"/><stop offset="1" stop-color="#d99a1f"/></linearGradient>
+    <filter id="sh" x="-5%" y="-5%" width="110%" height="115%"><feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#17402c" flood-opacity=".12"/></filter>
+  </defs>
+  <style>
+    text{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif}
+    .t{font-size:22px;font-weight:700;fill:#17402c}
+    .s{font-size:13px;fill:#63646d}
+    .ax{font-size:12px;fill:#8a8b94}
+    .v{font-size:13px;font-weight:700;fill:#17402c;text-anchor:middle}
+    .line{stroke-dasharray:1200;stroke-dashoffset:1200;animation:d 2s ease forwards}
+    @keyframes d{to{stroke-dashoffset:0}}
+  </style>
+  <rect x="8" y="8" width="1184" height="404" rx="24" fill="#fbfaf7" stroke="#e6e0d8" filter="url(#sh)"/>
+  <text x="44" y="54" class="t">Load test · one API worker, nine dashboard endpoints</text>
+  <text x="44" y="76" class="s">Throughput stays flat from 1 to 100 concurrent clients, with zero errors. Latency grows only because clients queue.</text>
+
+  <g transform="translate(110 110)">
+    <!-- grid: y 0..230 (0..800 rps) -->
+    <g stroke="#e6e0d8" stroke-dasharray="3 5">
+      <line x1="0" y1="0" x2="900" y2="0"/><line x1="0" y1="57.5" x2="900" y2="57.5"/><line x1="0" y1="115" x2="900" y2="115"/><line x1="0" y1="172.5" x2="900" y2="172.5"/><line x1="0" y1="230" x2="900" y2="230" stroke-dasharray="none"/>
+    </g>
+    <g class="ax" text-anchor="end"><text x="-12" y="4">800</text><text x="-12" y="61">600</text><text x="-12" y="119">400</text><text x="-12" y="176">200</text><text x="-12" y="234">0</text></g>
+    <text x="-70" y="115" class="ax" transform="rotate(-90 -70 115)" text-anchor="middle">requests per second</text>
+    <g class="ax" text-anchor="middle"><text x="75" y="256">1 client</text><text x="300" y="256">10 clients</text><text x="525" y="256">50 clients</text><text x="750" y="256">100 clients</text></g>
+
+    <!-- p95 bars (scale 0..320ms -> 0..230) -->
+    <g>
+      <rect x="45" y="218.5" width="60" height="11.5" rx="6" fill="url(#bar)" opacity=".9"/>
+      <rect x="270" y="207.7" width="60" height="22.3" rx="6" fill="url(#bar)" opacity=".9"/>
+      <rect x="495" y="162.4" width="60" height="67.6" rx="6" fill="url(#bar)" opacity=".9"/>
+      <rect x="720" y="50" width="60" height="180" rx="6" fill="url(#bar)" opacity=".9"/>
+    </g>
+    <g style="font-size:12px;fill:#8a5a00;font-weight:700;text-anchor:middle;font-family:'Segoe UI',Arial,sans-serif">
+      <text x="75" y="212">16 ms</text><text x="300" y="201">31 ms</text><text x="525" y="156">94 ms</text><text x="750" y="44">250 ms</text>
+    </g>
+
+    <!-- rps line (699,679,660,615) -->
+    <path d="M75 67.4 L300 71.4 L525 76.2 L750 84.1 L750 230 L75 230 Z" fill="url(#area)"/>
+    <path class="line" d="M75 67.4 L300 71.4 L525 76.2 L750 84.1" fill="none" stroke="#2a6a46" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+    <g fill="#fff" stroke="#2a6a46" stroke-width="3.5">
+      <circle cx="75" cy="67.4" r="7"/><circle cx="300" cy="71.4" r="7"/><circle cx="525" cy="76.2" r="7"/><circle cx="750" cy="84.1" r="7"/>
+    </g>
+    <g class="v"><text x="75" y="48">699 rps</text><text x="300" y="52">679 rps</text><text x="525" y="57">660 rps</text><text x="750" y="127" style="fill:#17402c">615 rps</text></g>
+  </g>
+
+  <g transform="translate(850 22)">
+    <rect y="44" width="14" height="14" rx="7" fill="#fff" stroke="#2a6a46" stroke-width="3.5"/><text x="22" y="56" class="s">Requests/s</text>
+    <rect x="110" y="44" width="14" height="14" rx="4" fill="url(#bar)"/><text x="132" y="56" class="s">p95 latency</text>
+  </g>
+  <text x="44" y="396" class="s">Source: docs/load-test.md · measured with python backend/scripts/loadtest.py · 16 threads, 16.4 GB RAM, local JSON store</text>
+</svg>

@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-label="The TestSphere AI testing loop: ingest, QA agent, attacker agent, report, remediation, validation, verified deploy">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#f4f0ea"/></linearGradient>
+    <linearGradient id="hd" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#17402c"/><stop offset="1" stop-color="#2a6a46"/></linearGradient>
+    <linearGradient id="hd2" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7a2e0e"/><stop offset="1" stop-color="#c2531a"/></linearGradient>
+    <linearGradient id="hd3" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1d3f73"/><stop offset="1" stop-color="#3b6fc4"/></linearGradient>
+    <marker id="ar" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto"><path d="M1 1 L10 6 L1 11 Z" fill="#2a6a46"/></marker>
+    <marker id="ar2" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto"><path d="M1 1 L10 6 L1 11 Z" fill="#c2531a"/></marker>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#17402c" flood-opacity=".14"/></filter>
+  </defs>
+  <style>
+    text{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif}
+    .n{font-size:15px;font-weight:700;fill:#fff}
+    .h{font-size:17px;font-weight:700;fill:#1c1e2a}
+    .d{font-size:13px;fill:#464958}
+    .f{stroke-dasharray:7 7;animation:flow 1.2s linear infinite}
+    @keyframes flow{to{stroke-dashoffset:-14}}
+  </style>
+  <rect x="4" y="4" width="1192" height="552" rx="26" fill="#fbfaf7" stroke="#e6e0d8"/>
+
+  <!-- connectors -->
+  <g fill="none" stroke="#2a6a46" stroke-width="3" class="f" marker-end="url(#ar)">
+    <path d="M362 135 H440"/>
+    <path d="M752 135 H830"/>
+    <path d="M1000 205 V318" />
+    <path d="M830 425 H752"/>
+    <path d="M440 425 H362"/>
+  </g>
+  <path d="M200 318 V208" fill="none" stroke="#2a6a46" stroke-width="3" class="f" marker-end="url(#ar)"/>
+  <!-- retest loop -->
+  <path d="M595 340 C595 300 595 300 595 290" fill="none" stroke="#c2531a" stroke-width="2.5" class="f" marker-end="url(#ar2)" opacity="0"/>
+
+  <!-- 1 -->
+  <g transform="translate(50 60)" filter="url(#sh)">
+    <rect width="312" height="146" rx="18" fill="url(#card)" stroke="#e6e0d8"/>
+    <path d="M0 18a18 18 0 0 1 18-18h276a18 18 0 0 1 18 18v14H0z" fill="url(#hd)"/>
+    <text x="18" y="22" class="n">1 · CODEBASE INGESTION</text>
+    <text x="18" y="66" class="h">Reads your repository</text>
+    <text x="18" y="90" class="d">Languages, frameworks, routes, tests,</text>
+    <text x="18" y="108" class="d">committed secrets. Nothing is executed.</text>
+    <text x="18" y="132" class="d" style="fill:#2a6a46;font-weight:600">backend/ingestion</text>
+  </g>
+  <!-- 2 -->
+  <g transform="translate(444 60)" filter="url(#sh)">
+    <rect width="312" height="146" rx="18" fill="url(#card)" stroke="#e6e0d8"/>
+    <path d="M0 18a18 18 0 0 1 18-18h276a18 18 0 0 1 18 18v14H0z" fill="url(#hd)"/>
+    <text x="18" y="22" class="n">2A · AI QA AGENT</text>
+    <text x="18" y="66" class="h">Plans and runs real tests</text>
+    <text x="18" y="90" class="d">Playwright in Chromium, with live</text>
+    <text x="18" y="108" class="d">self-healing of broken locators.</text>
+    <text x="18" y="132" class="d" style="fill:#2a6a46;font-weight:600">backend/agents · engine</text>
+  </g>
+  <!-- 3 -->
+  <g transform="translate(838 60)" filter="url(#sh)">
+    <rect width="312" height="146" rx="18" fill="url(#card)" stroke="#e6e0d8"/>
+    <path d="M0 18a18 18 0 0 1 18-18h276a18 18 0 0 1 18 18v14H0z" fill="url(#hd2)"/>
+    <text x="18" y="22" class="n">2B · ATTACKER AGENT</text>
+    <text x="18" y="66" class="h">Scope-checked security scan</text>
+    <text x="18" y="90" class="d">Passive by default; opt-in DAST (XSS,</text>
+    <text x="18" y="108" class="d">SQLi, redirects) confirmed in a browser.</text>
+    <text x="18" y="132" class="d" style="fill:#b3400a;font-weight:600">backend/security</text>
+  </g>
+  <!-- 4 -->
+  <g transform="translate(838 320)" filter="url(#sh)">
+    <rect width="312" height="146" rx="18" fill="url(#card)" stroke="#e6e0d8"/>
+    <path d="M0 18a18 18 0 0 1 18-18h276a18 18 0 0 1 18 18v14H0z" fill="url(#hd3)"/>
+    <text x="18" y="22" class="n">3 + 4 · REPORT, then REMEDIATION</text>
+    <text x="18" y="66" class="h">Unified report and fix patch</text>
+    <text x="18" y="90" class="d">Findings become syntax-checked patches;</text>
+    <text x="18" y="108" class="d">approve one to open a PR / MR.</text>
+    <text x="18" y="132" class="d" style="fill:#2556a0;font-weight:600">Human approval always</text>
+  </g>
+  <!-- 5 -->
+  <g transform="translate(444 320)" filter="url(#sh)">
+    <rect width="312" height="146" rx="18" fill="url(#card)" stroke="#e6e0d8"/>
+    <path d="M0 18a18 18 0 0 1 18-18h276a18 18 0 0 1 18 18v14H0z" fill="url(#hd)"/>
+    <text x="18" y="22" class="n">5 · VALIDATION ENGINE</text>
+    <text x="18" y="66" class="h">Retests every fix</text>
+    <text x="18" y="90" class="d">Findings resolve or reopen as regressions.</text>
+    <text x="18" y="108" class="d">A failed retest goes back to remediation.</text>
+    <text x="18" y="132" class="d" style="fill:#2a6a46;font-weight:600">backend/app/pipeline</text>
+  </g>
+  <!-- 6 -->
+  <g transform="translate(50 320)" filter="url(#sh)">
+    <rect width="312" height="146" rx="18" fill="url(#card)" stroke="#e6e0d8"/>
+    <path d="M0 18a18 18 0 0 1 18-18h276a18 18 0 0 1 18 18v14H0z" fill="url(#hd)"/>
+    <text x="18" y="22" class="n">6 · VERIFIED DEPLOY</text>
+    <text x="18" y="66" class="h">Ships only what is healthy</text>
+    <text x="18" y="90" class="d">Deploy hook, health checks, smoke tests,</text>
+    <text x="18" y="108" class="d">and automatic rollback on any failure.</text>
+    <text x="18" y="132" class="d" style="fill:#2a6a46;font-weight:600">Render · Vercel · Netlify · Actions</text>
+  </g>
+
+  <!-- center -->
+  <g transform="translate(600 266)">
+    <circle r="46" fill="#e4f1e8" stroke="#9fcbb0"/>
+    <g transform="translate(-24 -24)">
+      <path d="M24 3 42 13.5v21L24 45 6 34.5v-21Z" fill="#2a6a46"/>
+      <path d="M24 3 42 13.5 24 24 6 13.5Z" fill="#4cc38a"/>
+      <path d="M24 24v21L6 34.5v-21Z" fill="#17402c" opacity=".85"/>
+      <path d="M24 13 33 18.2v10.5L24 34l-9-5.3V18.2Z" fill="#fff"/>
+    </g>
+  </g>
+  <text x="600" y="338" text-anchor="middle" style="font-size:12px;font-weight:700;fill:#2a6a46;letter-spacing:1px">RUNS AGAIN</text>
+  <text x="600" y="206" text-anchor="middle" style="font-size:12px;fill:#63646d">on a schedule or every git push</text>
+  <text x="600" y="530" text-anchor="middle" style="font-size:13px;fill:#63646d">Closed loop: a fix is only "done" once it has been retested, verified and deployed.</text>
+</svg>
