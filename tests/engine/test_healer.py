@@ -353,3 +353,34 @@ def test_a_different_kind_of_input_is_never_the_same_element():
     email = ElementFingerprint(tag="input", id="email", attributes={"type": "email"})
     assert score_fingerprint(box, radio)[0] == 0.0
     assert score_fingerprint(email, email.model_copy(update={"attributes": {"type": "text"}}))[0] > 0.0
+
+
+def test_disabled_element_candidate_scores_zero():
+    stored = _button_fp(attributes={"type": "submit"})
+    disabled_btn = _button_fp(attributes={"type": "submit", "disabled": ""})
+    aria_disabled_btn = _button_fp(attributes={"type": "submit", "aria-disabled": "true"})
+
+    assert score_fingerprint(stored, disabled_btn)[0] == 0.0
+    assert score_fingerprint(stored, aria_disabled_btn)[0] == 0.0
+
+
+def test_incompatible_accessible_role_scores_zero():
+    btn = _button_fp(role="button")
+    heading = _button_fp(role="heading")
+    assert score_fingerprint(btn, heading)[0] == 0.0
+
+
+def test_dynamic_id_does_not_anchor_score():
+    from engine.healer import is_dynamic_id
+
+    assert is_dynamic_id("ember123") is True
+    assert is_dynamic_id(":r1:") is True
+    assert is_dynamic_id("btn_1732356789") is True
+    assert is_dynamic_id("login-btn") is False
+
+    stored = _button_fp(id="btn_1732356789", parent_chain=["div.other"], sibling_index=9)
+    live = _button_fp(id="btn_1732356789", parent_chain=["div.other"], sibling_index=9)
+    # Because ID is dynamic, it does NOT trigger ID_ANCHOR_SCORE (0.85) automatically
+    score, _ = score_fingerprint(stored, live)
+    # The normal composite score applies instead of being anchored up
+    assert score <= 1.0

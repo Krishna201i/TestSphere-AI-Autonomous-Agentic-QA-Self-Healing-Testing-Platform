@@ -88,6 +88,17 @@ _LOCATOR_ATTR_RE = re.compile(r"\[\s*([\w:-]+)\s*[~|^$*]?=")
 _LOCATOR_ID_RE = re.compile(r"#([\w-]+)")
 _FIELD_OF_ATTR = {"id": "id", "name": "name", "placeholder": "placeholder", "aria-label": "aria_label", "role": "role"}
 
+_DYNAMIC_ID_RE = re.compile(
+    r"(?:^ember\d+$|^react-aria|^ng-|^_ngcontent|:r[0-9a-zA-Z]+:|[-_:][0-9a-f]{8,}$|[-_:][0-9]{5,}$)"
+)
+
+
+def is_dynamic_id(val: str | None) -> bool:
+    """Check if an ID appears generated or transient (e.g. React useId, Ember, timestamps)."""
+    if not val:
+        return False
+    return bool(_DYNAMIC_ID_RE.search(val)) or val.isdigit()
+
 
 def broken_attributes(primary_locator: str) -> frozenset[str]:
     """Attributes the (failed) primary locator matched on.  They have changed by
@@ -206,6 +217,15 @@ def score_fingerprint(
         return 0.0, signals
     if _input_kind(stored) != _input_kind(live):
         return 0.0, signals  # e.g. a checkbox that became a radio: a different control
+    # Prevent false healing onto disabled element when stored was active
+    if not stored.attributes.get("disabled") and (
+        live.attributes.get("disabled") is not None
+        or live.attributes.get("aria-disabled") == "true"
+    ):
+        return 0.0, signals
+    # Prevent false healing across incompatible accessible roles
+    if stored.role and live.role and stored.role.lower() != live.role.lower():
+        return 0.0, signals
 
     score = (
         W_ATTRIBUTE * signals.attribute
@@ -216,7 +236,7 @@ def score_fingerprint(
     identity = _identity_matches(stored, live, ignore)
     if identity is False:
         score = min(score, NO_IDENTITY_CAP)
-    elif "id" not in ignore and stored.id and live.id == stored.id:
+    elif "id" not in ignore and stored.id and live.id == stored.id and not is_dynamic_id(live.id):
         score = max(score, ID_ANCHOR_SCORE)
     return round(min(max(score, 0.0), 1.0), 4), signals
 
