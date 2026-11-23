@@ -431,3 +431,60 @@ def test_dependency_bump_not_found_in_manifest_goes_to_manual(tmp_path):
     assert len(result.manual) == 1
     assert result.manual[0].check_id == "SEC-DEP-MISSING-01"
     assert "not found in package.json" in result.manual[0].reason
+
+
+@pytest.mark.parametrize("target_inside", [False, True])
+def test_patch_scan_ignores_symlinked_source_files(tmp_path, target_inside):
+    root = tmp_path / "repo"
+    root.mkdir()
+    target = (root if target_inside else tmp_path) / "source.txt"
+    target.write_text("from fastapi import FastAPI\napp = FastAPI()\n", encoding="utf-8")
+    (root / "main.py").symlink_to(target)
+
+    result = build_patch(root, HEADERS, SITE)
+
+    assert result.files == []
+    assert result.applied == []
+    assert result.frameworks == []
+    assert len(result.manual) == len(HEADERS)
+    assert target.read_text(encoding="utf-8") == "from fastapi import FastAPI\napp = FastAPI()\n"
+
+
+def test_patch_scan_ignores_symlinked_dependency_manifest(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    target = tmp_path / "requirements.txt"
+    target.write_text("Flask==2.2.2\n", encoding="utf-8")
+    (root / "requirements.txt").symlink_to(target)
+
+    result = build_patch(root, [finding("SEC-DEP-FLASK", package="Flask", fixed_in="2.2.5")], SITE)
+
+    assert result.files == []
+    assert result.applied == []
+    assert len(result.manual) == 1
+    assert target.read_text(encoding="utf-8") == "Flask==2.2.2\n"
+
+
+def test_patch_scan_ignores_symlinked_directories_and_broken_links(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = write(tmp_path / "outside", {"main.py": FASTAPI_APP})
+    (root / "app").symlink_to(outside, target_is_directory=True)
+    (root / "main.py").symlink_to(tmp_path / "missing.py")
+
+    result = build_patch(root, HEADERS, SITE)
+
+    assert result.files == []
+    assert result.frameworks == []
+
+
+def test_patch_scan_ignores_special_files(tmp_path):
+    import os
+
+    from security.patcher import _files
+
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("Named pipes are not supported on this platform")
+    os.mkfifo(tmp_path / "main.py")
+
+    assert _files(tmp_path, (".py",)) == []

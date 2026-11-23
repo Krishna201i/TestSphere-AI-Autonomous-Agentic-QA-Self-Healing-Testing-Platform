@@ -31,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import tomllib
@@ -158,14 +159,20 @@ def fixes_for(findings: list[dict]) -> tuple[Fix, list[Manual]]:
 # ── Repository scan ────────────────────────────────────────────────────────
 
 def _files(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
+    """Find bounded regular files without following repository symlinks."""
     out: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith("."))
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in SKIP_DIRS and not d.startswith(".")
+            and not (Path(dirpath) / d).is_symlink()
+        )
         for name in sorted(filenames):
             if name.endswith(suffixes) or (suffixes == (".conf",) and name == "nginx.conf"):
                 p = Path(dirpath) / name
                 try:
-                    if p.stat().st_size <= MAX_FILE_BYTES:
+                    info = p.lstat()
+                    if stat.S_ISREG(info.st_mode) and info.st_size <= MAX_FILE_BYTES:
                         out.append(p)
                 except OSError:
                     continue
