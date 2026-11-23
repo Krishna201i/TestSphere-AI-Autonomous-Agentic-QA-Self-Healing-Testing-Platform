@@ -19,7 +19,7 @@ Provider selection is driven by ``LLM_PROVIDER`` env var::
     LLM_PROVIDER=mock   →  MockLLMProvider  (default, no deps)
     LLM_PROVIDER=local  →  APIProvider      (local OpenAI-compatible server, e.g. Ollama)
     LLM_PROVIDER=api    →  APIProvider      (OpenAI-compatible chat API)
-    LLM_PROVIDER=chain  →  ChainProvider    (fallback chain: NVIDIA Gemma, Nemotron, Groq, Gemini)
+    LLM_PROVIDER=chain  →  ChainProvider    (fallback chain: Gemini, NVIDIA Nemotron, NVIDIA Gemma, Groq)
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ def get_llm_provider(config: LLMConfig | None = None) -> LLMClient:
         return APIProvider(config)
 
     if provider == "chain":
-        # NVIDIA Gemma -> NVIDIA Nemotron -> Groq -> Gemini (LLM_CHAIN), failing over on limits and outages
+        # Gemini -> NVIDIA Nemotron -> NVIDIA Gemma -> Groq (LLM_CHAIN), failing over on limits and outages
         from agents.llm.providers.chain import ChainProvider
 
         return ChainProvider(config)

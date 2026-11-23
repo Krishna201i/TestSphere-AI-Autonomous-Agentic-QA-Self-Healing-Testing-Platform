@@ -14,8 +14,7 @@ or a pull request for your repository. Each fix is retested, a verified version 
 rollback, and the whole loop runs again on a schedule or on every push.
 
 Write your own tests in plain English in **Test Studio** (or import your Playwright tests), review every heal on
-the **Self-Healing** page, and let the AI agents run on a fallback chain of models (NVIDIA Gemma, Nemotron, Groq,
-Gemini). How each part of the title is delivered: [platform overview](docs/platform-overview.md).
+the **Self-Healing** page, and let the AI agents run on a fallback chain of models, largest context window first (Gemini, NVIDIA Nemotron, NVIDIA Gemma, Groq). How each part of the title is delivered: [platform overview](docs/platform-overview.md).
 
 ---
 

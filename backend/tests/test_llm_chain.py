@@ -228,23 +228,24 @@ def test_default_chain_order_and_models(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "gq")
     monkeypatch.setenv("GEMINI_API_KEY", "gm")
     links = chain_links()
+    # Largest context window first
     assert [(link.name, link.model) for link in links] == [
-        ("nvidia-gemma", "google/gemma-4-31b-it"), ("nvidia-nemotron", "nvidia/nemotron-3-ultra-550b-a55b"),
-        ("groq", "openai/gpt-oss-120b"), ("gemini", "gemini-3.8-flash")]
-    assert links[0].base_url == NVIDIA_BASE_URL and links[0].api_key == "nv"
+        ("gemini", "gemini-3.8-flash"), ("nvidia-nemotron", "nvidia/nemotron-3-ultra-550b-a55b"),
+        ("nvidia-gemma", "google/gemma-4-31b-it"), ("groq", "openai/gpt-oss-120b")]
+    assert links[1].base_url == NVIDIA_BASE_URL and links[1].api_key == "nv"
 
 
 def test_providers_without_a_key_are_left_out(monkeypatch):
     monkeypatch.setenv("NVIDIA_GEMMA_API_KEY", "only-gemma")
     monkeypatch.setenv("GEMINI_API_KEY", "gm")
-    assert [link.name for link in chain_links()] == ["nvidia-gemma", "gemini"]
+    assert [link.name for link in chain_links()] == ["gemini", "nvidia-gemma"]
 
 
 def test_separate_nvidia_keys_and_thinking(monkeypatch):
     monkeypatch.setenv("NVIDIA_GEMMA_API_KEY", "g")
     monkeypatch.setenv("NVIDIA_NEMOTRON_API_KEY", "n")
     monkeypatch.setenv("NVIDIA_NEMOTRON_THINKING", "true")
-    gemma, nemotron = chain_links()
+    nemotron, gemma = chain_links()
     assert (gemma.api_key, nemotron.api_key) == ("g", "n")
     assert dict(nemotron.extra_body)["chat_template_kwargs"] == {"enable_thinking": True}
 
@@ -292,7 +293,7 @@ def test_system_info_lists_the_chain_and_says_ai_runs_in_the_cloud(monkeypatch):
     info = TestClient(app).get("/api/system").json()
     assert info["privacy"]["ai_processing"] == "cloud"
     assert [(c["name"], c["benched_seconds"] > 100) for c in info["llm"]["chain"]] == [
-        ("nvidia-gemma", True), ("nvidia-nemotron", False), ("gemini", False)]
+        ("gemini", False), ("nvidia-nemotron", False), ("nvidia-gemma", True)]
     assert "nv" not in json.dumps(info["llm"]).replace("nvidia", "")
 
 

@@ -41,7 +41,9 @@ class ChainLink:
 
 
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_CHAIN = "nvidia-gemma,nvidia-nemotron,groq,gemini"
+# Largest context window first (the providers' own figures): Gemini 3.8 Flash 1,048,576 tokens, Nemotron 3
+# Ultra up to 1M, Gemma 4 31B 256K, Groq gpt-oss-120b 131,072
+DEFAULT_CHAIN = "gemini,nvidia-nemotron,nvidia-gemma,groq"
 
 
 def _env(*names: str, default: str = "") -> str:
