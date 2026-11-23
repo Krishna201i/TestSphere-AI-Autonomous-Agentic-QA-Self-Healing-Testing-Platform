@@ -47,11 +47,11 @@ server {
     location ~ ^/(api(/|$)|docs(/|$)|redoc$|openapi\.json$) {
         proxy_pass http://$backend;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        # The client's Host header is not passed on (nginx sends the backend's
+        # own name): the backend builds links from DASHBOARD_URL, never from it
         proxy_set_header Connection "";
         proxy_set_header X-Forwarded-For $client_forwarded_for;
         proxy_set_header X-Forwarded-Proto $client_proto;
-        proxy_set_header X-Forwarded-Host $host;
         # Live pipeline events are server-sent events: no buffering, long reads
         proxy_buffering off;
         proxy_cache off;
