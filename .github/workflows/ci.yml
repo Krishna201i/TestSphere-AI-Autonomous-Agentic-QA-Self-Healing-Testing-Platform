@@ -122,8 +122,12 @@ jobs:
   # The published numbers are a promise, checked on every change: a job of
   # their own, in parallel with the tests instead of after them
   gates:
-    name: Accuracy gates (healing, Test Studio)
+    name: Accuracy gate (${{ matrix.gate }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [healing, studio] # each takes ~3 minutes: side by side
     container:
       image: mcr.microsoft.com/playwright/python:v1.64.0-noble
       options: --ipc=host
@@ -155,11 +159,13 @@ jobs:
 
       # Any false heal, or a drop below 90% of the cases it should heal (92.3% today), fails CI
       - name: Healing benchmark gate (quick, 52 cases)
+        if: matrix.gate == 'healing'
         run: python -m engine.heal_benchmark --quick --gate 0.90
 
       # Plain-English tests (Test Studio, rule-based planner): any false alarm, or
       # fewer than 85% of the described bugs caught (95% today), fails CI
       - name: Test Studio accuracy gate (15 instructions, 19 bugs)
+        if: matrix.gate == 'studio'
         run: python -m scripts.studio_eval --rules --gate 0.85 --no-report
 
   # The engine also runs tests in Firefox and WebKit (ENGINE_BROWSER); the
