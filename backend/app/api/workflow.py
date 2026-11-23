@@ -219,6 +219,7 @@ async def execute_test_workflow(
         return await _workflow_orchestrator.execute_test_run(
             db=db,
             execution_id=execution_id,
+            allow_reexecute=True,
         )
     except ValueError as exc:
         raise HTTPException(

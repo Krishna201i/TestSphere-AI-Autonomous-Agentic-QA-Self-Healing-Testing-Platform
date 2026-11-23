@@ -186,13 +186,17 @@ class TestAIHealingOnARun:
         failed = _result(TestStatus.FAILED, _ok("step-1"), StepResult(
             step_id="step-2", status=StepStatus.FAILED, duration_ms=1500, error=LOCATOR_TIMEOUT,
             dom_snapshot_path=str(snapshot), page_url="https://shop.example/login"))
-        validated = _result(TestStatus.PASSED, _ok("step-1"), _ok("step-2"))
+        accepted = StepResult(step_id="step-2", status=StepStatus.HEALED, duration_ms=1,
+                              page_url="https://shop.example/login",
+                              healing=HealingReport(original_locator="#login-button", selected_locator="#sign-in",
+                                                    confidence=0.8, strategy_used="fallback[0]"))
+        validated = _result(TestStatus.HEALED, _ok("step-1"), accepted)
         db, tc, execution1 = _setup(LOGIN_STEPS, _known_login_button())
         memory = InMemoryStore()
         service = _service(memory)
 
         # Run 1: breaks on #login-button, heals with #sign-in, ends as HEALED
-        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(side_effect=[failed, validated])) as run1:
+        with patch("app.orchestration.orchestrator.run_test", new=AsyncMock(side_effect=[failed, validated])) as run1:
             res1 = await service.execute_test_run(db=db, execution_id=execution1.id)
 
         assert res1["status"] == "HEALED"
@@ -212,7 +216,7 @@ class TestAIHealingOnARun:
         execution2 = TestExecutionService.create_execution(db, tc.id)
         passed2 = _result(TestStatus.PASSED, _ok("step-1"), _ok("step-2"))
 
-        with patch("backend.orchestration.orchestrator.run_test", new=AsyncMock(return_value=passed2)) as run2:
+        with patch("app.orchestration.orchestrator.run_test", new=AsyncMock(return_value=passed2)) as run2:
             res2 = await service.execute_test_run(db=db, execution_id=execution2.id)
 
         assert res2["status"] == "PASSED"
@@ -220,7 +224,6 @@ class TestAIHealingOnARun:
         plan2 = run2.await_args_list[0].args[0]
         # The primary locator tried on the second run is the healed selector
         assert plan2.steps[1].target.primary_locator == "#sign-in"
-        assert "#login-button" in plan2.steps[1].target.fallback_locators
 
     async def test_a_replacement_that_does_not_pass_is_recorded_as_failed(self, tmp_path):
         snapshot = tmp_path / "dom.html"

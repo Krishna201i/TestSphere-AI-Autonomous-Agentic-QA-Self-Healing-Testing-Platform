@@ -426,6 +426,7 @@ class PlatformWorkflowOrchestrator:
         *,
         storage_state: dict | None = None,
         keep_state: list[dict] | None = None,
+        allow_reexecute: bool = False,
     ) -> dict[str, Any]:
         """Execute a single test execution run end-to-end.
 
@@ -453,7 +454,7 @@ class PlatformWorkflowOrchestrator:
             raise ValueError(
                 f"TestExecution #{execution_id} is already in progress (RUNNING)"
             )
-        if current_status in (
+        if not allow_reexecute and current_status in (
             TestExecutionStatus.PASSED.value,
             TestExecutionStatus.FAILED.value,
             TestExecutionStatus.HEALED.value,

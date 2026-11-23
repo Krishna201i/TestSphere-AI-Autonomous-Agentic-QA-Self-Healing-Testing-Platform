@@ -241,7 +241,7 @@ def test_step_descriptions_read_like_sentences_and_hide_typed_values():
 
 @pytest.fixture
 def s3():
-    import boto3
+    boto3 = pytest.importorskip("boto3")
     from botocore.stub import Stubber
 
     from app.artifacts import S3ArtifactStore
