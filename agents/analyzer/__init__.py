@@ -19,6 +19,11 @@ from agents.analyzer.failure_classifier import (
     ClassificationResult,
     FailureClassifier,
 )
+from agents.analyzer.grouping import (
+    FailureGroup,
+    FailureGroupingEngine,
+    normalize_error_message,
+)
 from agents.analyzer.schemas import (
     FailureAnalysis,
     FailureContext,
@@ -41,4 +46,7 @@ __all__ = [
     "FailureAnalysisAgentV2",
     "FailureAnalysisResult",
     "Severity",
+    "FailureGroup",
+    "FailureGroupingEngine",
+    "normalize_error_message",
 ]
