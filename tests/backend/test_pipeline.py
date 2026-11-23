@@ -182,6 +182,27 @@ def test_flaky_tests_ignore_steady_results():
     assert runner.flaky_tests(flipping, [{"test_case_id": 1, "status": "HEALED"}]) == {1}
 
 
+@pytest.mark.parametrize("status", ["PENDING", "RUNNING", "SKIPPED", "ERROR", None])
+def test_flaky_detection_does_not_count_unfinished_or_unknown_results_as_passes(status):
+    history = [
+        [{"test_case_id": 1, "status": "FAILED"}],
+        [{"test_case_id": 1, "status": status}],
+    ]
+
+    assert runner.flaky_tests(history, [{"test_case_id": 1, "status": "FAILED"}]) == set()
+
+
+@pytest.mark.parametrize("status", ["PENDING", "RUNNING", "SKIPPED", "ERROR", None])
+def test_flaky_detection_preserves_completed_transitions_across_ignored_results(status):
+    history = [
+        [{"test_case_id": 1, "status": "PASSED"}],
+        [{"test_case_id": 1, "status": status}],
+        [{"test_case_id": 1, "status": "FAILED"}],
+    ]
+
+    assert runner.flaky_tests(history, [{"test_case_id": 1, "status": "HEALED"}]) == {1}
+
+
 def test_a_quarantined_failure_is_reported_but_does_not_fail_the_run(fresh_store, stub_network):
     project = make_project(fresh_store)
     first = run_once(fresh_store, project, FakeOrchestrator({}), OutOfScope())

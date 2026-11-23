@@ -530,10 +530,21 @@ FLAKY_FLIPS = 2    # pass↔fail changes in that window that make a test flaky
 
 def flaky_tests(history: list[list[dict[str, Any]]], current: list[dict[str, Any]]) -> set[int]:
     """Test cases whose result flipped between pass and fail at least FLAKY_FLIPS
-    times over *history* (older runs' tests, oldest first) plus *current*."""
+    times over *history* (older runs' tests, oldest first) plus *current*.
+
+    Only completed PASSED, HEALED and FAILED outcomes provide evidence;
+    pending, running and unknown statuses must not be mistaken for passes.
+    """
+    completed = {
+        TestExecutionStatus.PASSED.value,
+        TestExecutionStatus.HEALED.value,
+        TestExecutionStatus.FAILED.value,
+    }
     outcomes: dict[int, list[bool]] = {}
     for tests in [*history, current]:
         for t in tests:
+            if t.get("status") not in completed:
+                continue
             outcomes.setdefault(t["test_case_id"], []).append(t["status"] != TestExecutionStatus.FAILED.value)
     return {tc for tc, seq in outcomes.items()
             if sum(1 for a, b in zip(seq, seq[1:], strict=False) if a != b) >= FLAKY_FLIPS}
