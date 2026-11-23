@@ -556,10 +556,17 @@ def _patch_package_json(content: str, package_name: str, fixed_version: str) -> 
     return content, bool(edits)
 
 
+def _pep503_pattern(package_name: str) -> str:
+    """Return a regex pattern matching package names per PEP 503 normalization (case-insensitive, [-_.]+ equivalent)."""
+    parts = re.split(r"[-_.]+", package_name)
+    return r"[-_.]+".join(re.escape(p) for p in parts if p)
+
+
 def _patch_requirements_txt(content: str, package_name: str, fixed_version: str) -> tuple[str, bool]:
     """Update a pinned dependency in requirements*.txt / *.in."""
+    pkg_pat = _pep503_pattern(package_name)
     pattern = re.compile(
-        r'^(?P<indent>[ \t]*)(?P<pkg>' + re.escape(package_name) + r'(?:\[[^\]]*\])?)\s*'
+        r'^(?P<indent>[ \t]*)(?P<pkg>' + pkg_pat + r'(?:\[[^\]]*\])?)\s*'
         r'(?P<op>==|>=|<=|~=|[<>]=?)\s*(?P<ver>[^\s#;,]+)(?P<rest>.*)$',
         re.IGNORECASE | re.MULTILINE
     )
@@ -576,8 +583,9 @@ def _patch_requirements_txt(content: str, package_name: str, fixed_version: str)
 
 def _patch_pyproject_toml(content: str, package_name: str, fixed_version: str) -> tuple[str, bool]:
     """Update dependency in pyproject.toml (PEP 621 dependencies array or Poetry table)."""
+    pkg_pat = _pep503_pattern(package_name)
     pattern_pep621 = re.compile(
-        r'("|\')(' + re.escape(package_name) + r'(?:\[[^\]]*\])?)\s*([~><=!]+)\s*([^\'",;]+)(.*?)\1',
+        r'("|\')(' + pkg_pat + r'(?:\[[^\]]*\])?)\s*([~><=!]+)\s*([^\'",;]+)(.*?)\1',
         re.IGNORECASE
     )
     match_pep = pattern_pep621.search(content)
@@ -596,7 +604,7 @@ def _patch_pyproject_toml(content: str, package_name: str, fixed_version: str) -
             pass
 
     pattern_poetry = re.compile(
-        r'^([ \t]*' + re.escape(package_name) + r'\s*=\s*("|\'))([~><=!^]*)\s*([^"\']+)(\2)',
+        r'^([ \t]*' + pkg_pat + r'\s*=\s*("|\'))([~><=!^]*)\s*([^"\']+)(\2)',
         re.IGNORECASE | re.MULTILINE
     )
     match_poetry = pattern_poetry.search(content)

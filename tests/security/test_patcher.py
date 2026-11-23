@@ -409,6 +409,55 @@ dependencies = [
     assert "requests==2.31.0" in data["project"]["dependencies"]
 
 
+def test_dependency_bump_pep503_canonical_matching_requirements(tmp_path):
+    # Tests matching across hyphens, underscores, dots, and casing (PEP 503)
+    root = write(tmp_path / "repo", {"requirements.txt": """flask-cors==3.0.10
+Zope_Interface==5.4.0
+"""})
+    findings = [
+        finding("SEC-DEP-CORS-01", recommendation="Upgrade Flask_Cors to 4.0.0 or later.", package="Flask_Cors", fixed_in="4.0.0"),
+        finding("SEC-DEP-ZOPE-01", recommendation="Upgrade zope.interface to 6.0.0 or later.", package="zope.interface", fixed_in="6.0.0"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert [f.path for f in result.files] == ["requirements.txt"]
+    assert result.files[0].verified is True
+    assert "+flask-cors==4.0.0" in result.patch
+    assert "+Zope_Interface==6.0.0" in result.patch
+    assert result.manual == []
+
+    git_apply(root, result.patch)
+    text = (root / "requirements.txt").read_text(encoding="utf-8")
+    assert "flask-cors==4.0.0\n" in text
+    assert "Zope_Interface==6.0.0\n" in text
+
+
+def test_dependency_bump_pep503_canonical_matching_pyproject(tmp_path):
+    root = write(tmp_path / "repo", {"pyproject.toml": """[project]
+name = "shop"
+version = "0.1.0"
+dependencies = [
+    "flask_cors==3.0.10",
+]
+
+[tool.poetry.dependencies]
+zope-interface = "^5.4.0"
+"""})
+    findings = [
+        finding("SEC-DEP-CORS-01", recommendation="Upgrade Flask-Cors to 4.0.0 or later.", package="Flask-Cors", fixed_in="4.0.0"),
+        finding("SEC-DEP-ZOPE-01", recommendation="Upgrade zope_interface to 6.0.0 or later.", package="zope_interface", fixed_in="6.0.0"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert [f.path for f in result.files] == ["pyproject.toml"]
+    assert result.files[0].verified is True
+    assert result.manual == []
+
+    git_apply(root, result.patch)
+    import tomllib
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "flask_cors==4.0.0" in data["project"]["dependencies"]
+    assert data["tool"]["poetry"]["dependencies"]["zope-interface"] == "^6.0.0"
+
+
 def test_dependency_bump_no_fixed_version_goes_to_manual(tmp_path):
     root = write(tmp_path / "repo", {"requirements.txt": "evil-pkg==1.0.0\n"})
     findings = [
