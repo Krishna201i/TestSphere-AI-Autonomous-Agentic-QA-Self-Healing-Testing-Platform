@@ -1,0 +1,271 @@
+"""
+TestSphere-AI — Workflow Orchestration & Telemetry API Router.
+
+Provides endpoints to trigger autonomous test runs and stream real-time
+Server-Sent Events (SSE) telemetry to platform dashboards.
+"""
+
+import asyncio
+import json
+import logging
+from typing import Any
+from urllib.parse import urlparse
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+from agents.schemas.member3_contract import format_sse_event
+from app.auth import User, actor_for, ensure_owned, get_current_user, scope
+from app.database.session import get_db
+from app.database.store import Store, StoreUnavailableError
+from app.models import APPLICATIONS, TEST_CASES, TEST_EXECUTIONS
+from app.models.test_execution import TestExecutionStatus
+from app.orchestration.orchestrator import get_platform_orchestrator
+from app.ratelimit import limit_runs
+from app.services.application_service import default_project
+from app.services.security_service import record_audit
+from app.services.test_case_service import TestCaseService
+from app.services.test_execution_service import TestExecutionService
+from app.services.url_analyzer import URLAnalyzerService
+from engine.schemas import RunOptions
+
+logger = logging.getLogger("testsphere.workflow")
+
+router = APIRouter(prefix="/workflow", tags=["Workflow & Orchestration"])
+
+_workflow_orchestrator = get_platform_orchestrator()
+
+
+class PlanAndExecuteRequest(BaseModel):
+    application_id: int | None = None
+    app_name: str | None = Field(None, max_length=255)
+    app_url: str | None = Field(None, max_length=1024, description="Page to test; required unless test_case_id is given")
+    test_case_id: int | None = None
+    test_case_name: str | None = Field(None, max_length=255)
+    prompt: str | None = Field(None, max_length=2000, description="What to test, in plain words")
+    steps: list[dict[str, Any]] | None = Field(None, max_length=100, description="At most 100 hand-written steps")
+    headless: bool = True
+
+
+class AnalyzeURLRequest(BaseModel):
+    url: str = Field(..., min_length=1, max_length=1024)
+    prompt: str | None = Field(None, max_length=2000)
+    test_case_name: str | None = Field(None, max_length=255)
+
+
+@router.post("/analyze", status_code=status.HTTP_200_OK)
+async def analyze_url_endpoint(req: AnalyzeURLRequest, _user: User = Depends(limit_runs)) -> dict[str, Any]:
+    """Perform live DOM element extraction, security/a11y audit, and QA synthesis on any URL."""
+    if not req.url.strip():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A URL is required.")
+    try:
+        URLAnalyzerService.normalize_url(req.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return await URLAnalyzerService.analyze_live_website(
+        url=req.url,
+        prompt=req.prompt,
+        test_case_name=req.test_case_name,
+    )
+
+
+@router.post("/plan-and-execute", status_code=status.HTTP_200_OK)
+async def plan_and_execute_workflow(
+    payload: PlanAndExecuteRequest | None = None,
+    db: Store = Depends(get_db),
+    user: User = Depends(limit_runs),
+) -> dict[str, Any]:
+    """Autonomous plan and execute workflow endpoint.
+    
+    Dynamically identifies or provisions the target application context,
+    performs live DOM analysis on real URLs, synthesizes executable test steps,
+    creates an execution record, and executes the complete autonomous QA loop.
+    """
+    req = payload or PlanAndExecuteRequest()
+    actor = await asyncio.to_thread(actor_for, user, None)
+    try:
+        live_analysis = None
+        if req.test_case_id:
+            tc = await asyncio.to_thread(db.get, TEST_CASES, req.test_case_id)
+            if not tc or not (user.local or tc.get("owner_uid") == user.uid):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"TestCase #{req.test_case_id} not found",
+                )
+        else:
+            # Perform live website inspection on the target URL
+            target_url = (req.app_url or "").strip()
+            if not target_url:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                    detail="Give the page to test (app_url) or an existing test_case_id.")
+            try:
+                live_analysis = await URLAnalyzerService.analyze_live_website(
+                    url=target_url,
+                    prompt=req.prompt,
+                    test_case_name=req.test_case_name,
+                )
+            except Exception as exc:  # noqa: BLE001 - reported to the user below
+                logger.exception("Page analysis of %s crashed", target_url)
+                live_analysis = {"success": False, "error": f"page analysis failed ({type(exc).__name__}: {exc})"}
+
+            # Never synthesize tests from a page that failed to load: a 404 page
+            # would yield a test asserting "Not Found" and pass.
+            if not req.steps and not (live_analysis and live_analysis.get("success")):
+                reason = (
+                    f"HTTP {live_analysis.get('status_code')}" if live_analysis and live_analysis.get("status_code")
+                    else (live_analysis or {}).get("error") or "unreachable"
+                )
+                await asyncio.to_thread(record_audit, db, actor=actor, kind="qa", level="error", owner_uid=user.uid,
+                                        message=f"QA run refused: {target_url} did not load ({reason})")
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Could not load {target_url} ({reason}). Check the URL — no tests were planned from an error page.",
+                )
+
+            # Project, application and test case: database work, in a thread
+            tc = await asyncio.to_thread(_save_planned_test, db, user, req, target_url, live_analysis)
+
+        # Create execution record
+        execution = await asyncio.to_thread(
+            TestExecutionService.create_execution,
+            db, test_case_id=tc.id, status=TestExecutionStatus.PENDING, owner_uid=user.uid,
+        )
+
+        res = await _workflow_orchestrator.execute_test_run(
+            db=db,
+            execution_id=execution.id,
+            options=RunOptions(headless=req.headless),
+        )
+
+        if live_analysis and "analysis" not in res:
+            res["analysis"] = live_analysis
+
+        run_status = res.get("status", "UNKNOWN")
+        await asyncio.to_thread(
+            record_audit, db, actor=actor, kind="qa", ref=str(execution.id), owner_uid=user.uid,
+            level={"FAILED": "error", "HEALED": "warn", "PASSED": "success"}.get(run_status, "info"),
+            message=f"QA run #{execution.id} ({tc.name}) -> {run_status}"
+                    + (f": {res['error_message']}" if res.get("error_message") else ""),
+        )
+        return res
+    except (HTTPException, StoreUnavailableError):
+        raise
+    except Exception as exc:  # noqa: BLE001 - logged with traceback, generic answer to the client
+        logger.exception("Plan-and-execute failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Plan-and-execute failed unexpectedly ({type(exc).__name__}). The error is in the server log.",
+        ) from exc
+
+
+def _save_planned_test(db: Store, user: User, req: PlanAndExecuteRequest, target_url: str,
+                       live_analysis: dict[str, Any] | None):
+    """The test case planned for *target_url*: created on the first call, updated
+    (a new version when its steps change) on the next ones, never duplicated."""
+    proj = default_project(db, None if user.local else user.uid)
+
+    resolved_app_name = req.app_name
+    resolved_app_url = target_url
+    if live_analysis and live_analysis.get("page_title"):
+        if not resolved_app_name:
+            resolved_app_name = live_analysis["page_title"][:60]
+        resolved_app_url = live_analysis["url"]
+
+    if req.application_id:
+        app_entity = db.get(APPLICATIONS, req.application_id)
+        if not app_entity or not (user.local or app_entity.get("owner_uid") == user.uid):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail=f"Application #{req.application_id} not found")
+    else:
+        app_entity = db.find_one(APPLICATIONS, name=resolved_app_name, **scope(user)) if resolved_app_name else None
+        if not app_entity:
+            app_entity = db.insert(
+                APPLICATIONS, project_id=proj.id,
+                name=resolved_app_name or urlparse(resolved_app_url).netloc or resolved_app_url,
+                base_url=resolved_app_url, description=None, owner_uid=user.uid,
+            )
+
+    effective_steps = req.steps
+    if not effective_steps and live_analysis:
+        effective_steps = live_analysis["synthesized_test_case"]["steps"]
+    resolved_tc_name = req.test_case_name
+    if not resolved_tc_name and live_analysis:
+        resolved_tc_name = live_analysis["synthesized_test_case"]["name"]
+    name = resolved_tc_name or "Autonomous Planned Test Case"
+    description = json.dumps({"steps": effective_steps or [], "analysis": live_analysis, "prompt": req.prompt})
+    external_id = f"tc-auto-{app_entity.id}"
+
+    existing = db.find_one(TEST_CASES, application_id=app_entity.id, external_id=external_id)
+    if existing is None:
+        return TestCaseService.create_test_case(db, application_id=app_entity.id, name=name, description=description,
+                                                external_id=external_id, owner_uid=user.uid)
+    old_steps = (json.loads(existing.get("description") or "{}") or {}).get("steps")
+    changes: dict[str, Any] = {"name": name, "description": description}
+    if old_steps != (effective_steps or []):
+        changes["version"] = int(existing.get("version") or 1) + 1
+    return db.update(TEST_CASES, existing["id"], **changes)
+
+
+@router.post("/execute/{execution_id}", status_code=status.HTTP_200_OK)
+async def execute_test_workflow(
+    execution_id: int,
+    db: Store = Depends(get_db),
+    user: User = Depends(limit_runs),
+) -> dict[str, Any]:
+    """Execute a test execution run with autonomous AI diagnosis and self-healing."""
+    ensure_owned(user, db.get(TEST_EXECUTIONS, execution_id), f"TestExecution #{execution_id}")
+    try:
+        return await _workflow_orchestrator.execute_test_run(
+            db=db,
+            execution_id=execution_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except StoreUnavailableError:
+        raise  # handled app-wide as 503 with a readable cause
+    except Exception as exc:  # noqa: BLE001 - logged with traceback, generic answer to the client
+        logger.exception("Workflow execution #%s failed", execution_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Workflow execution failed unexpectedly ({type(exc).__name__}). The error is in the server log.",
+        ) from exc
+
+
+@router.get("/stream/{workflow_id}")
+async def stream_workflow_events(
+    workflow_id: str,
+    db: Store = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Recorded events of a workflow run, as Server-Sent Events (SSE).
+
+    *workflow_id* is ``wf-exec-<execution id>`` or the bare execution id; only
+    the execution's owner may read it.
+    """
+    raw = workflow_id.removeprefix("wf-exec-")
+    execution = db.get(TEST_EXECUTIONS, int(raw)) if raw.isdigit() else None
+    ensure_owned(user, execution, "Workflow")
+    events = _workflow_orchestrator.execution_events(execution["id"])
+    if not events:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="No recorded events for this workflow (it has not run since the server started).")
+    return StreamingResponse(
+        (format_sse_event(event) for event in events),
+        media_type="text/event-stream",
+    )
+
+
+@router.get("/timeline/{execution_id}")
+async def get_execution_timeline(
+    execution_id: int,
+    db: Store = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Retrieve structured agent decision timeline for a test execution."""
+    execution = db.get(TEST_EXECUTIONS, execution_id)
+    ensure_owned(user, execution, f"TestExecution #{execution_id}")
+    return _workflow_orchestrator.execution_timeline(execution_id)

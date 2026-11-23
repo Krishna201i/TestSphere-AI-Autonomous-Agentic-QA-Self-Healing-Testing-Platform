@@ -1,19 +1,34 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { WorkspaceProvider, useWorkspace } from './state/Workspace';
 import { AuthProvider, useAuth } from './state/Auth';
 import { healthStats } from './lib/derive';
 import TopNav, { PAGES } from './components/TopNav';
+import Sidebar from './components/Sidebar';
 import CommandCenter from './pages/CommandCenter';
-import Autopilot from './pages/Autopilot';
-import Reports from './pages/Reports';
-import Security from './pages/Security';
-import Profile from './pages/Profile';
 import Privacy, { PrivacyStandalone } from './pages/Privacy';
 import { AuthGate } from './pages/Login';
-import PipelineVisualizer from './pages/PipelineVisualizer';
-import AuditLogs from './pages/AuditLogs';
-import RunDetail from './pages/RunDetail';
+
+// The home page and Privacy (also shown signed out) come with the app; the
+// other pages load when first opened, so the first visit downloads less
+const Autopilot = lazy(() => import('./pages/Autopilot'));
+const TestStudio = lazy(() => import('./pages/TestStudio'));
+const Reports = lazy(() => import('./pages/Reports'));
+const Security = lazy(() => import('./pages/Security'));
+const Profile = lazy(() => import('./pages/Profile'));
+const PipelineVisualizer = lazy(() => import('./pages/PipelineVisualizer'));
+const AuditLogs = lazy(() => import('./pages/AuditLogs'));
+const RunDetail = lazy(() => import('./pages/RunDetail'));
+const TestRuns = lazy(() => import('./pages/TestRuns'));
+const AIAgents = lazy(() => import('./pages/AIAgents'));
+const SelfHealing = lazy(() => import('./pages/SelfHealing'));
+const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
+const Schedules = lazy(() => import('./pages/Schedules'));
+
+/** #/runs lists the runs; #/runs/<run>[/<execution>] opens one. */
+function Runs(props) {
+  return props.params?.tab ? <RunDetail {...props} /> : <TestRuns {...props} />;
+}
 
 /** Shown while the API is up but its database is not — explains why actions fail. */
 function DatabaseBanner() {
@@ -23,6 +38,18 @@ function DatabaseBanner() {
   return (
     <div className="alert-banner" role="alert">
       <b>The backend cannot reach its database</b>, so saving and running tests will fail. {h.dbError}
+    </div>
+  );
+}
+
+/** What happened to a GitHub sign-in that had to be linked to an existing account. */
+function AccountBanner() {
+  const { accountNotice, clearAccountNotice } = useAuth();
+  if (!accountNotice) return null;
+  return (
+    <div className={`alert-banner row-between${accountNotice.ok ? ' ok' : ''}`} role={accountNotice.ok ? 'status' : 'alert'}>
+      <span>{accountNotice.text}</span>
+      <button type="button" className="btn btn-sm" onClick={clearAccountNotice}>Dismiss</button>
     </div>
   );
 }
@@ -58,13 +85,18 @@ class PageErrorBoundary extends React.Component {
 const VIEWS = {
   home: CommandCenter,
   autopilot: Autopilot,
+  studio: TestStudio,
   reports: Reports,
   security: Security,
   visualizer: PipelineVisualizer,
   audit: AuditLogs,
   profile: Profile,
   privacy: Privacy,
-  runs: RunDetail,
+  runs: Runs,
+  agents: AIAgents,
+  healing: SelfHealing,
+  integrations: IntegrationsPage,
+  schedules: Schedules,
 };
 
 // Older page ids (links inside cards, bookmarks) → where they live now
@@ -78,7 +110,7 @@ const ALIASES = {
 };
 
 // Reachable by link (profile menu), not shown as a nav pill
-const EXTRA_PAGES = [{ id: 'profile', label: 'Profile' }, { id: 'privacy', label: 'Privacy' }, { id: 'runs', label: 'Run' }];
+const EXTRA_PAGES = [{ id: 'privacy', label: 'Privacy' }];
 // Pages whose address carries a sub-path: #/security/<tab>, #/runs/<run>[/<execution>]
 const SUB_PATH = ['security', 'runs'];
 
@@ -151,16 +183,26 @@ function Dashboard({ uid }) {
     if (!samePage) window.scrollTo({ top: 0 }); // e.g. opening a test inside a run keeps your place
   }, []);
 
+  const [menuOpen, setMenuOpen] = useState(false);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
   const View = VIEWS[page];
   return (
     <WorkspaceProvider uid={uid}>
-      <TopNav page={page} onNavigate={navigate} />
-      <DatabaseBanner />
-      <main>
-        <PageErrorBoundary key={page}>
-          <View onNavigate={navigate} params={params} />
-        </PageErrorBoundary>
-      </main>
+      <div className="shell">
+        <Sidebar page={page} onNavigate={navigate} open={menuOpen} onClose={closeMenu} />
+        <div className="shell-main">
+          <TopNav page={page} onNavigate={navigate} onMenu={() => setMenuOpen(true)} />
+          <DatabaseBanner />
+          <AccountBanner />
+          <main>
+            <PageErrorBoundary key={page}>
+              <Suspense fallback={<div className="empty" role="status">Loading…</div>}>
+                <View onNavigate={navigate} params={params} />
+              </Suspense>
+            </PageErrorBoundary>
+          </main>
+        </div>
+      </div>
     </WorkspaceProvider>
   );
 }

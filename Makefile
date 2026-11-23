@@ -11,16 +11,16 @@ help:
 	@echo "  sarif         Scan demo app and generate SARIF v2.1.0 report"
 
 demo:
-	python3 scripts/run_demo.py
+	python3 backend/scripts/run_demo.py
 
 test:
-	python3 -m pytest -q
+	cd backend && python3 -m pytest -q
 
 test-backend:
-	python3 -m pytest -q tests/backend tests/security tests/test_*.py
+	cd backend && python3 -m pytest -q tests/app tests/security tests/test_*.py
 
 lint:
-	ruff check .
+	ruff check backend
 
 sarif:
-	python3 scripts/run_demo.py --sarif-only
+	python3 backend/scripts/run_demo.py --sarif-only

@@ -1,0 +1,748 @@
+"""
+Automated pipeline: suite planning, a full run through every stage (page
+analysis, browser and network stubbed), regressions between runs, the
+scheduler loop and the GitHub push webhook.
+"""
+
+import asyncio
+import json
+from datetime import UTC, datetime, timedelta
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from app.api.webhooks import signature_for
+from app.config import settings
+from app.main import app
+from app.models import BLUEPRINTS, PIPELINE_RUNS, PROJECTS, TEST_CASES
+from app.pipeline import runner, scheduler, suite
+from app.services.project_service import ProjectService
+from security import OutOfScopeError, PassiveScanner, ScopePolicy
+
+URL = "http://app.test/login"
+
+
+def analysis(**overrides):
+    base = {
+        "success": True, "url": URL, "status_code": 200, "latency_ms": 42, "page_title": "Shop Login",
+        "elements_inventory": {
+            "inputs_count": 2, "buttons_count": 1, "links_count": 4,
+            "headings": ["Welcome back"],
+            "links": ["/about", "https://elsewhere.example/x", "/logout", "mailto:a@b.c"],
+        },
+        "synthesized_test_case": {"steps": [
+            {"step_number": 1, "action": "NAVIGATE", "value": URL, "target": None, "description": "open"},
+            {"step_number": 2, "action": "FILL", "target": "#username", "value": "u", "description": "fill"},
+            {"step_number": 3, "action": "CLICK", "target": "button.radius", "value": None, "description": "click"},
+        ]},
+    }
+    base.update(overrides)
+    return base
+
+
+BLUEPRINT = {"routes": [
+    {"method": "GET", "path": "/pricing", "file": "app.py", "line": 1},
+    {"method": "GET", "path": "/users/{id}", "file": "app.py", "line": 2},
+    {"method": "POST", "path": "/login", "file": "app.py", "line": 3},
+    {"method": "GET", "path": "/about", "file": "app.py", "line": 4},
+    {"method": "ANY", "path": "/api/hello", "file": "pages/api/hello.ts", "line": 1},
+]}
+
+
+# ── suite planning ─────────────────────────────────────────────
+
+
+def test_page_tests_cover_smoke_interaction_and_content():
+    tests = suite.page_tests(analysis(), prompt="log in as admin")
+    assert [t["slug"] for t in tests] == ["smoke", "interaction", "content"]
+    assert tests[1]["name"] == "Scenario: log in as admin"
+    assert tests[2]["steps"][1] == {"step_number": 2, "action": "ASSERT_CONTAINS_TEXT", "target": "body",
+                                    "value": "Welcome back", "description": "Page shows 'Welcome back'"}
+
+
+def test_candidate_pages_are_same_site_safe_and_parameter_free():
+    pages = suite.candidate_pages(analysis(), BLUEPRINT)
+    assert [(p["kind"], p["url"]) for p in pages] == [
+        ("link", "http://app.test/about"),
+        ("route", "http://app.test/pricing"),  # /about deduplicated; /users/{id}, POST and /api skipped
+    ]
+
+
+# ── full run ───────────────────────────────────────────────────
+
+
+class FakeOrchestrator:
+    def __init__(self, outcomes):
+        self.outcomes = outcomes  # test name substring -> (status, error)
+        self.ran = []
+
+    async def execute_test_run(self, db, execution_id, options=None):
+        tc = db.get(TEST_CASES, db.get("test_executions", execution_id)["test_case_id"])
+        self.ran.append(tc["name"])
+        status, error = next((v for k, v in self.outcomes.items() if k in tc["name"]), ("PASSED", None))
+        db.update("test_executions", execution_id, status=status, error_message=error)
+        return {"status": status, "error_message": error}
+
+
+def scanner_for(headers):
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, headers=headers, text=""))
+    return PassiveScanner(ScopePolicy.of("app.test"), transport=transport)
+
+
+class OutOfScope:
+    async def fetch(self, url, **_):
+        raise OutOfScopeError("app.test:80 is not in the authorized scope (127.0.0.1)")
+
+
+@pytest.fixture
+def stub_network(monkeypatch):
+    state = {"analysis": analysis(), "codes": {"http://app.test/about": 200, "http://app.test/pricing": 404}}
+
+    async def analyze(url, prompt=None, test_case_name=None, **options):
+        state.setdefault("analyze_options", {})[url] = options
+        return state["analysis"]
+
+    async def reachable(urls):
+        return {u: ({"status": code, "file": False, "digest": u} if (code := state["codes"].get(u)) else None)
+                for u in urls}
+
+    async def no_fallback(base_url):
+        return state.get("fallback", set())
+
+    monkeypatch.setattr("app.pipeline.runner.URLAnalyzerService.analyze_live_website", analyze)
+    monkeypatch.setattr(runner, "_reachable", reachable)
+    monkeypatch.setattr(runner, "_fallback_digests", no_fallback)
+    return state
+
+
+def make_project(db, **fields):
+    return ProjectService.create_project(db, name="Shop", owner_uid="local-dev", app_url=URL, **fields)
+
+
+def run_once(db, project, orchestrator, scanner, trigger="manual"):
+    run = runner.create_run(db, project, trigger=trigger, actor="tester")
+    return asyncio.run(runner.execute_run(run["id"], orchestrator=orchestrator, scanner=scanner))
+
+
+def stage(run, key):
+    return next(s for s in run["stages"] if s["key"] == key)
+
+
+def test_full_run_chains_every_stage(fresh_store, stub_network):
+    project = make_project(fresh_store, prompt="log in", repo_url="https://github.com/acme/shop")
+    # An earlier ingestion of the repo: its GET routes become page tests
+    fresh_store.insert(BLUEPRINTS, source=project["repo_url"], name="shop", project_id=project["id"], owner_uid="local-dev",
+                       data=json.dumps({**BLUEPRINT, "analyzed_at": "2026-10-20T10:00:00+00:00"}))
+    orch = FakeOrchestrator({"Scenario": ("HEALED", "Self-healed #user -> #username")})
+    run = run_once(fresh_store, project, orch, scanner_for({"content-type": "text/html"}))
+
+    assert run["status"] == "passed"
+    assert stage(run, "codebase")["status"] == "done"
+    assert "Using the blueprint from 2026-10-20 10:00 (5 routes)" in stage(run, "codebase")["detail"]
+    assert stage(run, "analyze")["status"] == "done"
+    plan = stage(run, "plan")
+    assert plan["status"] == "done"
+    assert "4 tests: 4 generated (4 new)" in plan["detail"]
+    assert "GET /pricing (404)" in plan["detail"]  # unreachable page left out, and said so
+    assert orch.ran == ["Smoke: Shop Login", "Scenario: log in", "Content: heading 'Welcome back'", "Linked page: /about"]
+    assert stage(run, "heal")["detail"].startswith("1 test(s) self-healed")
+    assert stage(run, "security")["status"] == "done"
+    assert run["summary"]["total"] == 4 and run["summary"]["healed"] == 1
+    # Missing headers are hardening suggestions: listed, never counted as security findings
+    assert run["summary"]["findings"] == {} and run["summary"]["hardening"] > 0
+    assert any("hardening suggestion" in line for line in run["summary"]["narrative"])
+    assert all(s["status"] in ("done", "skipped") for s in run["stages"])
+
+    refreshed = fresh_store.get(PROJECTS, project["id"])
+    assert refreshed["last_run_id"] == run["id"] and refreshed["last_run_status"] == "passed"
+
+
+def test_a_login_forms_own_tests_run_and_a_goal_it_could_not_run_says_why(fresh_store, stub_network):
+    """The analysis left the sign-in out (no credentials) and planned the form's own tests."""
+    wrong = {"slug": "login-wrong-password", "name": "Login: a wrong password is refused with a message",
+             "category": "functional", "steps": [{"step_number": 1, "action": "NAVIGATE", "value": URL}]}
+    stub_network["analysis"] = analysis(
+        synthesized_test_case={"steps": [{"step_number": 1, "action": "NAVIGATE", "value": URL}],
+                               "goal": {"tested": [], "untested": ["test the login (needs credentials in the goal)"]}},
+        auth_tests=[wrong])
+    project = make_project(fresh_store, prompt="test the login", allow_test_accounts=True,
+                           test_email_domain="qa.acme.dev")
+    orch = FakeOrchestrator({})
+    run = run_once(fresh_store, project, orch, scanner_for({"content-type": "text/html"}))
+
+    assert stub_network["analyze_options"][URL] == {"allow_test_accounts": True, "email_domain": "qa.acme.dev",
+                                                    "test_data": {}}
+    assert "Login: a wrong password is refused with a message" in orch.ran
+    detail = stage(run, "plan")["detail"]
+    assert "Not tested from your goal: “test the login (needs credentials in the goal)”" in detail
+    assert "no form fields" not in detail  # the reason given, not a wrong guess
+    assert run["goal_untested"] is False and run["goal_untested_parts"] == ["test the login (needs credentials in the goal)"]
+
+
+def test_a_test_planned_as_unconfirmed_starts_quarantined(fresh_store, stub_network):
+    """The logout test assumes a visible "Log out": it reports, but cannot fail a run until confirmed."""
+    logout = {"slug": "login-logout", "name": "Login: logging out ends the session", "category": "functional",
+              "quarantined": True, "steps": [{"step_number": 1, "action": "NAVIGATE", "value": URL}]}
+    stub_network["analysis"] = analysis(auth_tests=[logout])
+    project = make_project(fresh_store, prompt="log in with demo / secret")
+    run = run_once(fresh_store, project, FakeOrchestrator({"logging out": ("FAILED", "assert_hidden failed")}),
+                   scanner_for({"content-type": "text/html"}))
+
+    row = fresh_store.find_one(TEST_CASES, name="Login: logging out ends the session")
+    assert row["quarantined"] is True
+    assert run["status"] == "passed"  # its failure is reported, not counted against the run
+    assert any(t["name"] == row["name"] and t["status"] == "FAILED" and t["quarantined"] for t in run["tests"])
+
+
+def test_second_run_reuses_generated_tests_and_reports_regressions(fresh_store, stub_network):
+    project = make_project(fresh_store)
+    first = run_once(fresh_store, project, FakeOrchestrator({}), OutOfScope())
+    assert first["status"] == "passed"
+    assert stage(first, "security")["status"] == "skipped"
+    assert "SECURITY_SCAN_ALLOWED_HOSTS" in stage(first, "security")["detail"]
+
+    second = run_once(fresh_store, project, FakeOrchestrator({"Smoke": ("FAILED", "Timeout")}), OutOfScope(), trigger="schedule")
+    assert "0 new" in stage(second, "plan")["detail"]
+    assert len(fresh_store.find(TEST_CASES)) == len(first["tests"])  # no duplicates
+    assert second["status"] == "failed"
+    assert second["regressions"] == [{"kind": "test", "name": "Smoke: Shop Login", "test_case_id": second["tests"][0]["test_case_id"],
+                                      "was": "PASSED", "now": "FAILED", "error": "Timeout"}]
+    assert second["summary"]["previous_run_id"] == first["id"]
+
+
+def test_flaky_tests_are_flagged_after_flipping_twice(fresh_store, stub_network):
+    project = make_project(fresh_store)
+    outcomes = [{}, {"Smoke": ("FAILED", "Timeout")}, {}]  # pass, fail, pass: two flips
+    runs = [run_once(fresh_store, project, FakeOrchestrator(o), OutOfScope()) for o in outcomes]
+    smoke = next(t for t in runs[-1]["tests"] if t["name"].startswith("Smoke"))
+    assert smoke["flaky"] is True
+    assert runs[-1]["summary"]["flaky"] == 1
+    assert not any(t["flaky"] for t in runs[1]["tests"])  # one flip is a regression, not yet flaky
+    assert all(not t["flaky"] for t in runs[-1]["tests"] if t is not smoke)
+
+
+def test_flaky_tests_ignore_steady_results():
+    steady = [[{"test_case_id": 1, "status": "PASSED"}]] * 4
+    flipping = [[{"test_case_id": 1, "status": s}] for s in ("PASSED", "FAILED", "HEALED")]
+    assert runner.flaky_tests(steady, [{"test_case_id": 1, "status": "FAILED"}]) == set()
+    assert runner.flaky_tests(flipping, [{"test_case_id": 1, "status": "HEALED"}]) == {1}
+
+
+@pytest.mark.parametrize("status", ["PENDING", "RUNNING", "SKIPPED", "ERROR", None])
+def test_flaky_detection_does_not_count_unfinished_or_unknown_results_as_passes(status):
+    history = [
+        [{"test_case_id": 1, "status": "FAILED"}],
+        [{"test_case_id": 1, "status": status}],
+    ]
+
+    assert runner.flaky_tests(history, [{"test_case_id": 1, "status": "FAILED"}]) == set()
+
+
+@pytest.mark.parametrize("status", ["PENDING", "RUNNING", "SKIPPED", "ERROR", None])
+def test_flaky_detection_preserves_completed_transitions_across_ignored_results(status):
+    history = [
+        [{"test_case_id": 1, "status": "PASSED"}],
+        [{"test_case_id": 1, "status": status}],
+        [{"test_case_id": 1, "status": "FAILED"}],
+    ]
+
+    assert runner.flaky_tests(history, [{"test_case_id": 1, "status": "HEALED"}]) == {1}
+
+
+def test_a_quarantined_failure_is_reported_but_does_not_fail_the_run(fresh_store, stub_network):
+    project = make_project(fresh_store)
+    first = run_once(fresh_store, project, FakeOrchestrator({}), OutOfScope())
+    smoke_id = next(t["test_case_id"] for t in first["tests"] if t["name"].startswith("Smoke"))
+    fresh_store.update(TEST_CASES, smoke_id, quarantined=True)
+
+    run = run_once(fresh_store, project, FakeOrchestrator({"Smoke": ("FAILED", "Timeout")}), OutOfScope())
+    smoke = next(t for t in run["tests"] if t["test_case_id"] == smoke_id)
+    assert smoke["status"] == "FAILED" and smoke["quarantined"] is True
+    assert run["status"] == "passed"
+    assert run["summary"]["failed"] == 0 and run["summary"]["quarantined_failed"] == 1
+    assert stage(run, "execute")["status"] == "done"
+    assert "1 quarantined failed" in stage(run, "execute")["detail"]  # never counted as a pass
+
+
+def test_unreachable_target_stops_before_planning(fresh_store, stub_network):
+    stub_network["analysis"] = analysis(success=False, status_code=404)
+    run = run_once(fresh_store, make_project(fresh_store), FakeOrchestrator({}), OutOfScope())
+    assert run["status"] == "error"
+    assert "Could not load http://app.test/login (HTTP 404)" in run["error"]
+    assert stage(run, "analyze")["detail"] == "http://app.test/login did not load (HTTP 404)"
+    assert stage(run, "plan")["status"] == "skipped"
+    assert fresh_store.find(TEST_CASES) == []
+
+
+def test_saved_tests_run_alongside_generated_ones(fresh_store, stub_network):
+    project = make_project(fresh_store)
+    run_once(fresh_store, project, FakeOrchestrator({}), OutOfScope())
+    app_id = fresh_store.find(TEST_CASES)[0]["application_id"]
+    fresh_store.insert(TEST_CASES, application_id=app_id, external_id="my-checkout", name="My checkout test",
+                       description=json.dumps({"steps": []}), owner_uid="local-dev", version=1)
+    orch = FakeOrchestrator({})
+    run_once(fresh_store, project, orch, OutOfScope())
+    assert "My checkout test" in orch.ran
+
+
+def test_restart_marks_unfinished_runs(fresh_store):
+    run = runner.create_run(fresh_store, make_project(fresh_store), trigger="manual", actor="t")
+    assert runner.recover_interrupted(fresh_store) == 1
+    assert fresh_store.get(PIPELINE_RUNS, run["id"])["status"] == "error"
+
+
+# ── API, scheduler, webhook ────────────────────────────────────
+
+
+@pytest.fixture
+def no_background(monkeypatch):
+    """Record started runs instead of executing them."""
+    started = []
+
+    async def fake_execute(run_id, *a, **k):
+        started.append(run_id)
+
+    monkeypatch.setattr(runner, "execute_run", fake_execute)
+    return started
+
+
+def test_quick_run_creates_a_project_and_queues_a_run(no_background):
+    client = TestClient(app)
+    resp = client.post("/api/pipelines/quick", json={"url": "https://shop.example/", "prompt": "buy a hat"})
+    assert resp.status_code == 202, resp.text
+    run = resp.json()
+    assert run["status"] == "queued" and run["trigger"] == "manual"
+    project = client.get(f"/api/projects/{run['project_id']}").json()
+    assert project["app_url"] == "https://shop.example/" and project["prompt"] == "buy a hat"
+    assert project["webhook_secret"]
+    # Same URL again while queued: refused, and no second project
+    again = client.post("/api/pipelines/quick", json={"url": "https://shop.example/"})
+    assert again.status_code == 409
+    assert len(client.get("/api/projects").json()) == 1
+    assert client.get(f"/api/pipelines/runs/{run['id']}").json()["id"] == run["id"]
+    assert [r["id"] for r in client.get("/api/pipelines/runs").json()] == [run["id"]]
+
+
+def test_project_schedule_validation_and_clearing():
+    client = TestClient(app)
+    bad = client.post("/api/projects", json={"name": "x", "schedule_minutes": 7})
+    assert bad.status_code == 422
+    pid = client.post("/api/projects", json={"name": "x", "app_url": URL, "schedule_minutes": 60}).json()["id"]
+    project = client.get(f"/api/projects/{pid}").json()
+    assert project["schedule_minutes"] == 60 and project["next_run_at"]
+    cleared = client.put(f"/api/projects/{pid}", json={"schedule_minutes": None}).json()
+    assert cleared["schedule_minutes"] is None and cleared["next_run_at"] is None
+    assert cleared["app_url"] == URL  # untouched fields are kept
+
+
+def test_scheduler_starts_due_projects_once(fresh_store, no_background):
+    due = make_project(fresh_store, schedule_minutes=60)
+    fresh_store.update(PROJECTS, due["id"], next_run_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat())
+    make_project(fresh_store, schedule_minutes=60)  # next run an hour away
+    make_project(fresh_store)  # no schedule
+
+    async def go():
+        first = await scheduler.tick(fresh_store)
+        await asyncio.sleep(0)
+        second = await scheduler.tick(fresh_store)
+        return first, second
+
+    first, second = asyncio.run(go())
+    assert len(first) == 1 and second == []
+    assert fresh_store.get(PIPELINE_RUNS, first[0])["trigger"] == "schedule"
+    assert datetime.fromisoformat(fresh_store.get(PROJECTS, due["id"])["next_run_at"]) > datetime.now(UTC)
+
+
+def test_two_schedulers_racing_start_one_run(fresh_store, no_background, monkeypatch):
+    """Both read the project as due before either moved its schedule (two
+    instances, or the cron tick racing the in-process loop): one run, not two."""
+    due = make_project(fresh_store, schedule_minutes=60)
+    fresh_store.update(PROJECTS, due["id"], next_run_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat())
+    stale = scheduler.due_projects(fresh_store, datetime.now(UTC))
+    monkeypatch.setattr(scheduler, "due_projects", lambda db, now: stale)
+    monkeypatch.setattr(scheduler, "active_run", lambda db, pid: None)  # neither has seen the other's run yet
+
+    async def go():
+        return await asyncio.gather(scheduler.tick(fresh_store), scheduler.tick(fresh_store))
+
+    first, second = asyncio.run(go())
+    assert len(first) + len(second) == 1
+    assert len(fresh_store.find(PIPELINE_RUNS, project_id=due["id"])) == 1
+
+
+def test_cron_tick_requires_the_secret(monkeypatch, no_background):
+    client = TestClient(app)
+    assert client.post("/api/pipelines/scheduler/tick").status_code == 503
+    monkeypatch.setattr(settings, "CRON_SECRET", "s3cret")
+    assert client.post("/api/pipelines/scheduler/tick", headers={"X-Cron-Secret": "nope"}).status_code == 401
+    assert client.post("/api/pipelines/scheduler/tick", headers={"X-Cron-Secret": "s3cret"}).json() == {"started": []}
+
+
+def push_payload(repo="https://github.com/acme/shop", branch="main"):
+    return json.dumps({
+        "ref": f"refs/heads/{branch}", "after": "abc1234def",
+        "repository": {"html_url": repo, "clone_url": repo + ".git", "default_branch": "main"},
+        "head_commit": {"message": "Fix login button\n\nlong body"}, "pusher": {"name": "krishna"},
+    }).encode()
+
+
+def deliver(client, project, body, event="push", secret=None):
+    sig = signature_for(secret or project["webhook_secret"], body)
+    return client.post(f"/api/webhooks/github/{project['id']}", content=body,
+                       headers={"X-GitHub-Event": event, "X-Hub-Signature-256": sig, "Content-Type": "application/json"})
+
+
+def test_github_push_triggers_a_run_with_reingestion(fresh_store, no_background):
+    client = TestClient(app)
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop.git")
+    assert deliver(client, project, b"{}", event="ping").json()["ok"] is True
+
+    resp = deliver(client, project, push_payload())
+    assert resp.status_code == 200, resp.text
+    run = fresh_store.get(PIPELINE_RUNS, resp.json()["started"])
+    assert run["trigger"] == "webhook" and run["ingest"] is True
+    assert run["trigger_detail"] == "abc1234 Fix login button" and run["actor"] == "github:krishna"
+
+
+def test_github_webhook_rejects_bad_signatures_and_ignores_other_pushes(fresh_store, no_background):
+    client = TestClient(app)
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    assert deliver(client, project, push_payload(), secret="wrong").status_code == 401
+    assert client.post("/api/webhooks/github/999", content=b"{}").status_code == 401
+    assert "default branch" in deliver(client, project, push_payload(branch="feature")).json()["ignored"]
+    assert "not this project" in deliver(client, project, push_payload(repo="https://github.com/other/repo")).json()["ignored"]
+    assert no_background == []
+
+
+def test_scheduler_moves_slot_forward_for_projects_without_app_url(fresh_store, no_background):
+    past = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
+    project = fresh_store.insert(PROJECTS, name="no-url", schedule_minutes=30, next_run_at=past, app_url=None)
+    assert asyncio.run(scheduler.tick(fresh_store)) == []
+    assert fresh_store.get(PROJECTS, project["id"])["next_run_at"] > past
+    assert scheduler.due_projects(fresh_store, datetime.now(UTC)) == []
+
+
+# ── A run that stops part-way never looks unfinished ───────────
+
+
+def test_a_crash_closes_the_running_stage_and_updates_the_project(fresh_store, stub_network, monkeypatch):
+    async def broken_plan(*a, **k):
+        raise RuntimeError("planner exploded")
+
+    monkeypatch.setattr(runner, "_plan", broken_plan)
+    project = make_project(fresh_store)
+    fresh_store.update(PROJECTS, project["id"], last_run_status="passed")
+    run = run_once(fresh_store, project, FakeOrchestrator({}), OutOfScope())
+
+    assert run["status"] == "error" and "planner exploded" in run["error"]
+    assert stage(run, "plan")["status"] == "failed" and "planner exploded" in stage(run, "plan")["detail"]
+    assert not [s for s in run["stages"] if s["status"] in ("running", "pending")]
+    assert fresh_store.get(PROJECTS, project["id"])["last_run_status"] == "error"
+
+
+def test_restart_closes_the_stages_of_unfinished_runs(fresh_store):
+    project = make_project(fresh_store)
+    run = runner.create_run(fresh_store, project, trigger="manual", actor="t")
+    stages = [dict(s) for s in run["stages"]]
+    stages[0]["status"], stages[1]["status"] = "done", "running"
+    fresh_store.update(PIPELINE_RUNS, run["id"], status="running", stages=stages)
+
+    runner.recover_interrupted(fresh_store)
+
+    done = fresh_store.get(PIPELINE_RUNS, run["id"])
+    assert [s["status"] for s in done["stages"]][:3] == ["done", "failed", "skipped"]
+    assert fresh_store.get(PROJECTS, project["id"])["last_run_status"] == "error"
+
+
+def test_a_push_during_a_run_is_tested_when_the_run_ends(fresh_store, no_background):
+    client = TestClient(app)
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    first = runner.create_run(fresh_store, project, trigger="manual", actor="t")
+    fresh_store.update(PIPELINE_RUNS, first["id"], status="running")
+
+    resp = deliver(client, project, push_payload())
+    assert resp.json()["queued_after"] == first["id"]
+    assert fresh_store.get(PROJECTS, project["id"])["pending_push"]["commit_sha"] == "abc1234def"
+
+    fresh_store.update(PIPELINE_RUNS, first["id"], status="passed")
+
+    async def finish():
+        return runner._start_pending_push(fresh_store, fresh_store.get(PROJECTS, project["id"]))
+
+    follow_up = asyncio.run(finish())
+    assert follow_up["commit_sha"] == "abc1234def" and follow_up["ingest"] is True
+    assert follow_up["trigger"] == "webhook" and follow_up["actor"] == "github:krishna"
+    assert fresh_store.get(PROJECTS, project["id"])["pending_push"] is None
+    assert asyncio.run(finish()) is None  # started once
+
+
+def test_an_analyzed_linked_page_is_checked_but_never_submitted():
+    candidate = {"kind": "link", "url": "http://app.test/contact", "label": "/contact"}
+    page = {"page_title": "Contact us", "elements_inventory": {
+        "headings": ["Get in touch"],
+        "inputs": [{"selector": "#csrf", "type": "hidden"}, {"selector": "#email", "type": "email", "name": "email"}],
+        "buttons": [{"selector": "button", "text": "?"}, {"selector": "#send", "text": "Send"}],
+    }}
+    test = suite.page_check_test(candidate, page)
+    assert test["slug"] == suite.render_test(candidate)["slug"]  # same stored test, now with more checks
+    assert [(s["action"], s["target"]) for s in test["steps"]] == [
+        ("NAVIGATE", None), ("ASSERT_CONTAINS_TEXT", "head > title"), ("ASSERT_CONTAINS_TEXT", "body"),
+        ("ASSERT_VISIBLE", "#email"), ("ASSERT_VISIBLE", "#send"),
+    ]
+    assert not {s["action"] for s in test["steps"]} & {"FILL", "CLICK", "PRESS", "SELECT", "CHECK", "UPLOAD"}
+
+
+def test_page_limits_come_from_settings(monkeypatch):
+    many = {**analysis(), "elements_inventory": {"links": [f"/p{i}" for i in range(10)]}}
+    assert len(suite.candidate_pages(many, None, link_limit=7)) == 7
+    assert suite.candidate_pages(many, None, link_limit=0) == []
+
+
+class SessionRecorder(FakeOrchestrator):
+    """Records which session arguments each test got; the sign-in test 'signs in'."""
+
+    def __init__(self):
+        super().__init__({})
+        self.sessions = {}
+
+    async def execute_test_run(self, db, execution_id, options=None, storage_state=None, keep_state=None):
+        result = await super().execute_test_run(db, execution_id, options)
+        name = self.ran[-1]
+        self.sessions[name] = (storage_state, keep_state is not None)
+        if keep_state is not None:
+            keep_state.append({"cookies": [{"name": "session", "value": "s3cret"}], "origins": []})
+        return result
+
+
+def test_sign_in_first_runs_the_login_test_first_and_shares_its_session_with_linked_pages(fresh_store, stub_network):
+    project = make_project(fresh_store, prompt="log in with demo / secret", sign_in_first=True)
+    orch = SessionRecorder()
+    run = run_once(fresh_store, project, orch, OutOfScope())
+
+    assert orch.ran[0].startswith("Scenario")  # the sign-in test goes first
+    assert orch.sessions[orch.ran[0]] == (None, True)  # ... and hands its session on
+    linked = next(n for n in orch.ran if n.startswith("Linked page"))
+    assert orch.sessions[linked][0]["cookies"][0]["name"] == "session"
+    smoke = next(n for n in orch.ran if n.startswith("Smoke"))
+    assert orch.sessions[smoke] == (None, False)  # the target page is tested signed out
+    assert "s3cret" not in json.dumps(run, default=str)  # the session is never stored
+
+
+def test_without_sign_in_first_no_session_arguments_are_passed(fresh_store, stub_network):
+    project = make_project(fresh_store, prompt="log in with demo / secret")
+    run = run_once(fresh_store, project, FakeOrchestrator({}), OutOfScope())  # would fail on unknown kwargs
+    assert run["status"] == "passed"
+
+
+def gitlab_push(repo="https://gitlab.com/acme/shop", branch="main", sha="9f8e7d6c5b"):
+    return json.dumps({
+        "object_kind": "push", "ref": f"refs/heads/{branch}", "checkout_sha": sha, "user_username": "krishna",
+        "project": {"web_url": repo, "git_http_url": repo + ".git", "default_branch": "main"},
+        "commits": [{"id": sha, "message": "Tighten checkout validation\n\nbody"}],
+    }).encode()
+
+
+def deliver_gitlab(client, project, body, event="Push Hook", token=None):
+    return client.post(f"/api/webhooks/gitlab/{project['id']}", content=body,
+                       headers={"X-Gitlab-Event": event, "X-Gitlab-Token": token or project["webhook_secret"],
+                                "Content-Type": "application/json"})
+
+
+def test_gitlab_push_triggers_a_run_with_the_pushed_commit(fresh_store, no_background):
+    client = TestClient(app)
+    project = make_project(fresh_store, repo_url="https://gitlab.com/acme/shop.git")
+    resp = deliver_gitlab(client, project, gitlab_push())
+    assert resp.status_code == 200, resp.text
+    run = fresh_store.get(PIPELINE_RUNS, resp.json()["started"])
+    assert run["trigger"] == "webhook" and run["ingest"] is True and run["commit_sha"] == "9f8e7d6c5b"
+    assert run["actor"] == "gitlab:krishna" and run["trigger_detail"] == "9f8e7d6 Tighten checkout validation"
+
+
+def test_gitlab_webhook_checks_token_branch_repository_and_event(fresh_store, no_background):
+    client = TestClient(app)
+    project = make_project(fresh_store, repo_url="https://gitlab.com/acme/shop")
+    assert deliver_gitlab(client, project, gitlab_push(), token="wrong-token").status_code == 401
+    assert client.post("/api/webhooks/gitlab/999", content=b"{}").status_code == 401
+    assert "default branch" in deliver_gitlab(client, project, gitlab_push(branch="feature")).json()["ignored"]
+    assert "not this project" in deliver_gitlab(client, project, gitlab_push(repo="https://gitlab.com/x/y")).json()["ignored"]
+    assert "do not trigger" in deliver_gitlab(client, project, gitlab_push(), event="Merge Request Hook").json()["ignored"]
+    assert no_background == []
+
+
+def test_a_page_that_redirected_gets_no_content_checks_from_where_it_landed():
+    candidate = {"kind": "link", "url": "http://app.test/account", "label": "/account"}
+    assert suite.redirected(candidate, {"final_url": "http://app.test/login?next=/account"})
+    assert not suite.redirected(candidate, {"final_url": "http://app.test/account/"})
+    assert not suite.redirected(candidate, {})
+
+
+def test_sign_in_first_checks_linked_pages_stay_put_instead_of_signed_out_content(fresh_store, stub_network):
+    # Analysis is signed out: here every page "is" the login page it redirects to
+    stub_network["analysis"] = {**analysis(), "final_url": "http://app.test/login"}
+    project = make_project(fresh_store, prompt="log in with demo / secret", sign_in_first=True)
+    run_once(fresh_store, project, SessionRecorder(), OutOfScope())
+    linked = next(tc for tc in fresh_store.find(TEST_CASES) if tc["name"].startswith("Linked page"))
+    steps = json.loads(linked["description"])["steps"]
+    assert [(s["action"], s.get("value")) for s in steps][-1] == ("ASSERT_URL", "/about")
+    assert not any(s["action"] == "ASSERT_CONTAINS_TEXT" for s in steps)  # nothing from the signed-out page
+
+
+def test_active_scan_runs_in_the_pipeline_only_when_project_and_server_both_allow(fresh_store, stub_network, monkeypatch):
+    import app.api.security as sec_api
+
+    calls = {"n": 0}
+
+    class SpyActive:
+        def __init__(self, scope=None, *a, **k):
+            self.scope = scope
+
+        async def scan(self, url):
+            calls["n"] += 1
+            return []
+
+    monkeypatch.setattr(sec_api, "ActiveScanner", SpyActive)
+    # The active scanner only attacks listed (or verified) hosts
+    monkeypatch.setattr(settings, "SECURITY_SCAN_ALLOWED_HOSTS", "app.test")
+
+    # Project flag on but server off → not run
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", False)
+    project = make_project(fresh_store, active_scan=True)
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert calls["n"] == 0
+
+    # Both on → run (on the app URL and the pages the run reached)
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", True)
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert calls["n"] >= 1
+
+    # Server on but project flag off → not run
+    calls["n"] = 0
+    plain = make_project(fresh_store)  # active_scan defaults off
+    run_once(fresh_store, plain, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert calls["n"] == 0
+
+    # Sign-in on: the project's owner must be listed in SECURITY_ACTIVE_SCAN_USERS
+    monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "someone-else")
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert calls["n"] == 0
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "local-dev")
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert calls["n"] >= 1  # (at least: every page the run reached)
+
+
+def test_every_result_says_what_it_checked_and_how_long_it_took(fresh_store, stub_network):
+    class Timed(FakeOrchestrator):
+        async def execute_test_run(self, db, execution_id, options=None):
+            return {**await super().execute_test_run(db, execution_id, options), "duration_ms": 1234}
+
+    run = run_once(fresh_store, make_project(fresh_store), Timed({}), OutOfScope())
+    smoke = next(t for t in run["tests"] if t["category"] == "smoke")
+    # A passed test reports what passed, not only that it did
+    assert smoke["status"] == "PASSED" and smoke["duration_ms"] == 1234
+    assert smoke["step_count"] >= 2 and any(c.startswith("Page title contains") for c in smoke["checks"])
+    assert all(len(t["checks"]) <= runner.MAX_LISTED_CHECKS for t in run["tests"])
+
+
+def test_a_run_records_what_its_llm_calls_used(fresh_store, stub_network, monkeypatch):
+    from agents.llm.client import LLMClient, LLMClientSession
+    from agents.llm.config import LLMConfig
+    from agents.llm.schemas import LLMRequest, LLMResponse, LLMUsage
+
+    class Groq(LLMClient):
+        async def generate(self, request):
+            return LLMResponse(content="ok", model="llama-3.3-70b-versatile", provider="api",
+                               usage=LLMUsage(prompt_tokens=1000, completion_tokens=500))
+
+    session = LLMClientSession(Groq(LLMConfig(provider="api", api_key="k", model="llama-3.3-70b-versatile")))
+    real_execute = runner._execute
+
+    async def execute_with_ai(state, project, orchestrator, scanner):
+        await session.generate(LLMRequest(prompt="plan"))
+        await asyncio.to_thread(lambda: asyncio.run(session.generate(LLMRequest(prompt="triage"))))
+        await real_execute(state, project, orchestrator, scanner)
+
+    monkeypatch.setattr(runner, "_execute", execute_with_ai)
+    monkeypatch.setattr(settings, "LLM_MAX_TOKENS_PER_RUN", 2000)
+    run = run_once(fresh_store, make_project(fresh_store), FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    usage = run["llm_usage"]
+    assert (usage["calls"], usage["input_tokens"], usage["output_tokens"]) == (2, 2000, 1000)
+    assert usage["limit"] == 2000 and usage["budget_exhausted"]
+
+    second = run_once(fresh_store, make_project(fresh_store), FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+    assert second["llm_usage"]["calls"] == 2  # each run has its own budget, not a running total
+
+
+def test_a_non_ascii_webhook_signature_is_refused_not_a_server_error(fresh_store, no_background):
+    client = TestClient(app, raise_server_exceptions=False)
+    project = make_project(fresh_store, repo_url="https://github.com/acme/shop")
+    resp = client.post(f"/api/webhooks/github/{project['id']}", content=push_payload(),
+                       headers={"X-GitHub-Event": "push", "X-Hub-Signature-256": "sha256=é".encode()})
+    assert resp.status_code == 401
+    assert no_background == []
+
+
+def test_generated_tests_no_longer_planned_are_retired_and_hidden(fresh_store):
+    """A link that went away left its generated test behind forever (never run, still listed)."""
+    project = make_project(fresh_store)
+    app_row = fresh_store.insert("applications", project_id=project["id"], name="A", base_url="https://a.example",
+                                 owner_uid=project.get("owner_uid"))
+    keep = fresh_store.insert(TEST_CASES, application_id=app_row["id"], external_id=f"pipe-{project['id']}-smoke", name="smoke", version=1)
+    gone = fresh_store.insert(TEST_CASES, application_id=app_row["id"], external_id=f"pipe-{project['id']}-link-old", name="old link", version=1)
+    mine = fresh_store.insert(TEST_CASES, application_id=app_row["id"], external_id="TC-MANUAL", name="saved by hand", version=1)
+
+    rows = fresh_store.find(TEST_CASES, application_id=app_row["id"])
+    assert runner._retire_unplanned(fresh_store, rows, {keep["id"]}) == 1
+    assert fresh_store.get(TEST_CASES, gone["id"])["retired"] is True
+    assert not fresh_store.get(TEST_CASES, keep["id"]).get("retired")
+    assert not fresh_store.get(TEST_CASES, mine["id"]).get("retired")  # saved tests are never retired
+
+    client = TestClient(app)
+    listed = {r["id"] for r in client.get("/api/test-cases").json()}
+    assert listed == {keep["id"], mine["id"]}
+    assert gone["id"] in {r["id"] for r in client.get("/api/test-cases?include_retired=true").json()}
+
+    # Planned again (the link is back): un-retired
+    rows = fresh_store.find(TEST_CASES, application_id=app_row["id"])
+    assert runner._retire_unplanned(fresh_store, rows, {keep["id"], gone["id"]}) == 0
+    assert fresh_store.get(TEST_CASES, gone["id"])["retired"] is False
+
+
+def test_the_security_stage_scans_the_pages_the_run_reached(fresh_store, stub_network):
+    """It scanned the app URL only; the linked pages the QA stage already reached are scanned too."""
+    from app.models import PIPELINE_RUNS, SECURITY_FINDINGS
+
+    fetched = []
+    scanner = scanner_for({"content-type": "text/html"})
+    original = scanner.fetch
+
+    async def spy(url, **kwargs):
+        fetched.append(url)
+        return await original(url, **kwargs)
+
+    scanner.fetch = spy
+    project = make_project(fresh_store)
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner)
+
+    assert fetched == [URL, "http://app.test/about"]  # /pricing did not load: never a test, never scanned
+    targets = {r["target_url"] for r in fresh_store.find(SECURITY_FINDINGS)}
+    assert targets == {URL, "http://app.test/about"}  # each page's findings are tracked on their own
+    stage = next(s for s in fresh_store.find(PIPELINE_RUNS)[0]["stages"] if s["key"] == "security")
+    assert stage["detail"].startswith("2 pages scanned")
+
+
+def test_the_pipeline_adds_ai_triage_to_its_findings(fresh_store, stub_network, monkeypatch):
+    from app.models import PIPELINE_RUNS, SECURITY_FINDINGS
+    from security import ai as security_ai
+    from tests.app.test_security_api import _fake_triage
+
+    monkeypatch.setattr(security_ai, "enabled", lambda: True)
+    monkeypatch.setattr(security_ai, "triage", _fake_triage)
+    project = make_project(fresh_store)
+    run_once(fresh_store, project, FakeOrchestrator({}), scanner_for({"content-type": "text/html"}))
+
+    rows = fresh_store.find(SECURITY_FINDINGS)
+    assert rows and all(r.get("ai", {}).get("summary", "").startswith("note:") for r in rows)
+    stage = next(s for s in fresh_store.find(PIPELINE_RUNS)[0]["stages"] if s["key"] == "security")
+    assert "AI triage added" in stage["detail"]

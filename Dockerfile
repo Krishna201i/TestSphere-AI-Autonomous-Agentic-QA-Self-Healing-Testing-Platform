@@ -21,24 +21,32 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_ENV=production \
     PORT=8000
 
-WORKDIR /app
+# Mirrors the repository: /app/backend (Python, the working directory) and
+# /app/frontend/dist (the dashboard the API serves)
+WORKDIR /app/backend
 
-# Exact, hash-checked dependency versions (the same lock Render installs)
-COPY requirements.txt ./
+# The commit being deployed (no .git in the image): /api/system and Sentry's release
+ARG GIT_COMMIT=""
+ENV GIT_COMMIT=$GIT_COMMIT
+
+# Exact, hash-checked dependency versions (the same lock CI installs)
+COPY backend/requirements.txt ./
 RUN pip install --require-hashes -r requirements.txt
 
-# Chromium plus the system libraries it needs (this stage runs as root)
+# Chromium plus the system libraries it needs (this stage runs as root), and
+# git: repository ingestion clones with it, and fix patches and deploy checks use it
 RUN python -m playwright install --with-deps chromium \
+    && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
-COPY agents/ agents/
-COPY backend/ backend/
-COPY engine/ engine/
-COPY ingestion/ ingestion/
-COPY security/ security/
+COPY backend/pyproject.toml ./
+COPY backend/app/ app/
+COPY backend/agents/ agents/
+COPY backend/engine/ engine/
+COPY backend/ingestion/ ingestion/
+COPY backend/security/ security/
 RUN pip install --no-deps -e .
-COPY --from=dashboard /src/frontend/dist frontend/dist
+COPY --from=dashboard /src/frontend/dist /app/frontend/dist
 
 # Run unprivileged; data/ holds the offline JSON store and ingestion clones
 RUN useradd --create-home --uid 10001 testsphere \
@@ -50,4 +58,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/api/health', timeout=4)"
 
-CMD ["sh", "-c", "exec uvicorn backend.main:app --host 0.0.0.0 --port ${PORT} --no-access-log"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --no-access-log"]

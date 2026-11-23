@@ -3,11 +3,12 @@ import { LogOut, Save, ShieldCheck, Trash2 } from 'lucide-react';
 import { useAuth } from '../state/Auth';
 import { useWorkspace } from '../state/Workspace';
 import { deleteMe, getMe, updateMe } from '../services/api';
-import Integrations from '../components/Integrations';
-import ApiTokens from '../components/ApiTokens';
 import { timeAgo, toDate } from '../lib/derive';
 
-const PROVIDERS = { password: 'Email & password', 'google.com': 'Google', local: 'Local (sign-in off)' };
+const PROVIDERS = {
+  password: 'Email & password', 'google.com': 'Google', 'github.com': 'GitHub', phone: 'Phone (SMS code)',
+  anonymous: 'Guest (no account)', local: 'Local (sign-in off)',
+};
 
 export function initialsOf(name) {
   return (name || '').split(/[\s._@-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
@@ -172,14 +173,17 @@ export default function Profile({ onNavigate }) {
             </div>
           )}
           <div className="popover-links">
-            <button type="button" className="chip" onClick={() => onNavigate('autopilot')}>Autopilot</button>
+            <button type="button" className="chip" onClick={() => onNavigate('autopilot')}>Projects</button>
             <button type="button" className="chip" onClick={() => onNavigate('audit', { query: name })}>My activity</button>
           </div>
         </section>
       </div>
 
-      <Integrations />
-      {auth.mode === 'firebase' && <ApiTokens />}
+      <section className="card">
+        <div className="card-head"><h3>Integrations and API tokens</h3></div>
+        <p className="small m-0">GitHub, Git credentials for private repositories and API tokens for coding agents are on the Integrations page.</p>
+        <button type="button" className="btn btn-sm" onClick={() => onNavigate('integrations')}>Open Integrations</button>
+      </section>
 
       <section className="card">
         <div className="card-head"><h3>Your data</h3></div>

@@ -1,0 +1,126 @@
+"""
+TestSphere-AI — Security finding persistence and the audit trail.
+"""
+
+import json
+from collections.abc import Callable
+from typing import Any
+
+from app.database.store import Record, Store, now_iso
+from app.models import AUDIT_EVENTS, SECURITY_FINDINGS
+from security.findings import tier_of
+
+
+def record_audit(
+    db: Store, *, actor: str, kind: str, message: str, level: str = "info", ref: str | None = None,
+    owner_uid: str | None = None,
+) -> Record:
+    return db.insert(AUDIT_EVENTS, at=now_iso(), actor=actor, kind=kind, message=message, level=level, ref=ref,
+                     owner_uid=owner_uid)
+
+
+def list_audit(db: Store, limit: int = 200, **filters: Any) -> list[dict[str, Any]]:
+    rows = db.find(AUDIT_EVENTS, order_by="id", descending=True, limit=limit, **filters)
+    return [
+        {"id": r["id"], "at": r["at"], "actor": r["actor"], "kind": r["kind"], "level": r["level"],
+         "message": r["message"], "ref": r.get("ref")}
+        for r in rows
+    ]
+
+
+def serialize(row: Record) -> dict[str, Any]:
+    """Stored finding JSON plus its tracked lifecycle fields (and its tier,
+    worked out for findings stored before tiers existed)."""
+    data = json.loads(row["data"])
+    data.setdefault("tier", tier_of(data.get("check_id", ""), float(data.get("confidence", 1.0)),
+                                    data.get("source", "security")).value)
+    return data | {
+        "key": row["key"],
+        "status": row["status"],
+        "retest_result": row.get("retest_result"),
+        "retested_at": row.get("retested_at"),
+        "approved_by": row.get("approved_by"),
+        "approved_at": row.get("approved_at"),
+        "first_seen": row["first_seen"],
+        "last_seen": row["last_seen"],
+    } | ({"ai": row["ai"]} if row.get("ai") else {})
+
+
+def save_ai_insights(db: Store, insights: dict[str, dict[str, Any]], owner_uid: str | None = None) -> int:
+    """Keep the AI triage on each finding (by key), so the findings list and
+    reports show it later; returns how many findings got one."""
+    owner = {"owner_uid": owner_uid} if owner_uid else {}
+    saved = 0
+    for key, insight in insights.items():
+        row = get_finding(db, key, **owner)
+        if row is not None and row.get("ai") != insight:
+            db.update(SECURITY_FINDINGS, row["id"], ai=insight)
+            saved += 1
+    return saved
+
+
+def get_finding(db: Store, key: str, **filters: Any) -> Record | None:
+    return db.find_one(SECURITY_FINDINGS, key=key, **filters)
+
+
+def list_findings(db: Store, target_url: str | None = None, **filters: Any) -> list[Record]:
+    if target_url:
+        filters["target_url"] = target_url
+    return db.find(SECURITY_FINDINGS, order_by="last_seen", descending=True, **filters)
+
+
+def save_scan(
+    db: Store, target_url: str, findings: list[dict[str, Any]], owner_uid: str | None = None,
+    checked: Callable[[str], bool] | None = None,
+) -> dict[str, list[Record]]:
+    """Upsert this scan's findings for *target_url*.
+
+    - New findings are inserted as open.
+    - A previously resolved finding that shows up again is a regression:
+      reopened, approval and retest cleared.
+    - Open findings for this target that no longer appear are resolved —
+      the scan itself is a retest that passed — but only for checks this scan
+      ran (*checked* tells which; all by default): a passive-only scan says
+      nothing about an XSS the active scanner found.
+
+    With *owner_uid*, only that user's findings are matched (each user tracks
+    their own lifecycle for the same target).
+    """
+    owner = {"owner_uid": owner_uid} if owner_uid else {}
+    now = now_iso()
+    seen = {f["key"] for f in findings}
+    current, reopened, resolved = [], [], []
+
+    for f in findings:
+        data = json.dumps({k: v for k, v in f.items() if k != "key"})
+        row = get_finding(db, f["key"], **owner)
+        if row is None:
+            row = db.insert(
+                SECURITY_FINDINGS, key=f["key"], target_url=target_url, check_id=f["check_id"],
+                severity=f["severity"], title=f["title"], data=data, status="open",
+                retest_result=None, retested_at=None, approved_by=None, approved_at=None,
+                first_seen=now, last_seen=now, owner_uid=owner_uid,
+            )
+        else:
+            changes: dict[str, Any] = {"severity": f["severity"], "title": f["title"], "data": data, "last_seen": now}
+            if row["status"] == "resolved":
+                changes.update(status="open", retest_result=None, retested_at=None, approved_by=None, approved_at=None)
+            was_resolved = row["status"] == "resolved"
+            row = db.update(SECURITY_FINDINGS, row["id"], **changes)
+            if was_resolved:
+                reopened.append(row)
+        current.append(row)
+
+    for row in db.find(SECURITY_FINDINGS, target_url=target_url, **owner):
+        if row["key"] not in seen and row["status"] == "open" and (checked is None or checked(row["check_id"])):
+            resolved.append(db.update(SECURITY_FINDINGS, row["id"], status="resolved", retest_result="pass", retested_at=now))
+
+    return {"current": current, "reopened": reopened, "resolved": resolved}
+
+
+def approve(db: Store, row: Record, actor: str) -> Record:
+    return db.update(SECURITY_FINDINGS, row["id"], approved_by=actor, approved_at=now_iso())
+
+
+def save_retest(db: Store, row: Record, result: str, status: str) -> Record:
+    return db.update(SECURITY_FINDINGS, row["id"], retest_result=result, status=status, retested_at=now_iso())

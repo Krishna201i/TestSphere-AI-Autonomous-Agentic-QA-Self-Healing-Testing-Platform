@@ -1,0 +1,65 @@
+"""Test-wide settings, applied before any test module imports the app."""
+
+import os
+
+import pytest
+
+# Never read the developer's .env: its LLM key would send tests to a real,
+# billed model, and its database settings to the real database.  Tests run
+# offline on the mock model unless a test sets otherwise.
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+for _name in [n for n in os.environ if n.startswith("LLM_")]:
+    del os.environ[_name]
+
+# Keep agent healing memory in-process and storage in memory, so tests never
+# touch the dev database or Firestore.
+os.environ.setdefault("AGENT_MEMORY_BACKEND", "memory")
+os.environ.setdefault("DATABASE_BACKEND", "memory")
+# Single local user (auth tests turn sign-in on explicitly); no background scheduler.
+os.environ.setdefault("AUTH_REQUIRED", "false")
+os.environ.setdefault("SCHEDULER_ENABLED", "false")
+# Real-browser tests run without Playwright tracing unless a test turns it on
+os.environ.setdefault("ARTIFACT_TRACES", "false")
+# No calls to OSV.dev from tests (dependency tests use a mock transport)
+os.environ.setdefault("DEPENDENCY_SCAN", "false")
+# Visual baselines only where a test turns them on
+os.environ.setdefault("VISUAL_REGRESSION", "false")
+# The broken-page acceptance check only where a test turns it on (it is one more real browser run)
+os.environ.setdefault("ACCEPTANCE_MAX_PER_RUN", "0")
+# Page analysis reads the given HTML, without a browser render, unless a test turns it on
+os.environ.setdefault("ANALYZE_VISIBILITY", "false")
+
+
+@pytest.fixture(autouse=True)
+def fresh_store():
+    """Every test gets an empty in-memory store (also used by the API via get_db)."""
+    from app import auth
+    from app.database.session import set_store
+    from app.database.store import MemoryStore
+
+    store = MemoryStore()
+    set_store(store)
+    auth._display_names.clear()  # cached profile names belong to the previous test's store
+    yield store
+    set_store(None)
+
+
+@pytest.fixture(autouse=True)
+def fresh_artifacts():
+    """Screenshots and traces go to an in-memory store, never the dev data folder."""
+    from app.artifacts import MemoryArtifactStore, set_artifact_store
+
+    store = MemoryArtifactStore()
+    set_artifact_store(store)
+    yield store
+    set_artifact_store(None)
+
+
+@pytest.fixture(autouse=True)
+def fresh_rate_limits():
+    """Rate-limit counts never carry over between tests."""
+    from app import ratelimit
+
+    ratelimit.reset()
+    yield
+    ratelimit.reset()

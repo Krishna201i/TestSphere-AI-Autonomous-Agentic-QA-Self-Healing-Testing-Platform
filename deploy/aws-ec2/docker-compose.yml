@@ -1,0 +1,84 @@
+# TestSphere on one EC2 instance: API (+ dashboard), pipeline worker, Caddy for HTTPS.
+#   cd /opt/testsphere/app/deploy/aws-ec2 && ./fetch-env.sh && docker compose up -d --build
+# Secrets come from SSM Parameter Store (/testsphere/*) via fetch-env.sh into
+# /opt/testsphere/secrets.env; settings that are not secret live here.
+
+x-testsphere: &testsphere
+  build:
+    context: ../..
+    args:
+      GIT_COMMIT: ${GIT_COMMIT:-}   # GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
+  # Built here by default; continuous deployment (cd/pull-deploy.sh) sets the
+  # published ghcr.io image in this folder's .env, so nothing builds on the instance
+  image: ${TESTSPHERE_IMAGE:-testsphere:latest}
+  restart: unless-stopped
+  logging: &logging
+    # Docker keeps container logs forever by default; cap them at 3 × 10 MB
+    driver: json-file
+    options: {max-size: 10m, max-file: "3"}
+  env_file: /opt/testsphere/secrets.env
+  environment: &env
+    APP_ENV: production
+    # Runs are queued by the API and executed by the worker, so an API restart
+    # never interrupts a scan
+    PIPELINE_EXECUTION: worker
+    # 2 GB instance: one browser at a time; further runs queue
+    ENGINE_MAX_BROWSERS: "1"
+    # The dashboard is served by the API on the same origin, so no CORS origins
+    DASHBOARD_URL: https://${DOMAIN}
+    LOG_FORMAT: json
+    # Security scanning scope: ONLY hosts we own or are authorized to test
+    # (loopback is always allowed). List individual hosts, never a shared
+    # platform apex (e.g. vercel.app, onrender.com, hf.space) — that would
+    # authorize attacks on other people's apps. Add a new owned host here.
+    SECURITY_SCAN_ALLOWED_HOSTS: "54-153-148-247.sslip.io"
+    # Active (DAST) scanning sends real XSS/SQLi/open-redirect payloads.
+    # On for authorized testing — aim it at staging/demo, not live prod data.
+    SECURITY_ACTIVE_SCAN: "true"
+    # ...and only for these Firebase uids (comma-separated; set in this folder's
+    # .env next to DOMAIN). Empty = nobody, so no guest or other user can.
+    SECURITY_ACTIVE_SCAN_USERS: ${SECURITY_ACTIVE_SCAN_USERS:-}
+    # Run artifacts: the data volume by default, or an S3 bucket (README:
+    # "Artifacts in S3"), set in this folder's .env
+    ARTIFACT_STORE: ${ARTIFACT_STORE:-local}
+    ARTIFACT_BUCKET: ${ARTIFACT_BUCKET:-}
+    AWS_REGION: ap-southeast-2
+  volumes:
+    - testsphere-data:/app/backend/data   # artifacts (screenshots, traces) the API serves and the worker writes
+
+services:
+  api:
+    <<: *testsphere
+    # Behind Caddy: trust its X-Forwarded-* headers (the API port is not published)
+    command: ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log --proxy-headers --forwarded-allow-ips '*'"]
+    expose: ["8000"]
+
+  worker:
+    <<: *testsphere
+    command: ["python", "-m", "app.worker"]
+    healthcheck:
+      # The image's check probes the API's HTTP port, which the worker has none
+      # of; this one fails when the worker loop stops (no database read)
+      test: ["CMD", "python", "-m", "app.worker_alive"]
+      interval: 60s
+      timeout: 15s
+      start_period: 60s
+    depends_on: [api]
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    logging: *logging
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN, e.g. 54-153-148-247.sslip.io}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [api]
+
+volumes:
+  testsphere-data:
+  caddy-data:
+  caddy-config:

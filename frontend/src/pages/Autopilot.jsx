@@ -1,28 +1,35 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  CheckCircle2, Circle, Copy, Database, GitBranch, Loader2, MinusCircle, Play, RefreshCw, Rocket, Unplug, XCircle, Zap,
+  CheckCircle2, Circle, Copy, Database, Download, GitBranch, Loader2, ListChecks, MinusCircle, Play, RefreshCw, Rocket, ShieldCheck, Unplug, X, XCircle, Zap,
 } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import {
+  cancelPipelineRun,
   deployProject,
+  getDomainVerification,
   getPipelineRun,
   getProjectDatabase,
+  getRunJunit,
   linkProjectDatabase,
   quickPipeline,
   rotateWebhookSecret,
   runProjectPipeline,
   unlinkProjectDatabase,
   updateProject,
+  verifyDomain,
   webhookUrl,
 } from '../services/api';
+import { ResultBadges, ResultDetail, RunSummary } from '../components/TestResult';
 import { timeAgo, timeUntil, urlError } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
+import { usePaged } from '../lib/usePaged';
+import Pager from '../components/Pager';
 
-const SCHEDULES = [
+export const SCHEDULES = [
   [null, 'Off'], [15, 'Every 15 min'], [30, 'Every 30 min'], [60, 'Hourly'], [180, 'Every 3 hours'],
   [360, 'Every 6 hours'], [720, 'Every 12 hours'], [1440, 'Daily'], [10080, 'Weekly'],
 ];
-const TRIGGER_LABEL = { manual: 'Manual', schedule: 'Scheduled', webhook: 'GitHub push' };
+export const TRIGGER_LABEL = { manual: 'Manual', schedule: 'Scheduled', webhook: 'GitHub push' };
 const ACTIVE = ['queued', 'running'];
 
 export function StageIcon({ status }) {
@@ -38,7 +45,11 @@ export function RunStatus({ status }) {
 }
 
 function QuickRun({ onStarted }) {
+  const { system } = useWorkspace();
   const [form, setForm] = useState({ url: '', prompt: '', repo_url: '' });
+  // Settings for the project this run creates, so the first run already uses them
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [options, setOptions] = useState({ sign_in_first: false, active_scan: false });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -54,6 +65,7 @@ function QuickRun({ onStarted }) {
     try {
       const run = await quickPipeline({
         url: form.url.trim(), prompt: form.prompt.trim() || null, repo_url: form.repo_url.trim() || null,
+        generation_profile: cleanProfile(profile), sign_in_first: options.sign_in_first, active_scan: options.active_scan,
       });
       onStarted(run);
     } catch (err) {
@@ -83,14 +95,70 @@ function QuickRun({ onStarted }) {
           Git repository (optional)
           <input className="input" value={form.repo_url} onChange={(e) => setForm({ ...form, repo_url: e.target.value })} placeholder="https://github.com/you/app" />
         </label>
-        <button className="btn btn-primary" type="submit" disabled={busy}><Play size={16} /> {busy ? 'Starting…' : 'Run pipeline'}</button>
+        <button className="btn btn-primary" type="submit" disabled={busy || profile.test_types.length === 0}>
+          <Play size={16} /> {busy ? 'Starting…' : 'Run pipeline'}
+        </button>
       </form>
+      <details className="run-settings">
+        <summary>Settings for this run <span className="muted small">(kinds of tests, test data, sign-in, active scan; saved on the project)</span></summary>
+        <div className="grid-2 mt-2">
+          <div className="form-stack">
+            <ProfileFields profile={profile} onChange={setProfile} />
+          </div>
+          <div className="form-stack">
+            <label className="check">
+              <input type="checkbox" checked={options.sign_in_first} onChange={(e) => setOptions({ ...options, sign_in_first: e.target.checked })} />
+              Sign in first: run the goal&apos;s login test, then test linked pages signed in (for example &quot;log in with demo / secret&quot;)
+            </label>
+            {system?.active_scan && (
+              <label className="check">
+                <input type="checkbox" checked={options.active_scan} onChange={(e) => setOptions({ ...options, active_scan: e.target.checked })} />
+                Active security scan: also send test attacks, only to a site you verified under Security → Sites for active testing
+              </label>
+            )}
+            <p className="small muted m-0">
+              These become the project&apos;s settings. Change them later under the project&apos;s Settings below.
+            </p>
+          </div>
+        </div>
+      </details>
       {error && <div className="error-text">{error}</div>}
     </section>
   );
 }
 
-function RunDetail({ run, onOpen }) {
+function RunDetail({ run, onOpen, onClear, onCancelled }) {
+  const testPage = usePaged(run?.tests, 10);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState(null);
+
+  const isActive = run && ACTIVE.includes(run.status);
+
+  async function handleCancel() {
+    setCancelError(null);
+    setCancelling(true);
+    try {
+      await cancelPipelineRun(run.id);
+      onCancelled();
+    } catch (err) {
+      setCancelError(err.message);
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function handleJunit() {
+    try {
+      const blob = await getRunJunit(run.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `testsphere-run-${run.id}.xml`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { /* silent */ }
+  }
+
   if (!run) {
     return (
       <section className="card">
@@ -108,7 +176,21 @@ function RunDetail({ run, onOpen }) {
       </div>
       <div className="row">
         <button type="button" className="btn btn-sm" onClick={() => onOpen(run.id)}>Open run: steps, screenshots and trace</button>
+        {s && (
+          <button type="button" className="btn btn-sm" onClick={handleJunit} title="Download JUnit XML for CI">
+            <Download size={13} /> JUnit XML
+          </button>
+        )}
+        {isActive && (
+          <button type="button" className="btn btn-sm bad-text" onClick={handleCancel} disabled={cancelling}>
+            <X size={13} /> {cancelling ? 'Cancelling…' : 'Cancel run'}
+          </button>
+        )}
+        <button type="button" className="btn btn-sm btn-ghost" onClick={onClear} title="Deselect this run">
+          <X size={13} /> Clear
+        </button>
       </div>
+      {cancelError && <div className="error-text" role="alert">{cancelError}</div>}
       {run.error && <div className="subbox small cell-wrap bad-text">{run.error}</div>}
 
       <ol className="stage-list">
@@ -126,12 +208,17 @@ function RunDetail({ run, onOpen }) {
       {s && (
         <div className="stat-tiles">
           <div className="stat-tile"><div className="v">{s.passed}/{s.total}</div><div className="l">Tests passed</div></div>
+          <div className="stat-tile" title="Passing tests that failed on a deliberately broken copy of their page: the ones a pass actually means something for">
+            <div className="v">{s.verified ?? '—'}</div><div className="l">Proven to catch a break</div>
+          </div>
           <div className="stat-tile"><div className="v">{s.failed}</div><div className="l">Failed</div></div>
           <div className="stat-tile"><div className="v">{s.healed}</div><div className="l">Self-healed</div></div>
-          <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Security findings</div></div>
+          <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Proven security issues{s.hardening ? <span className="muted"> · {s.hardening} hardening</span> : null}</div></div>
           <div className="stat-tile"><div className="v">{(run.regressions || []).length}</div><div className="l">Regressions</div></div>
         </div>
       )}
+
+      <RunSummary lines={s?.narrative} />
 
       {(run.regressions || []).length > 0 && (
         <div className="subbox">
@@ -149,15 +236,16 @@ function RunDetail({ run, onOpen }) {
           <table className="table">
             <thead><tr><th>Test</th><th>Result</th><th>Details</th></tr></thead>
             <tbody>
-              {run.tests.map((t) => (
+              {testPage.items.map((t) => (
                 <tr key={t.execution_id} className="selectable" {...selectableRow(() => onOpen(run.id, t.execution_id), false)}>
-                  <td className="cell-wrap">{t.name}<div className="small muted">{t.category || 'saved'} · execution #{t.execution_id}</div></td>
-                  <td><span className="row"><span className={`status ${t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}`}>{t.healed && t.status === 'PASSED' ? 'HEALED' : t.status}</span>{t.flaky && <span className="status FLAKY">Flaky</span>}</span></td>
-                  <td className="small cell-wrap">{t.error ? t.error.split('\n')[0] : '—'}</td>
+                  <td className="cell-name">{t.name}<div className="small muted">{t.category || 'saved'} · execution #{t.execution_id}</div></td>
+                  <td><ResultBadges test={t} /></td>
+                  <td className="small"><ResultDetail test={t} /></td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <Pager paged={testPage} label="tests" />
         </div>
       )}
     </section>
@@ -176,6 +264,164 @@ function CopyField({ label, value }) {
         }}><Copy size={13} /> {copied ? 'Copied' : 'Copy'}</button>
       </span>
     </label>
+  );
+}
+
+const TEST_TYPES = [
+  ['smoke', 'Smoke', 'the page loads'],
+  ['functional', 'Functional', "your goal and the page's form"],
+  ['negative', 'Negative', 'what must be refused: wrong password, empty or invalid input'],
+  ['content', 'Content', 'the main heading is shown'],
+  ['pages', 'Linked pages', 'linked pages and code routes render'],
+];
+const DATA_KEYS = [['text', 'Text to type (search term, item)'], ['email', 'Email'], ['name', 'Name'],
+  ['username', 'User name'], ['password', 'Password (never sent to the AI)']];
+const DEFAULT_PROFILE = { test_types: TEST_TYPES.map((t) => t[0]), test_data: {}, max_ai_tests: 5, strict: false, acceptance: true };
+
+/** The generation settings as form fields (controlled): kinds of tests, test data, AI tests, strict, broken-page check. */
+function ProfileFields({ profile, onChange }) {
+  const toggle = (type) => onChange({
+    ...profile,
+    test_types: profile.test_types.includes(type) ? profile.test_types.filter((t) => t !== type) : [...profile.test_types, type],
+  });
+  const setData = (key, value) => onChange({ ...profile, test_data: { ...profile.test_data, [key]: value } });
+  return (
+    <>
+      <fieldset className="form-stack m-0">
+        <legend className="small"><b>Kinds of tests</b></legend>
+        {TEST_TYPES.map(([id, label, hint]) => (
+          <label key={id} className="check">
+            <input type="checkbox" checked={profile.test_types.includes(id)} onChange={() => toggle(id)} />
+            {label} <span className="muted">— {hint}</span>
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="form-stack m-0">
+        <legend className="small"><b>Test data</b> <span className="muted">(values typed into matching fields; your goal&apos;s values win)</span></legend>
+        {DATA_KEYS.map(([key, label]) => (
+          <label key={key} className="field">
+            {label}
+            <input className="input" type={key === 'password' ? 'password' : 'text'} autoComplete="off" value={profile.test_data[key] || ''}
+              onChange={(e) => setData(key, e.target.value)} maxLength={200} />
+          </label>
+        ))}
+      </fieldset>
+      <label className="field">
+        AI-written tests per run (0 = none; used when an AI model is configured)
+        <input className="input" type="number" min={0} max={20} value={profile.max_ai_tests}
+          onChange={(e) => onChange({ ...profile, max_ai_tests: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })} />
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={profile.strict} onChange={(e) => onChange({ ...profile, strict: e.target.checked })} />
+        Strict: leave out tests that only check a page renders
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={profile.acceptance} onChange={(e) => onChange({ ...profile, acceptance: e.target.checked })} />
+        Broken-page check: run each new test once on a copy of the page with what it checks removed, to prove it can fail
+      </label>
+    </>
+  );
+}
+
+/** The profile as the API takes it: empty test-data values left out. */
+function cleanProfile(profile) {
+  return { ...profile, test_data: Object.fromEntries(Object.entries(profile.test_data).filter(([, v]) => String(v).trim())) };
+}
+
+/** What the pipeline generates for this project: test types, test data, AI tests, strictness, broken-page check. */
+function GenerationProfile({ project, onChanged }) {
+  const [profile, setProfile] = useState({ ...DEFAULT_PROFILE, ...(project.generation_profile || {}) });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => { setProfile({ ...DEFAULT_PROFILE, ...(project.generation_profile || {}) }); }, [project.id, project.generation_profile]);
+
+
+  async function save(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await updateProject(project.id, { generation_profile: cleanProfile(profile) });
+      setSaved(true);
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="form-stack" onSubmit={save}>
+      <h4 className="section-title"><ListChecks size={14} className="icon-inline" /> Test generation</h4>
+      <ProfileFields profile={profile} onChange={setProfile} />
+      <div><button type="submit" className="btn btn-sm" disabled={busy || profile.test_types.length === 0}>{busy ? 'Saving…' : 'Save'}</button></div>
+      {saved && <div className="small" role="status">Saved. The next run generates tests this way.</div>}
+      {error && <div className="error-text" role="alert">{error}</div>}
+    </form>
+  );
+}
+
+/** Proof the project owns its site: active scans (real attack payloads) need it on a hosted server. */
+function DomainVerification({ project }) {
+  const [info, setInfo] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [message, setMessage] = useState(null);
+
+  useEffect(() => {
+    if (!project.app_url) return;
+    getDomainVerification(project.id).then(setInfo).catch((err) => setError(err.message));
+  }, [project.id, project.app_url]);
+
+  async function verify() {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await verifyDomain(project.id);
+      setInfo(result);
+      setMessage(result.message);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!project.app_url) return null;
+  const verified = info?.verified_at && info.verified_host === info.host;
+  return (
+    <div className="form-stack">
+      <h4 className="section-title"><ShieldCheck size={14} className="icon-inline" /> Domain verification</h4>
+      {verified ? (
+        <div className="small">
+          <span className="pill green">Verified</span>{' '}
+          <b>{info.host}</b> <span className="muted">· {timeAgo(info.verified_at)}, valid {info.valid_days} days</span>
+        </div>
+      ) : (
+        <p className="hint m-0">
+          Active scans send real attack payloads, so they only run against a site you prove is yours: publish this token
+          as a file at the address below, then verify.
+        </p>
+      )}
+      {info && (
+        <>
+          <CopyField label="Token (the file's content)" value={info.token} />
+          <CopyField label="Publish it at" value={info.file_url || ''} />
+        </>
+      )}
+      <div>
+        <button type="button" className="btn btn-sm" disabled={busy || !info} onClick={verify}>
+          {busy ? 'Checking…' : verified ? 'Verify again' : 'Verify'}
+        </button>
+      </div>
+      {message && <div className="small" role="status">{message}</div>}
+      {error && <div className="error-text" role="alert">{error}</div>}
+    </div>
   );
 }
 
@@ -259,6 +505,7 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
     slack_webhook_url: p.slack_webhook_url || '', notify_on: p.notify_on || 'failures',
     deploy_hook_url: p.deploy_hook_url || '', rollback_hook_url: p.rollback_hook_url || '',
     health_url: p.health_url || '', deploy_on_pass: Boolean(p.deploy_on_pass),
+    sign_in_first: Boolean(p.sign_in_first), active_scan: Boolean(p.active_scan),
   });
   const [form, setForm] = useState(() => fromProject(project));
   const [error, setError] = useState(null);
@@ -267,7 +514,8 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
   useEffect(() => {
     setForm(fromProject(project));
   }, [project.app_url, project.repo_url, project.prompt, project.slack_webhook_url, project.notify_on,
-    project.deploy_hook_url, project.rollback_hook_url, project.health_url, project.deploy_on_pass]); // eslint-disable-line react-hooks/exhaustive-deps
+    project.deploy_hook_url, project.rollback_hook_url, project.health_url, project.deploy_on_pass,
+    project.sign_in_first, project.active_scan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function act(fn) {
     setError(null);
@@ -320,10 +568,21 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                   <label className="field">App URL<input className="input" value={form.app_url} onChange={(e) => setForm({ ...form, app_url: e.target.value })} placeholder="https://app.example/" /></label>
                   <label className="field">Git repository<input className="input" value={form.repo_url} onChange={(e) => setForm({ ...form, repo_url: e.target.value })} placeholder="https://github.com/you/app" /></label>
                   <label className="field">What to test<input className="input" value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} placeholder="optional" /></label>
+                  <label className="check">
+                    <input type="checkbox" checked={form.sign_in_first}
+                      onChange={(e) => setForm({ ...form, sign_in_first: e.target.checked })} />
+                    Sign in first: run the goal&apos;s login test, then test linked pages signed in (for example “log in with demo / secret”)
+                  </label>
+                  <label className="check">
+                    <input type="checkbox" checked={form.active_scan}
+                      onChange={(e) => setForm({ ...form, active_scan: e.target.checked })} />
+                    Active security scan (sends test attacks — reflected XSS, SQL injection, open redirect; only for apps you own,
+                    only where the server enables it, and once the domain is verified below)
+                  </label>
                   <label className="field">
-                    Slack alerts (incoming webhook URL)
+                    Chat alerts (Slack, Discord, Google Chat or Teams webhook URL)
                     <input className="input" value={form.slack_webhook_url} onChange={(e) => setForm({ ...form, slack_webhook_url: e.target.value })}
-                      placeholder="https://hooks.slack.com/services/…" />
+                      placeholder="https://hooks.slack.com/services/… or https://discord.com/api/webhooks/…" />
                   </label>
                   <label className="field">
                     Send an alert
@@ -334,12 +593,12 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                   </label>
                   <h4 className="section-title mt-3">Verified deploy</h4>
                   <label className="field">
-                    Deploy hook (Render, Vercel or Netlify)
+                    Deploy hook (Render, Vercel, Netlify, or a GitHub workflow's dispatch URL)
                     <input className="input" value={form.deploy_hook_url} onChange={(e) => setForm({ ...form, deploy_hook_url: e.target.value })}
                       placeholder="https://api.render.com/deploy/srv-…?key=…" />
                   </label>
                   <label className="field">
-                    Rollback hook (optional; on Render the last verified commit is redeployed)
+                    Rollback hook (optional; on Render or a GitHub workflow the last verified commit is redeployed)
                     <input className="input" value={form.rollback_hook_url} onChange={(e) => setForm({ ...form, rollback_hook_url: e.target.value })}
                       placeholder="A deploy hook for your stable version" />
                   </label>
@@ -359,8 +618,12 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                   <div className="small"><GitBranch size={14} className="icon-inline" /> <b>Run on every push</b> — in GitHub: Settings → Webhooks → Add webhook, content type <span className="mono">application/json</span>, “Just the push event”.</div>
                   <CopyField label="Payload URL" value={webhookUrl(project.id)} />
                   <CopyField label="Secret" value={project.webhook_secret || ''} />
+                  <div className="small">On GitLab: Settings → Webhooks, this URL, the same secret as the <i>Secret token</i>, trigger “Push events”.</div>
+                  <CopyField label="GitLab URL" value={webhookUrl(project.id, 'gitlab')} />
                   <div><button type="button" className="btn btn-sm" disabled={busy} onClick={() => act(() => rotateWebhookSecret(project.id))}><RefreshCw size={13} /> New secret</button></div>
                   <ProjectDatabase project={project} onChanged={onChanged} />
+                  <DomainVerification project={project} />
+                  <GenerationProfile project={project} onChanged={onChanged} />
                 </div>
               </div>
             )}
@@ -375,6 +638,8 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
 export default function Autopilot({ onNavigate }) {
   const { projects, refresh, system, pipelineRuns, refreshRuns, refreshDeployments } = useWorkspace();
   const runs = pipelineRuns || [];
+  const projectPage = usePaged(projects, 8);
+  const runPage = usePaged(runs, 10);
   const [selectedId, setSelectedId] = useState(null);
   const [older, setOlder] = useState(null); // a run past the list's newest 40
 
@@ -409,7 +674,12 @@ export default function Autopilot({ onNavigate }) {
       </div>
 
       <QuickRun onStarted={started} />
-      <RunDetail run={shown} onOpen={(id, exec) => onNavigate('runs', { tab: exec ? `${id}/${exec}` : String(id) })} />
+      <RunDetail
+        run={shown}
+        onOpen={(id, exec) => onNavigate('runs', { tab: exec ? `${id}/${exec}` : String(id) })}
+        onClear={() => setSelectedId(null)}
+        onCancelled={() => { refreshRuns(); refresh(); }}
+      />
 
       <section className="card">
         <div className="card-head"><h3>Projects</h3><span className="muted small">{projects.length}</span></div>
@@ -421,7 +691,7 @@ export default function Autopilot({ onNavigate }) {
             <table className="table">
               <thead><tr><th>Project</th><th>Schedule</th><th>Last run</th><th /></tr></thead>
               <tbody>
-                {projects.map((p) => (
+                {projectPage.items.map((p) => (
                   <ProjectRow key={p.id} project={p} latest={latestByProject[p.id]} onRun={started} onChanged={refresh}
                     onDeployed={() => { refreshDeployments(); onNavigate('validation'); }} />
                 ))}
@@ -429,6 +699,7 @@ export default function Autopilot({ onNavigate }) {
             </table>
           </div>
         )}
+        <Pager paged={projectPage} label="projects" />
       </section>
 
       <section className="card">
@@ -438,7 +709,7 @@ export default function Autopilot({ onNavigate }) {
             <table className="table">
               <thead><tr><th>Run</th><th>Project</th><th>Trigger</th><th>Status</th><th>Result</th><th>When</th></tr></thead>
               <tbody>
-                {runs.map((r) => (
+                {runPage.items.map((r) => (
                   <tr key={r.id} className={`selectable ${r.id === shownId ? 'selected' : ''}`} {...selectableRow(() => setSelectedId(r.id), r.id === shownId)}>
                     <td>#{r.id}</td>
                     <td className="cell-wrap">{r.project_name}</td>
@@ -452,6 +723,7 @@ export default function Autopilot({ onNavigate }) {
             </table>
           </div>
         )}
+        <Pager paged={runPage} label="runs" />
       </section>
     </div>
   );

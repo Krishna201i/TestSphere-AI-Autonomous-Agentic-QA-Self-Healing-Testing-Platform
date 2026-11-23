@@ -7,13 +7,71 @@ export const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
 const SEVERITY_WEIGHT = { critical: 1, high: 0.8, medium: 0.5, low: 0.25, info: 0.1 };
 
 export const RADAR_AXES = [
-  { id: 'headers', label: 'Headers', checks: ['SEC-HDR-CSP', 'SEC-HDR-FRAME', 'SEC-HDR-XCTO', 'SEC-HDR-REFERRER'] },
+  { id: 'headers', label: 'Headers', checks: ['SEC-HDR-CSP', 'SEC-CSP-WEAK', 'SEC-HDR-FRAME', 'SEC-HDR-XCTO', 'SEC-HDR-REFERRER'] },
   { id: 'transport', label: 'Transport', checks: ['SEC-HDR-HSTS', 'SEC-TRANSPORT-HTTP'] },
-  { id: 'cookies', label: 'Cookies', checks: ['SEC-COOKIE-FLAGS'] },
+  { id: 'cookies', label: 'Cookies', checks: ['SEC-COOKIE-FLAGS', 'SEC-COOKIE-SAMESITE-NONE'] },
   { id: 'cors', label: 'CORS', checks: ['SEC-CORS'] },
-  { id: 'disclosure', label: 'Disclosure', checks: ['SEC-DISCLOSURE'] },
-  { id: 'content', label: 'Content', checks: ['SEC-MIXED-CONTENT', 'SEC-FORM-PASSWORD'] },
+  { id: 'disclosure', label: 'Disclosure',
+    checks: ['SEC-DISCLOSURE', 'SEC-ERROR-DISCLOSURE', 'SEC-DIR-LISTING', 'SEC-EXPOSED-GIT', 'SEC-EXPOSED-ENV'] },
+  { id: 'content', label: 'Content', checks: ['SEC-MIXED-CONTENT', 'SEC-FORM-PASSWORD', 'SEC-CSRF'] },
+  { id: 'injection', label: 'Injection', checks: ['SEC-XSS-REFLECTED', 'SEC-SQLI-ERROR', 'SEC-OPEN-REDIRECT'] },
 ];
+
+// What a finding proves (security/findings.py tier_of): only proven ones count as vulnerabilities
+const PROVEN_CHECKS = new Set(['SEC-SQLI-ERROR', 'SEC-OPEN-REDIRECT', 'SEC-EXPOSED-GIT', 'SEC-EXPOSED-ENV',
+  'SEC-ERROR-DISCLOSURE', 'SEC-DIR-LISTING', 'SEC-CORS', 'SEC-FORM-PASSWORD']);
+export const TIER_ORDER = ['proven', 'unconfirmed', 'hardening'];
+export const TIER_LABEL = {
+  proven: { text: 'Proven', tone: 'red', title: 'The scan showed the harm itself' },
+  unconfirmed: { text: 'Check by hand', tone: 'orange', title: 'A real signal the scan could not prove' },
+  hardening: { text: 'Hardening', tone: 'gray', title: 'A missing defence; nothing was shown to be exploitable' },
+};
+
+/** The tier of *finding*: the server's, or worked out the same way for one stored before tiers existed. */
+export function findingTier(finding) {
+  if (!finding) return 'hardening';
+  if (TIER_ORDER.includes(finding.tier)) return finding.tier;
+  if (finding.source === 'qa') return 'proven';
+  if (finding.check_id === 'SEC-XSS-REFLECTED') return finding.confidence >= 1 ? 'proven' : 'unconfirmed';
+  if (PROVEN_CHECKS.has(finding.check_id)) return 'proven';
+  return finding.check_id === 'SEC-CSRF' ? 'unconfirmed' : 'hardening';
+}
+
+/** Findings with proven ones first, then by severity (the order a reader should act in). */
+export function byTier(findings) {
+  return [...(findings || [])].sort((a, b) => TIER_ORDER.indexOf(findingTier(a)) - TIER_ORDER.indexOf(findingTier(b))
+    || SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
+}
+
+/** How many findings of each tier: { proven, unconfirmed, hardening }. */
+export function tierCounts(findings) {
+  const counts = { proven: 0, unconfirmed: 0, hardening: 0 };
+  for (const f of findings || []) counts[findingTier(f)] += 1;
+  return counts;
+}
+
+/** Whether a pipeline run's security stage actually scanned (not skipped: out of scope, failed, cancelled). */
+export function securityScanned(run) {
+  return (run?.stages || []).some((s) => s.key === 'security' && s.status === 'done');
+}
+
+/** Why the newest of *runs* that skipped its security scan did not scan, or null. */
+export function scanSkipReason(runs) {
+  const skipped = [...(runs || [])].reverse().map((r) => (r.stages || []).find((s) => s.key === 'security'))
+    .find((s) => s && ['skipped', 'failed'].includes(s.status));
+  if (!skipped) return null;
+  return /not in the authorized scope/i.test(skipped.detail || '')
+    ? 'the target is outside the authorized scan scope'
+    : (skipped.detail || 'the scan did not run');
+}
+
+/** How sure a finding is, as a reviewer reads it: proven in a real browser, or worth a manual look. */
+export function confidenceLabel(finding) {
+  if (!finding) return null;
+  if (finding.confidence >= 1 && finding.check_id === 'SEC-XSS-REFLECTED') return { text: 'Confirmed in a real browser', tone: 'green' };
+  if (finding.confidence <= 0.5) return { text: 'Not confirmed — check by hand', tone: 'orange' };
+  return null;
+}
 
 /** Exposure per radar axis in [0, 1] (severity-weighted, saturating). */
 export function radarValues(findings = []) {
@@ -238,4 +296,54 @@ export function urlError(value) {
     return 'Not a valid URL — include http:// or https://.';
   }
   return null;
+}
+
+// ── Test results in reports ────────────────────────────────
+
+/** Test types in report order, with what a passing test of that type verified (for runs before checks were recorded). */
+export const TEST_GROUPS = [
+  { key: 'smoke', label: 'Smoke', about: 'Page loads; title and body render' },
+  { key: 'functional', label: 'Goal scenario', about: 'The written goal: form filled and its outcome checked' },
+  { key: 'explored', label: 'AI-explored goal', about: 'The goal as the AI explorer reached it, replayed' },
+  { key: 'content', label: 'Content', about: 'The main heading is on the page' },
+  { key: 'link', label: 'Linked pages', about: 'Linked page loads with its title and heading' },
+  { key: 'route', label: 'Code routes', about: 'Route found in the code loads' },
+  { key: 'ai', label: 'AI-written tests', about: 'Scenario written by the AI planner' },
+  { key: 'saved', label: 'Saved tests', about: 'Saved test' },
+];
+const GROUP_KEYS = new Set(TEST_GROUPS.map((g) => g.key));
+
+export const groupOf = (t) => (GROUP_KEYS.has(t.category) ? t.category : 'saved');
+
+export function resultLabel(t) {
+  return t.healed && t.status === 'PASSED' ? 'HEALED' : t.status;
+}
+
+export function formatDuration(ms) {
+  if (ms == null) return null;
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
+}
+
+/** What a result says in its Details cell: the error when it failed, else what it checked. */
+export function testDetail(t) {
+  const time = formatDuration(t.duration_ms);
+  if (t.status === 'FAILED' && t.error) {
+    return { kind: 'error', text: t.error.split('\n')[0].replace(/\\n/g, ' '), time };
+  }
+  const checks = (t.checks || []).filter(Boolean);
+  const about = TEST_GROUPS.find((g) => g.key === groupOf(t)).about;
+  const parts = [checks.length ? checks.join(' · ') : about];
+  if (t.healed) parts.push('a broken locator was healed');
+  if (t.status === 'FAILED') parts.push('failed without an error message');
+  return { kind: t.status === 'FAILED' ? 'error' : 'ok', text: parts.join(' — '), time };
+}
+
+/** A run's results in report order: by test type, failures first within each type. */
+export function groupedResults(tests = []) {
+  const rank = { FAILED: 0, HEALED: 1, PASSED: 2 };
+  return TEST_GROUPS.map((g) => ({
+    ...g,
+    tests: tests.filter((t) => groupOf(t) === g.key)
+      .sort((a, b) => (rank[resultLabel(a)] ?? 1) - (rank[resultLabel(b)] ?? 1) || a.execution_id - b.execution_id),
+  })).filter((g) => g.tests.length);
 }

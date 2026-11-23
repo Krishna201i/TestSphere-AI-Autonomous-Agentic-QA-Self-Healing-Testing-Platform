@@ -7,20 +7,31 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRight, Check, Download, ExternalLink, FileCode2, Image, Link2, ShieldOff, Shield, Wand2, X,
+  ArrowLeft, ArrowRight, Check, Download, ExternalLink, FileCode2, FileText, Image, Link2, ShieldOff, Shield, Wand2, X,
 } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import {
-  acceptVisual, getArtifact, getPipelineRun, getRunJunit, getTestExecution, updateTestCase,
+  acceptVisual, getArtifact, getPipelineRun, getRunJunit, getRunReportPdf, getTestExecution, updateTestCase,
 } from '../services/api';
 import { timeAgo, toDate } from '../lib/derive';
 import { selectableRow } from '../lib/a11y';
 import { Skeleton } from '../components/charts';
+import { Diagnosis, RunSummary } from '../components/TestResult';
+import ShareReport from '../components/ShareReport';
+import Pager from '../components/Pager';
+import { usePaged } from '../lib/usePaged';
 import { RunStatus, StageIcon } from './Autopilot';
 
 const ACTIVE = ['queued', 'running'];
 const TRIGGER_LABEL = { manual: 'Manual', schedule: 'Scheduled', webhook: 'GitHub push' };
 const STEP_STATUS = { passed: 'PASSED', failed: 'FAILED', healed: 'HEALED', skipped: 'PENDING' };
+
+/** "12.3k" tokens the run's model calls used, of the budget when there is one. */
+export function aiTokens(usage) {
+  const short = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
+  const used = usage.input_tokens + usage.output_tokens;
+  return usage.limit ? `${short(used)} / ${short(usage.limit)}` : short(used);
+}
 
 export const testLabel = (t) => (t.healed && t.status === 'PASSED' ? 'HEALED' : t.status);
 
@@ -33,7 +44,7 @@ function saveBlob(blob, name) {
 }
 
 /** An artifact image fetched with the sign-in token; click to enlarge. */
-function Screenshot({ executionId, artifactKey, alt }) {
+export function Screenshot({ executionId, artifactKey, alt }) {
   const [url, setUrl] = useState(null);
   const [error, setError] = useState(null);
   const dialog = useRef(null);
@@ -186,6 +197,7 @@ function ExecutionDetail({ test, onQuarantine, onVisualAccepted }) {
         {test.quarantined && <span className="pill gray">Quarantined</span>}
         {test.visual_changed && <span className="pill violet">Visual change</span>}
       </div>
+      {test.status === 'FAILED' && <Diagnosis diagnosis={ex?.diagnosis || test.diagnosis} />}
       <div className="row">
         {ex?.trace && (
           <>
@@ -259,8 +271,27 @@ export default function RunDetail({ params, onNavigate }) {
   const [run, setRun] = useState(null);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+
+  async function downloadReport() {
+    setPdfBusy(true);
+    try {
+      saveBlob(await getRunReportPdf(run.id), `testsphere-run-${run.id}-report.pdf`);
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setPdfBusy(false);
+    }
+  }
   const [notice, setNotice] = useState(null); // e.g. a download that failed
   const selectedExec = Number(execParam) || null;
+  const testPage = usePaged(run?.tests, 15);
+  const selectedIndex = (run?.tests || []).findIndex((t) => t.execution_id === selectedExec);
+  const { setPage: setTestPage } = testPage;
+  // An opened test (a link, a run card) is always on the page shown
+  useEffect(() => {
+    if (selectedIndex >= 0) setTestPage(Math.floor(selectedIndex / 15) + 1);
+  }, [selectedIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let alive = true;
@@ -334,6 +365,11 @@ export default function RunDetail({ params, onNavigate }) {
           </p>
         </div>
         <div className="page-actions">
+          {!ACTIVE.includes(run.status) && (
+            <button type="button" className="btn btn-primary" onClick={downloadReport} disabled={pdfBusy}>
+              <FileText size={16} /> {pdfBusy ? 'Preparing PDF…' : 'PDF report'}
+            </button>
+          )}
           {tests.length > 0 && (
             <button type="button" className="btn" onClick={() => getRunJunit(run.id).then((b) => saveBlob(b, `testsphere-run-${run.id}.xml`)).catch((err) => setNotice(err.message))}>
               <Download size={16} /> JUnit XML
@@ -351,6 +387,7 @@ export default function RunDetail({ params, onNavigate }) {
         </div>
       )}
       {notice && <div className="alert-banner inline" role="alert">{notice}</div>}
+      <RunSummary lines={s?.narrative} />
 
       <ol className="stage-list" aria-label="Stages">
         {run.stages.map((st) => (
@@ -367,16 +404,27 @@ export default function RunDetail({ params, onNavigate }) {
       {s && (
         <div className="stat-tiles">
           <div className="stat-tile"><div className="v">{s.passed}/{s.total}</div><div className="l">Tests passed</div></div>
+          <div className="stat-tile" title="Passing tests that failed on a deliberately broken copy of their page: the ones a pass actually means something for">
+            <div className="v">{s.verified ?? '—'}</div><div className="l">Proven to catch a break</div>
+          </div>
           <div className="stat-tile"><div className={`v ${s.failed ? 'bad' : ''}`}>{s.failed}</div><div className="l">Failed{s.quarantined_failed ? ` (+${s.quarantined_failed} quarantined)` : ''}</div></div>
           <div className="stat-tile"><div className="v">{s.healed}</div><div className="l">Self-healed</div></div>
           <div className="stat-tile"><div className="v">{s.flaky ?? 0}</div><div className="l">Flaky</div></div>
           <div className="stat-tile"><div className="v">{(run.regressions || []).length}</div><div className="l">Regressions</div></div>
-          <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Security findings</div></div>
+          <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Proven security issues{s.hardening ? <span className="muted"> · {s.hardening} hardening</span> : null}</div></div>
+          {run.llm_usage && (
+            <div className="stat-tile" title={`${run.llm_usage.input_tokens.toLocaleString()} in, ${run.llm_usage.output_tokens.toLocaleString()} out`}>
+              <div className={`v ${run.llm_usage.budget_exhausted ? 'bad' : ''}`}>{aiTokens(run.llm_usage)}</div>
+              <div className="l">AI tokens · {run.llm_usage.calls} {run.llm_usage.calls === 1 ? 'call' : 'calls'}{run.llm_usage.budget_exhausted ? ' · budget used up' : ''}</div>
+            </div>
+          )}
           {s.visual_changes > 0 && (
             <div className="stat-tile"><div className="v">{tests.filter((t) => t.visual_changed).length}</div><div className="l">Visual changes to review</div></div>
           )}
         </div>
       )}
+
+      {!ACTIVE.includes(run.status) && <ShareReport runId={run.id} />}
 
       <div className={selected ? 'grid-side-main' : ''}>
         <section className="card">
@@ -386,7 +434,7 @@ export default function RunDetail({ params, onNavigate }) {
               <table className="table">
                 <thead><tr><th>Test</th><th>Result</th>{!selected && <th>Details</th>}</tr></thead>
                 <tbody>
-                  {withState.map((t) => (
+                  {withState.slice(testPage.from - 1, testPage.to).map((t) => (
                     <tr key={t.execution_id} className={`selectable ${t.execution_id === selectedExec ? 'selected' : ''}`}
                       {...selectableRow(() => open(t.execution_id === selectedExec ? null : t.execution_id), t.execution_id === selectedExec)}>
                       <td className="cell-wrap">{t.name}<div className="small muted">{t.category || 'saved'} · #{t.execution_id}</div></td>
@@ -403,6 +451,7 @@ export default function RunDetail({ params, onNavigate }) {
                   ))}
                 </tbody>
               </table>
+              <Pager paged={testPage} label="tests" />
             </div>
           )}
         </section>

@@ -2,7 +2,7 @@
  * TestSphere-AI — API client for the FastAPI backend.
  *
  * Base URL: VITE_API_URL when set (a dashboard hosted apart from the API,
- * e.g. on Vercel); otherwise the page's own origin: the backend serves the
+ * on another host); otherwise the page's own origin: the backend serves the
  * built dashboard itself, and the Vite dev server proxies /api.  (Guessing
  * from the port broke hosted pages: on Render the port is the default 443,
  * so the dashboard called http://127.0.0.1:8000 on the visitor's machine.)
@@ -54,12 +54,12 @@ async function request(path, { method = 'GET', body, raw = false } = {}) {
     err.kind = 'network';
     throw err;
   }
-  // An HTML page instead of JSON: the dashboard's host answered (e.g. Vercel's
-  // single-page rewrite), not the backend, so VITE_API_URL is missing or wrong
+  // An HTML page instead of JSON: the dashboard's host answered (e.g. a static
+  // host's single-page rewrite), not the backend, so VITE_API_URL is missing or wrong
   if ((res.headers.get('content-type') || '').includes('text/html') && path.startsWith('/api/')) {
     const err = new Error(`${API_BASE_LABEL} answered ${path.split('?')[0]} with a web page, not the TestSphere API. `
-      + 'If the dashboard is hosted apart from the backend (e.g. on Vercel), set VITE_API_URL to the backend URL '
-      + '(e.g. https://your-api.onrender.com) and build again.');
+      + 'If the dashboard is hosted apart from the backend, set VITE_API_URL to the backend URL '
+      + '(e.g. https://api.example.com) and build again.');
     err.kind = 'misconfigured';
     err.status = res.status;
     throw err;
@@ -120,8 +120,37 @@ export const acceptVisual = (id) => request(`/api/test-executions/${id}/accept-v
 export const planAndExecute = (payload) =>
   request('/api/workflow/plan-and-execute', { method: 'POST', body: payload });
 
-export const securityScan = (url, actor) => request('/api/security/scan', { method: 'POST', body: { url, actor } });
+/** Test Studio: a test described in plain English -> steps checked against the live page (nothing runs). */
+export const draftStudioTest = (projectId, payload) =>
+  request(`/api/projects/${projectId}/studio/draft`, { method: 'POST', body: payload });
+/** Re-check edited steps against the page. */
+export const verifyStudioSteps = (projectId, payload) =>
+  request(`/api/projects/${projectId}/studio/verify`, { method: 'POST', body: payload });
+export const getStudioTests = (projectId) => request(`/api/projects/${projectId}/studio/tests`);
+export const saveStudioTest = (projectId, payload) =>
+  request(`/api/projects/${projectId}/studio/tests`, { method: 'POST', body: payload });
+export const updateStudioTest = (projectId, testId, payload) =>
+  request(`/api/projects/${projectId}/studio/tests/${testId}`, { method: 'PUT', body: payload });
+/** Test Studio, codebase-aware: flows worth testing, and Playwright tests imported as text (never run). */
+export const suggestStudioFlows = (projectId) => request(`/api/projects/${projectId}/studio/suggest`, { method: 'POST', body: {} });
+export const importPlaywright = (projectId, text, filename) =>
+  request(`/api/projects/${projectId}/studio/import`, { method: 'POST', body: { text, filename } });
+export const importPlaywrightRepo = (projectId) => request(`/api/projects/${projectId}/studio/import-repo`, { method: 'POST', body: {} });
+/** Self-healing review: every heal with its evidence, and approve / reject one. */
+export const getHeals = (limit = 200) => request(`/api/heals?limit=${limit}`);
+export const reviewHeal = (executionId, originalLocator, decision) =>
+  request(`/api/heals/${executionId}/review`, { method: 'POST', body: { original_locator: originalLocator, decision } });
+/** Any saved test as a Playwright .spec.ts file, as a Blob. */
+export const exportPlaywright = (testId) => request(`/api/studio/tests/${testId}/playwright`, { raw: true });
+
+export const securityScan = (url, actor, active = false) => request('/api/security/scan', { method: 'POST', body: { url, actor, active } });
 export const getFindings = () => request('/api/security/findings');
+/** Sites this account may scan actively once it proves ownership (Attacker page). */
+export const getScanTargets = () => request('/api/security/targets');
+export const addScanTarget = (url) => request('/api/security/targets', { method: 'POST', body: { url } });
+/** Fetch the site's /.well-known/testsphere-verify.txt now; verified sites join the active-scan scope for 30 days. */
+export const verifyScanTarget = (id) => request(`/api/security/targets/${id}/verify`, { method: 'POST' });
+export const removeScanTarget = (id) => request(`/api/security/targets/${id}`, { method: 'DELETE' });
 export const approveFinding = (key, actor) =>
   request(`/api/security/findings/${encodeURIComponent(key)}/approve`, { method: 'POST', body: { actor } });
 export const retestFinding = (key, actor) =>
@@ -152,6 +181,10 @@ export const getProjectDatabase = (id) => request(`/api/projects/${id}/database`
 export const linkProjectDatabase = (id, url) => request(`/api/projects/${id}/database`, { method: 'PUT', body: { url } });
 export const unlinkProjectDatabase = (id) => request(`/api/projects/${id}/database`, { method: 'DELETE' });
 export const rotateWebhookSecret = (id) => request(`/api/projects/${id}/webhook-secret`, { method: 'POST' });
+/** Proof the project owns its site, needed before active scans: the token to publish and the current state. */
+export const getDomainVerification = (id) => request(`/api/projects/${id}/domain-verification`);
+/** Fetch the site's /.well-known/testsphere-verify.txt now and record the host as verified if it holds the token. */
+export const verifyDomain = (id) => request(`/api/projects/${id}/domain-verification`, { method: 'POST' });
 export const runProjectPipeline = (projectId, ingest = false) =>
   request('/api/pipelines/run', { method: 'POST', body: { project_id: projectId, ingest } });
 /** Verified deploy: hook -> health -> smoke tests -> rollback on failure. */
@@ -160,8 +193,13 @@ export const getDeployments = (limit = 20) => request(`/api/pipelines/deployment
 export const quickPipeline = (payload) => request('/api/pipelines/quick', { method: 'POST', body: payload });
 export const getPipelineRuns = (limit = 30) => request(`/api/pipelines/runs?limit=${limit}`);
 export const getPipelineRun = (id) => request(`/api/pipelines/runs/${id}`);
+export const cancelPipelineRun = (id) => request(`/api/pipelines/runs/${id}/cancel`, { method: 'POST' });
 /** The run's tests as JUnit XML (for CI dashboards), as a Blob. */
 export const getRunJunit = (id) => request(`/api/pipelines/runs/${id}/junit`, { raw: true });
+export const getRunReportPdf = (id) => request(`/api/pipelines/runs/${id}/report.pdf`, { raw: true });
+export const createRunShare = (id, days = 7) => request(`/api/pipelines/runs/${id}/shares`, { method: 'POST', body: { days } });
+export const getRunShares = (id) => request(`/api/pipelines/runs/${id}/shares`);
+export const revokeRunShare = (shareId) => request(`/api/pipelines/shares/${shareId}`, { method: 'DELETE' });
 
 export const getMe = () => request('/api/me');
 export const recordLogin = () => request('/api/me/login', { method: 'POST' });
@@ -173,6 +211,6 @@ export const getApiTokens = () => request('/api/me/tokens');
 export const createApiToken = (name) => request('/api/me/tokens', { method: 'POST', body: { name } });
 export const revokeApiToken = (id) => request(`/api/me/tokens/${id}`, { method: 'DELETE' });
 
-/** Webhook URL GitHub should call for a project (absolute, using the API base). */
-export const webhookUrl = (projectId) =>
-  `${BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '')}/api/webhooks/github/${projectId}`;
+/** Webhook URL GitHub (or GitLab) should call for a project (absolute, using the API base). */
+export const webhookUrl = (projectId, host = 'github') =>
+  `${BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '')}/api/webhooks/${host}/${projectId}`;

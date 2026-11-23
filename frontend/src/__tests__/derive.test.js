@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { deployState, executionStats, loopModel, mergeStageStatus, pct } from '../lib/derive';
+import {
+  RADAR_AXES, confidenceLabel, deployState, executionStats, groupedResults, loopModel, mergeStageStatus, pct, radarValues,
+  scanSkipReason, securityScanned, testDetail,
+} from '../lib/derive';
 
 const run = (status) => ({ status });
 
@@ -115,5 +118,69 @@ describe('deployState', () => {
     expect(deployState([{ status: 'verified', commit: null }]).state).toBe('done');
     expect(deployState([{ status: 'rolled_back' }])).toEqual({ state: 'waiting', note: 'Rolled back' });
     expect(deployState([{ status: 'rollback_failed' }])).toEqual({ state: 'failed', note: 'Rollback failed' });
+  });
+});
+
+describe('test results in reports', () => {
+  it('a passed test says what it checked and how long it took', () => {
+    const d = testDetail({ status: 'PASSED', category: 'smoke', checks: ["Page title contains 'CareLink'"], duration_ms: 1234 });
+    expect(d).toEqual({ kind: 'ok', text: "Page title contains 'CareLink'", time: '1.2 s' });
+  });
+  it('an older run without recorded checks describes the test type', () => {
+    expect(testDetail({ status: 'PASSED', category: 'link' }).text).toBe('Linked page loads with its title and heading');
+    expect(testDetail({ status: 'PASSED', category: 'whatever' }).text).toBe('Saved test');
+  });
+  it('a failure shows its error, with older escaped line breaks as spaces', () => {
+    // Older runs stored the page text escaped: a backslash and an n, not a line break
+    expect(testDetail({ status: 'FAILED', error: String.raw`expected x in "a\nb"` }))
+      .toMatchObject({ kind: 'error', text: 'expected x in "a b"' });
+  });
+  it('a healed pass says so', () => {
+    expect(testDetail({ status: 'PASSED', healed: true, category: 'smoke' }).text).toMatch(/healed$/);
+  });
+  it('groups by test type in report order, failures first', () => {
+    const groups = groupedResults([
+      { execution_id: 3, category: 'link', status: 'PASSED' },
+      { execution_id: 1, category: 'smoke', status: 'PASSED' },
+      { execution_id: 4, category: 'link', status: 'FAILED' },
+      { execution_id: 5, category: null, status: 'PASSED' },
+    ]);
+    expect(groups.map((g) => [g.label, g.tests.map((t) => t.execution_id)]))
+      .toEqual([['Smoke', [1]], ['Linked pages', [4, 3]], ['Saved tests', [5]]]);
+  });
+});
+
+describe('security checks on the dashboard', () => {
+  it('places every check the scanners report on a radar axis', () => {
+    const shown = new Set(RADAR_AXES.flatMap((a) => a.checks));
+    for (const id of ['SEC-CSP-WEAK', 'SEC-COOKIE-SAMESITE-NONE', 'SEC-ERROR-DISCLOSURE', 'SEC-DIR-LISTING',
+      'SEC-EXPOSED-GIT', 'SEC-EXPOSED-ENV', 'SEC-CSRF', 'SEC-XSS-REFLECTED', 'SEC-SQLI-ERROR', 'SEC-OPEN-REDIRECT']) {
+      expect(shown.has(id), id).toBe(true);
+    }
+    const injection = RADAR_AXES.findIndex((a) => a.id === 'injection');
+    expect(radarValues([{ check_id: 'SEC-SQLI-ERROR', severity: 'critical' }])[injection]).toBeGreaterThan(0);
+  });
+
+  it('says when an XSS was proven in a browser and when a finding needs a manual look', () => {
+    expect(confidenceLabel({ check_id: 'SEC-XSS-REFLECTED', confidence: 1 }).text).toMatch(/Confirmed/);
+    expect(confidenceLabel({ check_id: 'SEC-XSS-REFLECTED', confidence: 0.5 }).text).toMatch(/Not confirmed/);
+    expect(confidenceLabel({ check_id: 'SEC-HDR-CSP', confidence: 0.9 })).toBeNull();
+  });
+});
+
+describe('security scan state', () => {
+  const run = (status, detail) => ({ stages: [{ key: 'security', status, detail }] });
+
+  it('counts only a scan that ran', () => {
+    expect(securityScanned(run('done'))).toBe(true);
+    expect(securityScanned(run('skipped'))).toBe(false);
+    expect(securityScanned({})).toBe(false);
+  });
+
+  it('says in plain words why the newest skipped scan did not run', () => {
+    const outOfScope = run('skipped', 'app.example:443 is not in the authorized scope (127.0.0.1). Add the host to SECURITY_SCAN_ALLOWED_HOSTS');
+    expect(scanSkipReason([run('done'), outOfScope])).toBe('the target is outside the authorized scan scope');
+    expect(scanSkipReason([run('done')])).toBe(null);
+    expect(scanSkipReason([run('running')])).toBe(null);
   });
 });

@@ -1,79 +1,137 @@
-# TestSphere AI — Member 1: AI Agents & Intelligence
+# TestSphere AI — Autonomous Agentic QA & Self-Healing Testing Platform
 
-**Owner:** Vinamra Bhatnagar · **Branch:** `vinamra-branch` · **Main folder:** [`agents/`](agents/)
+An end-to-end, multi-agent platform for web application testing: an AI QA agent plans and runs smoke,
+functional and negative tests in a real browser, an engine self-heals broken locators without false heals, an
+attacker agent scans for security vulnerabilities and drafts code patches, and results feed into unified
+reports, flaky-test tracking and verified deployment with automatic rollback.
 
-This branch contains the whole TestSphere AI project. This README covers the part Member 1 owns: the AI
-agents that plan tests, explain failures and decide whether a healed locator can be trusted. For the overview
-of the whole platform, see the [README on `main`](../../tree/main#readme).
+Built for the GLA University capstone project (Group 24, B.Tech CSE AIML 2022–2026).
 
 ---
 
-## What this part does
+## Architecture
 
-The platform calls the agents at three points of every run:
-
-1. **Before the run.** The **Test Planner** turns a page analysis and an optional goal into prioritized,
-   validated test cases.
-2. **When a step fails.** The **Failure Analyzer** classifies why it failed: a broken locator, timing, a
-   network problem, an assertion, or an application bug.
-3. **When a locator breaks.** The **healing decision engine** scores the candidates the browser engine finds,
-   uses the healing memory, and either accepts a heal or refuses it with a reason.
-
-The **agent orchestrator** connects these steps and applies a recovery policy (retry, heal, skip or abort).
-Every agent works through a provider-independent **LLM client**, so the whole platform runs offline with the
-mock provider and switches to a local or hosted model with one setting.
-
-## Modules
-
-| Module | Contents |
-| --- | --- |
-| [`agents/planner/`](agents/planner/) | Test Planner: prompts, structured output parsing, validation, prioritization, LangChain adapter, offline mock scenarios |
-| [`agents/analyzer/`](agents/analyzer/) | Failure Analyzer and failure classifier |
-| [`agents/healer/`](agents/healer/) | Candidate generation and scoring, healing decision, LLM healing evaluator, healing feedback, result mapping |
-| [`agents/memory/`](agents/memory/) | Healing history, evidence, pattern detection, context comparison; in-memory and persistent stores |
-| [`agents/orchestration/`](agents/orchestration/) | Agent controller, agent orchestrator, recovery policy, workflow schemas |
-| [`agents/llm/`](agents/llm/) | LLM client, configuration, response parser, providers (`mock`, `local`, OpenAI-compatible `api`) |
-| [`agents/schemas/`](agents/schemas/) | Shared contracts with the engine (Member 2) and the backend (Member 3) |
-
-## Contracts with the other members
-
-- **Engine (Member 2):** [`agents/schemas/member2_contract.py`](agents/schemas/member2_contract.py) defines the
-  step results, failure context and healing candidates the engine sends, and the decisions the agents return.
-- **Backend (Member 3):** [`agents/schemas/member3_contract.py`](agents/schemas/member3_contract.py) defines the
-  test plans and analyses the backend stores and shows in the dashboard.
-
-Changes to these contracts need a matching change on the other side, in the same pull request.
-
-## LLM providers
-
-| `LLM_PROVIDER` | Use |
-| --- | --- |
-| `mock` (default) | Offline and deterministic. Used by tests and CI. |
-| `local` | A local model server such as Ollama (`LLM_BASE_URL`, `LLM_MODEL`) |
-| `api` | Any OpenAI-compatible API (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`) |
-
-API keys are never logged, and `repr()` masks them.
-
-## Results this part contributes
-
-- **Healing benchmark:** 277 broken-locator cases. The healing decision heals **95.2%** of the cases where
-  healing is right, with **0 false heals**, and refuses all the cases where it is wrong
-  ([report](docs/healing-benchmark.md)).
-- **Failure classification** of real runs is shown on every failed step in the dashboard.
-
-## Working on this part
-
-```bash
-pip install -e ".[dev]"
-python -m pytest tests/ -q --ignore=tests/backend --ignore=tests/e2e --ignore=tests/engine   # agent tests
-python -m engine.heal_benchmark --quick                                                       # healing quality
+```
+frontend/  React dashboard ──────────────▶ backend/app/  FastAPI
+                                             │  api/            REST endpoints
+                                             │  pipeline/       pipeline runner, scheduler, verified deploy
+                                             │  orchestration/  ties the agents to the engine
+                                             │  database/       Store interface: Firestore, local JSON, memory
+                                             │  artifacts.py    screenshots, DOM snapshots, traces (disk, S3 or GCS)
+                                             │  github.py, notify.py, netguard.py, http_hardening.py
+                                             ▼
+        backend/agents/     planner, failure analyzer, healing decisions, memory, LLM client
+        backend/engine/     Playwright runner, locator healing, egress guard, benchmarks
+        backend/security/   passive + active (DAST) scanner, remediation, fix patcher
+        backend/ingestion/  repository blueprint
 ```
 
-Documentation: [AI agent architecture](docs/member1-architecture.md) ·
-[Self-healing & orchestration](docs/self-healing-orchestration.md) · [Integration guide](docs/integration-guide.md)
+The repository has three parts: **`backend/`** (all Python: `pyproject.toml`, the dependency lock and tests live
+there, and every Python command runs from it), **`frontend/`** (the dashboard) and **`docs/`**. Deployment files
+(`Dockerfile`, [`deploy/aws-ec2`](deploy/aws-ec2/README.md), Firestore rules) stay at the root.
 
-## How work reaches `main`
+| Folder | Contents |
+| --- | --- |
+| [`backend/app/`](backend/app/) | FastAPI API, automated pipeline and scheduler, pipeline worker, verified deploy, artifact store, integrations (GitHub, Slack), sign-in and data isolation, request hardening, MCP server |
+| [`backend/agents/`](backend/agents/) | Test Planner, Failure Analyzer, healing decision engine, healing memory, agent orchestrator and recovery policy, provider-independent LLM client (mock, local, OpenAI-compatible API) |
+| [`backend/engine/`](backend/engine/) | Playwright execution engine, locator healer, outbound request guard for the browser, healing benchmarks |
+| [`backend/security/`](backend/security/) | Passive and active security scanner, remediation proposals, fix patch generator, SARIF v2.1.0 exporter |
+| [`backend/ingestion/`](backend/ingestion/) | Repository cloning and static analysis |
+| [`backend/tests/`](backend/tests/) | Unit, integration, engine and end-to-end tests |
+| [`backend/scripts/`](backend/scripts/) | Load test, test-generation evaluation, demo runner |
+| [`frontend/`](frontend/) | React dashboard with its design system, live pipeline loop, run pages, reports, security, profile and privacy pages |
+| [`docs/`](docs/) | Architecture, operations, contributing guide and benchmark reports |
 
-1. Branch from `vinamra-branch` or work on it directly.
-2. Keep the agent tests and the healing benchmark passing.
-3. Open a pull request into `main`. CI runs the full test suite, the security scans and the frontend build.
+---
+
+## Results & Verified Capabilities
+
+| Capability | Verified Performance / Metric |
+| --- | --- |
+| **Self-healing benchmark** — 277 broken-locator cases (4 pages × every target × 15 mutations), [details](docs/healing-benchmark.md) | Heals **95.7%** of the cases where healing is right with **0 false heals**, and refuses **100%** of the cases where it is wrong. A static fallback chain heals 96.1% but **17.4%** of its heals hit the wrong element. |
+| **Plain-English tests** (Test Studio) — 15 instructions a tester would type, 19 real bugs, [details](docs/studio-eval.md) | **18 of 19** bugs caught with **0 false alarms** (rule-based planner, no AI model); 6 of 7 on held-out instructions it was never tuned on |
+| **Live sites** — the-internet.herokuapp.com, saucedemo.com, practicetestautomation.com, TodoMVC | 4 of 4 run the written goal (log in, add an item) and pass |
+| **Real repositories** — FastAPI, Express and Django RealWorld apps, microblog, Flask | 5 of 5 get a fix patch that applies to a fresh clone and compiles |
+| **Security and robustness** — SSRF, access control, input limits, webhook signatures, rate limits, SARIF v2.1.0 export | 55 of 55 checks pass |
+| **Load** — one API worker, [details](docs/load-test.md) | ~600–700 requests/s from 1 to 100 concurrent clients (p95 250 ms, no errors); 8 pipeline runs at once finish in 27 s at ~460 MB |
+| **Accessibility** | WCAG 2.1 AA (axe) on every dashboard page, light and dark |
+| **Automated tests** | 2,000+ backend, engine and end-to-end tests and 95 frontend unit tests, in CI; the healing and Test Studio benchmarks gate every change |
+
+---
+
+## Team
+
+| Member | Area | Main folders | Branch |
+| --- | --- | --- | --- |
+| **Vinamra Bhatnagar** | Member 1 — AI agents & intelligence | `backend/agents/`, `backend/security/` | [`vinamra-branch`](../../tree/vinamra-branch) |
+| **Krishna Singh** | Member 2 — Browser engine, self-healing & security testing | `backend/engine/`, `backend/security/`, `backend/ingestion/` | [`krishna-branch`](../../tree/krishna-branch) |
+| **Prashansha Maheshwari** | Member 3 — Platform backend, pipeline & dashboard | `backend/app/`, `frontend/`, `docs/` | [`prashansha-branch`](../../tree/prashansha-branch) |
+
+Each member branch contains the full project; its README describes that member's part in detail.
+Work is merged into `main` through pull requests that pass CI.
+
+### Contributions
+
+| Member | Contributed |
+| --- | --- |
+| **Vinamra Bhatnagar** | Founded the AI agent layer: the shared agent schemas and contracts, the provider-independent LLM client (mock provider, response parser, `LLMClientSession` with validation and retry), the Test Planner Agent (schemas, prompt architecture, mock scenarios, generation pipeline, risk-based prioritization), the failure classifier and Failure Analysis Agent (deterministic failure grouping and shared root-cause clustering), multi-tenant memory read isolation, self-healing false-heal safeguards, explainable flaky-test detection, SARIF v2.1.0 standard exporter, PEP 503 dependency patch matching, and agent observability execution timeline. |
+| **Krishna Singh** | The Playwright engine and locator healing with its benchmark, the passive and active security scanner and AI triage, codebase ingestion, fix patches and pull requests, verified deploy, the real LLM providers, persistent healing memory, the AI explorer, failure reports and PDF export, Firestore storage, CI and security scanning, hosting, and most of the current backend and dashboard. |
+| **Prashansha Maheshwari** | The first backend platform and workflow orchestration, the plan-and-execute API with live SSE events, the first React dashboard and its connection to the backend, the Vercel and Render deployment setup, and the architecture, API, engine, integration and operations documentation, plus [`CONTRIBUTING.md`](docs/CONTRIBUTING.md). |
+
+---
+
+## Getting Started
+
+```bash
+git clone https://github.com/Krishna201i/TestSphere-AI-Autonomous-Agentic-QA-Self-Healing-Testing-Platform.git
+cd TestSphere-AI-Autonomous-Agentic-QA-Self-Healing-Testing-Platform
+
+# Python package with development tools, and the browser (all Python lives in backend/)
+cd backend
+pip install -r requirements.txt && pip install -e ".[dev]"
+python -m playwright install chromium
+cd ..
+
+# Dashboard
+cd frontend && npm install && cd ..
+
+# Settings: works offline by default (LLM_PROVIDER=mock, local JSON database, sign-in off)
+cp .env.example .env
+```
+
+Start the servers:
+```bash
+cd backend && python -m uvicorn app.main:app --port 8000   # API on http://127.0.0.1:8000
+cd frontend && npm run dev                                 # dashboard (second terminal) on http://localhost:3000
+```
+
+Run tests:
+```bash
+cd backend && python -m pytest -q   # app, agents, engine; end-to-end tests need: cd frontend && npm run build
+cd frontend && npm test             # dashboard unit tests and design-token lint
+```
+
+Run the end-to-end demo loop:
+```bash
+make demo
+```
+
+---
+
+## Configuration and Deployment
+
+Production runs on one AWS EC2 instance with Firebase (Authentication and Firestore). Key settings:
+
+| Setting | Purpose |
+| --- | --- |
+| `FIREBASE_CREDENTIALS`, `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN` | Database and sign-in |
+| `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_BASE_URL` | AI model (`mock`, `local` such as Ollama, or any OpenAI-compatible `api`) |
+| `LLM_PROVIDER=chain`, `NVIDIA_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` | Fallback chain: NVIDIA Gemma → NVIDIA Nemotron → Groq → Gemini |
+| `SECURITY_SCAN_ALLOWED_HOSTS` | Hosts the scanner may contact |
+| `SECURITY_ACTIVE_SCAN` | Allow active (DAST) scanning |
+
+---
+
+## License
+
+[MIT](LICENSE)

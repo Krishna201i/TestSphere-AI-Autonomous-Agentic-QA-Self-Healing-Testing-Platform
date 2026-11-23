@@ -1,0 +1,742 @@
+"""
+Fix patches against real source: each framework gets a patch that applies
+with ``git apply`` and, where the framework is installed, actually changes
+the response headers.
+"""
+
+import importlib.util
+import json
+import shutil
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
+import pytest
+
+from security.patcher import build_patch, fixes_for
+
+SITE = "https://shop.example"
+
+
+def finding(check_id, **extra):
+    return {"check_id": check_id, "recommendation": f"fix {check_id}", **extra}
+
+
+HEADERS = [finding("SEC-HDR-FRAME"), finding("SEC-HDR-XCTO"), finding("SEC-HDR-REFERRER")]
+
+
+def write(root: Path, files: dict[str, str]) -> Path:
+    for rel, text in files.items():
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(textwrap.dedent(text).lstrip(), encoding="utf-8")
+    return root
+
+
+def git_apply(root: Path, patch: str) -> None:
+    """The patch must apply to the untouched checkout exactly as git would."""
+    if not shutil.which("git"):
+        pytest.skip("git not installed")
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    (root / "fix.patch").write_text(patch, encoding="utf-8", newline="\n")
+    res = subprocess.run(["git", "apply", "--whitespace=nowarn", "fix.patch"], cwd=root, capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+
+
+def load(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+FASTAPI_APP = """
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
+
+    app = FastAPI(
+        title="Shop",
+    )
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True)
+
+
+    @app.get("/")
+    def home():
+        return {"ok": True}
+
+
+    @app.get("/login")
+    def login():
+        resp = JSONResponse({"ok": True})
+        resp.set_cookie("session", "abc")
+        return resp
+"""
+
+
+def test_fastapi_patch_applies_and_really_sets_the_headers(tmp_path):
+    root = write(tmp_path / "repo", {"app/main.py": FASTAPI_APP, "app/__init__.py": ""})
+    findings = [*HEADERS, finding("SEC-CORS"), finding("SEC-COOKIE-FLAGS", component="https://shop.example/ (cookie: session)")]
+    result = build_patch(root, findings, SITE)
+
+    assert result.frameworks == ["fastapi"]
+    assert [f.path for f in result.files] == ["app/main.py"]
+    assert result.files[0].verified is True
+    assert result.manual == []
+    assert {a.check_id for a in result.applied} == {"SEC-HDR-FRAME", "SEC-HDR-XCTO", "SEC-HDR-REFERRER", "SEC-CORS", "SEC-COOKIE-FLAGS"}
+    assert '+@app.middleware("http")' in result.patch
+    assert '+    allow_origins=' not in result.patch  # replaced in place, not added
+    assert 'allow_origins=["https://shop.example"]' in result.patch
+
+    git_apply(root, result.patch)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(load(root / "app" / "main.py", "patched_fastapi_app").app)
+    resp = client.get("/")
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+    cookie = client.get("/login").headers["set-cookie"].lower()
+    assert "httponly" in cookie and "secure" in cookie and "samesite=lax" in cookie
+    evil = client.get("/", headers={"Origin": "https://evil.example"})
+    assert evil.headers.get("access-control-allow-origin") != "https://evil.example"
+
+
+def test_patching_twice_only_adds_what_is_missing(tmp_path):
+    root = write(tmp_path / "repo", {"main.py": FASTAPI_APP})
+    first = build_patch(root, HEADERS[:1], SITE)
+    git_apply(root, first.patch)
+    second = build_patch(root, HEADERS, SITE)
+    assert second.patch.count("@app.middleware") == 0  # the existing hook is extended
+    assert '+    response.headers["X-Content-Type-Options"] = "nosniff"' in second.patch
+    assert "X-Frame-Options" not in "".join(l for l in second.patch.splitlines() if l.startswith("+"))
+    assert any("already set" in a.how for a in second.applied if a.check_id == "SEC-HDR-FRAME")
+
+
+def test_uvicorn_server_header_and_disclosure(tmp_path):
+    root = write(tmp_path / "repo", {"main.py": textwrap.dedent(FASTAPI_APP) + '\nimport uvicorn\n\nif __name__ == "__main__":\n    uvicorn.run(app, host="0.0.0.0")\n'})
+    result = build_patch(root, [finding("SEC-DISCLOSURE", evidence=["server: uvicorn"])], SITE)
+    assert 'uvicorn.run(app, host="0.0.0.0", server_header=False)' in result.patch
+    assert result.manual == []
+
+
+def test_flask_after_request_hook(tmp_path):
+    root = write(tmp_path / "repo", {"app.py": """
+        from flask import Flask
+
+        app = Flask(__name__)
+
+
+        @app.route("/")
+        def home():
+            return "ok"
+    """})
+    result = build_patch(root, HEADERS, SITE)
+    assert result.frameworks == ["flask"]
+    assert "+@app.after_request" in result.patch and result.files[0].verified is True
+    git_apply(root, result.patch)
+    if importlib.util.find_spec("flask"):
+        client = load(root / "app.py", "patched_flask_app").app.test_client()
+        assert client.get("/").headers["X-Frame-Options"] == "DENY"
+
+
+def test_django_settings(tmp_path):
+    root = write(tmp_path / "repo", {"shop/settings.py": """
+        INSTALLED_APPS = ["django.contrib.admin", "corsheaders"]
+        MIDDLEWARE = ["django.middleware.security.SecurityMiddleware"]
+        X_FRAME_OPTIONS = "SAMEORIGIN"
+        CORS_ALLOW_ALL_ORIGINS = True
+    """})
+    findings = [*HEADERS, finding("SEC-HDR-HSTS"), finding("SEC-CORS"),
+                finding("SEC-COOKIE-FLAGS", component="https://shop.example/ (cookie: sessionid)")]
+    result = build_patch(root, findings, SITE)
+    text = result.patch
+    assert '+X_FRAME_OPTIONS = "DENY"' in text and '-X_FRAME_OPTIONS = "SAMEORIGIN"' in text  # replaced, not duplicated
+    assert "+SECURE_CONTENT_TYPE_NOSNIFF = True" in text
+    assert "+SECURE_HSTS_SECONDS = 31536000" in text
+    assert "+CORS_ALLOW_ALL_ORIGINS = False" in text and '+CORS_ALLOWED_ORIGINS = ["https://shop.example"]' in text
+    assert "+SESSION_COOKIE_SECURE = True" in text
+    assert result.files[0].verified is True and result.manual == []
+    git_apply(root, text)
+
+
+EXPRESS_APP = """
+    const express = require("express");
+    const cors = require("cors");
+
+    const app = express();
+    app.use(cors());
+
+    app.get("/login", (req, res) => {
+      res.cookie("session", token);
+      res.send("ok");
+    });
+
+    app.listen(3000);
+"""
+
+
+def test_express_middleware_cors_and_cookies(tmp_path):
+    root = write(tmp_path / "repo", {"server.js": EXPRESS_APP, "package.json": '{"name": "shop"}'})
+    findings = [*HEADERS, finding("SEC-CORS"), finding("SEC-DISCLOSURE", evidence=["x-powered-by: Express"]),
+                finding("SEC-COOKIE-FLAGS", component="https://shop.example/ (cookie: session)")]
+    result = build_patch(root, findings, SITE)
+    text = result.patch
+    assert result.frameworks == ["express"]
+    assert '+app.disable("x-powered-by");' in text
+    assert '+  res.setHeader("X-Frame-Options", "DENY");' in text
+    # The origin is narrowed; credentials stay off as they were (cors() sends none)
+    assert 'cors({ origin: ["https://shop.example"] })' in text and "credentials" not in text
+    assert 'res.cookie("session", token, { httpOnly: true, secure: true, sameSite: "lax" });' in text
+    assert result.manual == []
+    if shutil.which("node"):
+        assert result.files[0].verified is True
+    git_apply(root, text)
+
+
+def test_nginx_when_there_is_no_app_code(tmp_path):
+    root = write(tmp_path / "repo", {"deploy/nginx.conf": """
+        events {}
+        http {
+            server {
+                listen 80;
+                add_header X-Frame-Options SAMEORIGIN;
+                location / { root /srv; }
+            }
+        }
+    """})
+    result = build_patch(root, [*HEADERS, finding("SEC-DISCLOSURE", evidence=["server: nginx/1.25"])], SITE)
+    text = result.patch
+    assert result.frameworks == ["nginx"]
+    assert '+        add_header X-Frame-Options "DENY" always;' in text  # existing line updated
+    assert '+        add_header X-Content-Type-Options "nosniff" always;' in text
+    assert "+        server_tokens off;" in text
+    assert result.files[0].verified is None  # no checker for nginx
+    git_apply(root, text)
+
+
+def test_unsupported_findings_and_repos_explain_why(tmp_path):
+    root = write(tmp_path / "repo", {"README.md": "docs only"})
+    result = build_patch(root, [*HEADERS, finding("SEC-TRANSPORT-HTTP")], SITE)
+    assert result.files == [] and result.patch == ""
+    reasons = {m.check_id: m.reason for m in result.manual}
+    assert "SEC-TRANSPORT-HTTP" in reasons
+    assert "No supported app" in reasons["SEC-HDR-FRAME"]
+
+
+def test_disclosure_evidence_accepts_a_plain_string():
+    """A scanner may return evidence as text rather than a list of entries."""
+    fix, manual = fixes_for([finding("SEC-DISCLOSURE", evidence="Server: nginx/1.25")])
+    assert fix.remove_headers == {"Server"}
+    assert manual == []
+
+
+def test_disclosure_evidence_accepts_list_entries():
+    fix, manual = fixes_for([finding("SEC-DISCLOSURE", evidence=["x-powered-by: Express"])])
+    assert fix.remove_headers == {"X-Powered-By"}
+    assert manual == []
+
+
+def test_findings_group_into_one_fix():
+    fix, manual = fixes_for([finding("SEC-HDR-CSP"), finding("SEC-DISCLOSURE", evidence=["x-powered-by: PHP"]),
+                             finding("SEC-MIXED-CONTENT")])
+    assert "Content-Security-Policy" in fix.set_headers
+    assert fix.remove_headers == {"X-Powered-By"}
+    assert [m.check_id for m in manual] == ["SEC-MIXED-CONTENT"]
+
+
+def test_skips_dependencies_tests_and_unparsable_files(tmp_path):
+    root = write(tmp_path / "repo", {
+        "node_modules/pkg/server.js": EXPRESS_APP,
+        "tests/test_app.py": FASTAPI_APP,
+        "broken.py": "def (:\n",
+        "src/main.py": FASTAPI_APP,
+    })
+    result = build_patch(root, HEADERS, SITE)
+    assert [f.path for f in result.files] == ["src/main.py"]
+
+
+def test_inserted_hook_is_separated_from_following_code_and_names_only_its_checks(tmp_path):
+    root = write(tmp_path / "repo", {"main.py": FASTAPI_APP})
+    result = build_patch(root, [finding("SEC-HDR-FRAME"), finding("SEC-TRANSPORT-HTTP")], SITE)
+    git_apply(root, result.patch)
+    text = (root / "main.py").read_text()
+    assert "    return response\n\n\napp.add_middleware" in text
+    assert "(SEC-HDR-FRAME)" in text and "SEC-TRANSPORT-HTTP" not in text
+
+
+def test_flask_app_factory_gets_a_nested_hook(tmp_path):
+    root = write(tmp_path / "repo", {"app/__init__.py": """
+        from flask import Flask
+
+
+        def create_app(config_class=None):
+            app = Flask(__name__)
+            app.config.from_object(config_class)
+
+            @app.route("/")
+            def home():
+                return "ok"
+
+            return app
+    """})
+    result = build_patch(root, HEADERS, SITE)
+    assert result.frameworks == ["flask"] and result.files[0].verified is True
+    assert "+    @app.after_request" in result.patch
+    git_apply(root, result.patch)
+    if importlib.util.find_spec("flask"):
+        module = load(root / "app" / "__init__.py", "patched_flask_factory")
+        client = module.create_app().test_client()
+        assert client.get("/").headers["X-Frame-Options"] == "DENY"
+
+
+def test_fastapi_get_application_factory(tmp_path):
+    root = write(tmp_path / "repo", {"app/main.py": """
+        from fastapi import FastAPI
+
+
+        def get_application() -> FastAPI:
+            application = FastAPI(title="Conduit")
+
+            @application.get("/")
+            def home():
+                return {"ok": True}
+
+            return application
+
+
+        app = get_application()
+    """})
+    result = build_patch(root, HEADERS, SITE)
+    assert result.frameworks == ["fastapi"] and result.files[0].verified is True
+    git_apply(root, result.patch)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(load(root / "app" / "main.py", "patched_fastapi_factory").app)
+    assert client.get("/").headers["x-content-type-options"] == "nosniff"
+    # a second patch extends the nested hook instead of adding another
+    again = build_patch(root, [finding("SEC-HDR-CSP")], SITE)
+    assert "@application.middleware" not in again.patch and "Content-Security-Policy" in again.patch
+
+
+def test_typescript_express_patches_are_syntax_checked(tmp_path):
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
+    root = write(tmp_path / "repo", {"src/main.ts": """
+        import express, { Express } from "express";
+
+        const app: Express = express();
+        app.get("/", (req, res) => res.send("ok"));
+        app.listen(3000);
+    """})
+    result = build_patch(root, HEADERS, SITE)
+    assert result.frameworks == ["express"]
+    assert result.files[0].verified in (True, None)  # None only on Node older than 22.13
+    if result.files[0].verified is None:
+        assert "Node 22.13" in result.files[0].check_note
+
+
+def test_dependency_bump_package_json(tmp_path):
+    root = write(tmp_path / "repo", {"package.json": """{
+  "name": "shop-app",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "react": "18.2.0"
+  }
+}
+"""})
+    findings = [
+        finding("SEC-DEP-GHSA-aaaa", recommendation="Upgrade axios to 1.8.2 or later.", package="axios", fixed_in="1.8.2"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert [f.path for f in result.files] == ["package.json"]
+    assert result.files[0].verified is True
+    assert '"axios": "^1.8.2"' in result.patch
+    assert result.manual == []
+    assert len(result.applied) == 1
+    assert result.applied[0].check_id == "SEC-DEP-GHSA-aaaa"
+
+    git_apply(root, result.patch)
+    import json
+    content = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    assert content["dependencies"]["axios"] == "^1.8.2"
+    assert content["dependencies"]["react"] == "18.2.0"
+
+
+def test_dependency_bump_requirements_txt(tmp_path):
+    root = write(tmp_path / "repo", {"requirements.txt": """Flask==2.2.2
+requests>=2.25.0
+gunicorn[gevent]==21.2.0
+"""})
+    findings = [
+        finding("SEC-DEP-FLASK-01", recommendation="Upgrade Flask to 2.2.5 or later.", package="Flask", fixed_in="2.2.5"),
+        finding("SEC-DEP-GUNICORN-01", recommendation="Upgrade gunicorn to 21.2.2 or later.", package="gunicorn", fixed_in="21.2.2"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert [f.path for f in result.files] == ["requirements.txt"]
+    assert result.files[0].verified is True
+    assert "+Flask==2.2.5" in result.patch
+    assert "+gunicorn[gevent]==21.2.2" in result.patch
+    assert result.manual == []
+
+    git_apply(root, result.patch)
+    text = (root / "requirements.txt").read_text(encoding="utf-8")
+    assert "Flask==2.2.5\n" in text
+    assert "gunicorn[gevent]==21.2.2\n" in text
+    assert "requests>=2.25.0\n" in text
+
+
+def test_dependency_bump_pyproject_toml(tmp_path):
+    root = write(tmp_path / "repo", {"pyproject.toml": """[project]
+name = "shop"
+version = "0.1.0"
+dependencies = [
+    "flask>=2.2.0,<3.0",
+    "requests==2.25.0",
+]
+"""})
+    findings = [
+        finding("SEC-DEP-REQ-01", recommendation="Upgrade requests to 2.31.0 or later.", package="requests", fixed_in="2.31.0"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert [f.path for f in result.files] == ["pyproject.toml"]
+    assert result.files[0].verified is True
+    assert '"requests==2.31.0"' in result.patch
+
+    git_apply(root, result.patch)
+    import tomllib
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "requests==2.31.0" in data["project"]["dependencies"]
+
+
+def test_dependency_bump_pep503_canonical_matching_requirements(tmp_path):
+    # Tests matching across hyphens, underscores, dots, and casing (PEP 503)
+    root = write(tmp_path / "repo", {"requirements.txt": """flask-cors==3.0.10
+Zope_Interface==5.4.0
+"""})
+    findings = [
+        finding("SEC-DEP-CORS-01", recommendation="Upgrade Flask_Cors to 4.0.0 or later.", package="Flask_Cors", fixed_in="4.0.0"),
+        finding("SEC-DEP-ZOPE-01", recommendation="Upgrade zope.interface to 6.0.0 or later.", package="zope.interface", fixed_in="6.0.0"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert [f.path for f in result.files] == ["requirements.txt"]
+    assert result.files[0].verified is True
+    assert "+flask-cors==4.0.0" in result.patch
+    assert "+Zope_Interface==6.0.0" in result.patch
+    assert result.manual == []
+
+    git_apply(root, result.patch)
+    text = (root / "requirements.txt").read_text(encoding="utf-8")
+    assert "flask-cors==4.0.0\n" in text
+    assert "Zope_Interface==6.0.0\n" in text
+
+
+def test_dependency_bump_pep503_canonical_matching_pyproject(tmp_path):
+    root = write(tmp_path / "repo", {"pyproject.toml": """[project]
+name = "shop"
+version = "0.1.0"
+dependencies = [
+    "flask_cors==3.0.10",
+]
+
+[tool.poetry.dependencies]
+zope-interface = "^5.4.0"
+"""})
+    findings = [
+        finding("SEC-DEP-CORS-01", recommendation="Upgrade Flask-Cors to 4.0.0 or later.", package="Flask-Cors", fixed_in="4.0.0"),
+        finding("SEC-DEP-ZOPE-01", recommendation="Upgrade zope_interface to 6.0.0 or later.", package="zope_interface", fixed_in="6.0.0"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert [f.path for f in result.files] == ["pyproject.toml"]
+    assert result.files[0].verified is True
+    assert result.manual == []
+
+    git_apply(root, result.patch)
+    import tomllib
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "flask_cors==4.0.0" in data["project"]["dependencies"]
+    assert data["tool"]["poetry"]["dependencies"]["zope-interface"] == "^6.0.0"
+
+
+def test_dependency_bump_no_fixed_version_goes_to_manual(tmp_path):
+    root = write(tmp_path / "repo", {"requirements.txt": "evil-pkg==1.0.0\n"})
+    findings = [
+        finding("SEC-DEP-EVIL-01", recommendation="No fixed version of evil-pkg is published yet; see advisory for workarounds."),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert result.files == []
+    assert len(result.manual) == 1
+    assert result.manual[0].check_id == "SEC-DEP-EVIL-01"
+    assert "No fixed version" in result.manual[0].reason
+
+
+def test_dependency_bump_not_found_in_manifest_goes_to_manual(tmp_path):
+    root = write(tmp_path / "repo", {"requirements.txt": "Flask==2.2.2\n"})
+    findings = [
+        finding("SEC-DEP-MISSING-01", recommendation="Upgrade non-existent-pkg to 1.2.3 or later.", package="non-existent-pkg", fixed_in="1.2.3"),
+    ]
+    result = build_patch(root, findings, SITE)
+    assert result.files == []
+    assert len(result.manual) == 1
+    assert result.manual[0].check_id == "SEC-DEP-MISSING-01"
+    assert "No supported editable declaration" in result.manual[0].reason
+
+
+@pytest.mark.parametrize("target_inside", [False, True])
+def test_patch_scan_ignores_symlinked_source_files(tmp_path, target_inside):
+    root = tmp_path / "repo"
+    root.mkdir()
+    target = (root if target_inside else tmp_path) / "source.txt"
+    target.write_text("from fastapi import FastAPI\napp = FastAPI()\n", encoding="utf-8")
+    (root / "main.py").symlink_to(target)
+
+    result = build_patch(root, HEADERS, SITE)
+
+    assert result.files == []
+    assert result.applied == []
+    assert result.frameworks == []
+    assert len(result.manual) == len(HEADERS)
+    assert target.read_text(encoding="utf-8") == "from fastapi import FastAPI\napp = FastAPI()\n"
+
+
+def test_patch_scan_ignores_symlinked_dependency_manifest(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    target = tmp_path / "requirements.txt"
+    target.write_text("Flask==2.2.2\n", encoding="utf-8")
+    (root / "requirements.txt").symlink_to(target)
+
+    result = build_patch(root, [finding("SEC-DEP-FLASK", package="Flask", fixed_in="2.2.5")], SITE)
+
+    assert result.files == []
+    assert result.applied == []
+    assert len(result.manual) == 1
+    assert target.read_text(encoding="utf-8") == "Flask==2.2.2\n"
+
+
+def test_patch_scan_ignores_symlinked_directories_and_broken_links(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = write(tmp_path / "outside", {"main.py": FASTAPI_APP})
+    (root / "app").symlink_to(outside, target_is_directory=True)
+    (root / "main.py").symlink_to(tmp_path / "missing.py")
+
+    result = build_patch(root, HEADERS, SITE)
+
+    assert result.files == []
+    assert result.frameworks == []
+
+
+def test_patch_scan_ignores_special_files(tmp_path):
+    import os
+
+    from security.patcher import _files
+
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("Named pipes are not supported on this platform")
+    os.mkfifo(tmp_path / "main.py")
+
+    assert _files(tmp_path, (".py",)) == []
+
+
+@pytest.mark.parametrize("version", [
+    "2.2.5\n--extra-index-url https://untrusted.example/simple",
+    "2.2.5;python_version<'0'", "https://untrusted.example/pkg.tgz",
+    "file:../outside", "2.2.5\\g<1>", '2.2.5"', "2.2.5\x00", {"version": "2.2.5"},
+])
+def test_unsafe_dependency_versions_require_manual_review(tmp_path, version):
+    root = write(tmp_path / "repo", {"requirements.txt": "Flask==2.2.2\n"})
+    result = build_patch(root, [finding("SEC-DEP-FLASK", package="Flask", fixed_in=version)], SITE)
+
+    assert result.files == []
+    assert result.applied == []
+    assert len(result.manual) == 1
+    assert "manual review" in result.manual[0].reason.lower()
+
+
+@pytest.mark.parametrize("package", ["../Flask", "Flask\nother", ["Flask"]])
+def test_unsafe_dependency_names_require_manual_review(package):
+    fix, manual = fixes_for([finding("SEC-DEP-FLASK", package=package, fixed_in="2.2.5")])
+
+    assert fix.dependencies == []
+    assert len(manual) == 1
+    assert "manual review" in manual[0].reason.lower()
+
+
+def test_dependency_recommendation_cannot_introduce_a_remote_package():
+    fix, manual = fixes_for([finding(
+        "SEC-DEP-FLASK", recommendation="Upgrade Flask to https://untrusted.example/pkg.tgz or later.",
+    )])
+
+    assert fix.dependencies == []
+    assert len(manual) == 1
+
+
+@pytest.mark.parametrize(("package", "version"), [
+    ("Flask", "2.2.5"), ("@scope/package", "1.2.3-beta.1+build.7"),
+    ("my_package", "1!2.3.4.post1"), ("my-package", "v1.2.3"),
+])
+def test_supported_dependency_name_and_version_tokens(package, version):
+    fix, manual = fixes_for([finding("SEC-DEP-VALID", package=package, fixed_in=version)])
+
+    assert fix.dependencies == [("SEC-DEP-VALID", package, version)]
+    assert manual == []
+
+
+def test_package_bump_only_edits_dependency_sections(tmp_path):
+    import json
+
+    original = '''{
+  "scripts": {"axios": "node axios.js"},
+  "custom": {"dependencies": {"axios": "leave-me-alone"}},
+  "dependencies": {"axios": "^1.6.2", "react": "18.2.0"},
+  "devDependencies": {"axios": "~1.6.2"},
+  "peerDependencies": {"axios": ">=1.6.2"},
+  "optionalDependencies": {"axios": "1.6.2"}
+}
+'''
+    root = write(tmp_path / "repo", {"package.json": original})
+    findings = [finding("SEC-DEP-AXIOS", package="axios", fixed_in="1.8.2")]
+
+    result = build_patch(root, findings, SITE)
+
+    assert len(result.files) == 1
+    expected = original.replace("1.6.2", "1.8.2")
+    assert result.files[0].content == expected
+    assert json.loads(expected)["scripts"]["axios"] == "node axios.js"
+    git_apply(root, result.patch)
+    assert (root / "package.json").read_text(encoding="utf-8") == expected
+    assert build_patch(root, findings, SITE).files == []
+
+
+@pytest.mark.parametrize("content", ["[]", "null", '"text"', "42", '{"dependencies": []}'])
+def test_non_object_package_manifests_require_manual_review(tmp_path, content):
+    root = write(tmp_path / "repo", {"package.json": content + "\n"})
+
+    result = build_patch(root, [finding("SEC-DEP-AXIOS", package="axios", fixed_in="1.8.2")], SITE)
+
+    assert result.files == []
+    assert len(result.manual) == 1
+
+
+@pytest.mark.parametrize("spec", [None, {"version": "1.6.2"}, "file:../axios", "npm:other-package@1.6.2", "^1.6.2 || ^2.0.0"])
+def test_package_bump_leaves_unsupported_specs_for_manual_review(tmp_path, spec):
+    import json
+
+    root = write(tmp_path / "repo", {"package.json": json.dumps({"dependencies": {"axios": spec}}) + "\n"})
+
+    result = build_patch(root, [finding("SEC-DEP-AXIOS", package="axios", fixed_in="1.8.2")], SITE)
+
+    assert result.files == []
+    assert len(result.manual) == 1
+
+
+def test_package_bump_handles_escaped_json_keys():
+    from security.patcher import _patch_package_json
+
+    original = r'{"dependencies": {"\u0061xios": "^1.6.2"}}'
+    content, changed = _patch_package_json(original, "axios", "1.8.2")
+
+    assert changed is True
+    assert content == original.replace("1.6.2", "1.8.2")
+
+
+@pytest.mark.parametrize("original", [
+    '{"dependencies":{"axios":"1.6.2","axios":"1.6.3"}}',
+    '{"dependencies":{"axios":"1.6.2"},"dependencies":{"axios":"1.6.3"}}',
+])
+def test_package_bump_refuses_duplicate_json_keys(original):
+    from security.patcher import _patch_package_json
+
+    assert _patch_package_json(original, "axios", "1.8.2") == (original, False)
+
+
+@pytest.mark.parametrize("malformed", [None, [], "bad", {}, {"check_id": None}, {"check_id": []}, {"check_id": ""}])
+def test_malformed_findings_do_not_block_valid_repairs(tmp_path, malformed):
+    root = write(tmp_path / "repo", {"main.py": FASTAPI_APP})
+
+    result = build_patch(root, [malformed, finding("SEC-HDR-FRAME")], SITE)
+
+    assert len(result.manual) == 1
+    assert result.manual[0].check_id == "INVALID-FINDING"
+    assert "manual review" in result.manual[0].reason.lower()
+    assert {item.check_id for item in result.applied} == {"SEC-HDR-FRAME"}
+    assert result.files[0].verified is True
+
+
+@pytest.mark.parametrize("field", ["recommendation", "component", "title"])
+@pytest.mark.parametrize("value", [42, ["value"], {"value": "text"}])
+def test_malformed_finding_text_fields_require_manual_review(field, value):
+    fix, manual = fixes_for([finding("SEC-DEP-BAD", **{field: value})])
+
+    assert fix.dependencies == []
+    assert len(manual) == 1
+    assert manual[0].check_id == "SEC-DEP-BAD"
+    assert field in manual[0].reason
+
+
+def test_whitespace_dependency_title_requires_manual_review():
+    fix, manual = fixes_for([finding("SEC-DEP-BAD", title="   ", fixed_in="1.2.3")])
+
+    assert fix.dependencies == []
+    assert len(manual) == 1
+
+
+def test_nextjs_config_gets_headers_and_no_powered_by(tmp_path):
+    root = write(tmp_path / "repo", {
+        "next.config.mjs": """
+            /** @type {import('next').NextConfig} */
+            export default {
+              reactStrictMode: true,
+            };
+        """,
+        "package.json": '{"name": "shop", "dependencies": {"next": "15.0.0"}}',
+    })
+    result = build_patch(root, [*HEADERS, finding("SEC-DISCLOSURE", evidence=["x-powered-by: Next.js"])], SITE)
+    text = result.patch
+    assert result.frameworks == ["nextjs"]
+    assert "+  poweredByHeader: false," in text
+    assert '+      { key: "X-Frame-Options", value: "DENY" },' in text
+    assert result.manual == []
+    git_apply(root, text)
+    if shutil.which("node"):
+        assert result.files[0].verified is True
+        # The patched config really answers every path with the headers
+        script = ("import(process.argv[1]).then(async (m) => console.log(JSON.stringify("
+                  "{ powered: m.default.poweredByHeader, rules: await m.default.headers() })));")
+        out = subprocess.run(["node", "-e", script, (root / "next.config.mjs").as_uri()],
+                             capture_output=True, text=True, timeout=30, check=True).stdout
+        loaded = json.loads(out)
+        assert loaded["powered"] is False
+        assert loaded["rules"][0]["source"] == "/(.*)"
+        assert {"key": "X-Content-Type-Options", "value": "nosniff"} in loaded["rules"][0]["headers"]
+
+
+def test_nextjs_typescript_config(tmp_path):
+    root = write(tmp_path / "repo", {"next.config.ts": """
+        import type { NextConfig } from "next";
+
+        const nextConfig: NextConfig = {
+          images: { unoptimized: true },
+        };
+
+        export default nextConfig;
+    """})
+    result = build_patch(root, HEADERS, SITE)
+    assert "+  async headers() {" in result.patch
+    git_apply(root, result.patch)
+
+
+def test_nextjs_config_with_its_own_headers_is_left_to_a_manual_change(tmp_path):
+    root = write(tmp_path / "repo", {"next.config.js": """
+        module.exports = {
+          async headers() {
+            return [{ source: "/api/(.*)", headers: [{ key: "Cache-Control", value: "no-store" }] }];
+          },
+        };
+    """})
+    result = build_patch(root, HEADERS, SITE)
+    assert result.files == []  # never merged into a headers() it did not write
+    assert {m.check_id for m in result.manual} == {"SEC-HDR-FRAME", "SEC-HDR-XCTO", "SEC-HDR-REFERRER"}

@@ -1,0 +1,8 @@
+[Unit]
+Description=TestSphere disk cleanup (Docker images, build cache, leftover checkouts)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/testsphere/app/deploy/aws-ec2/housekeeping.sh

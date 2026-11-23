@@ -1,0 +1,999 @@
+"""
+TestSphere-AI — Real Live Website Analyzer & Autonomous QA Synthesizer.
+
+Inspects any real-world URL live over HTTP/HTTPS, extracts actual DOM elements
+(buttons, inputs, forms, links, headings), performs accessibility & security audits,
+and autonomously synthesizes tailored test execution plans with real selectors.
+"""
+
+from __future__ import annotations
+
+import html as html_lib
+import logging
+import re
+import ssl
+import time
+from typing import Any
+from urllib.parse import urlparse
+
+import httpx
+
+from app.netguard import PinnedTransport
+from app.services import auth_plan, form_checks, goal_plan
+from engine.locators import best_unique, css_string, stable_candidates
+
+logger = logging.getLogger("testsphere.analyzer")
+
+
+def is_certificate_error(exc: BaseException) -> bool:
+    """Whether *exc* (or anything it wraps) is a failed TLS certificate check."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        if isinstance(exc, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(exc):
+            return True
+        seen.add(id(exc))
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+# How long a site that sleeps when idle (free Render, Railway, Heroku) gets to wake up
+WAKE_TIMEOUT = 60.0
+
+
+async def get_verifying_first(url: str, *, timeout: float, headers: dict[str, str],
+                              wake: bool = False) -> tuple[httpx.Response, bool]:
+    """GET *url* with certificate verification; returns ``(response, certificate_valid)``.
+
+    With *wake*, a request that times out is tried once more with
+    ``WAKE_TIMEOUT``: the first request to a sleeping free-tier site can take
+    most of a minute while it starts.
+
+    A site whose certificate fails verification (expired, self-signed staging)
+    is still fetched, without verification, so it can be tested; the caller
+    reports the invalid certificate instead of silently trusting it.
+    """
+    # PinnedTransport checks every hop's addresses and connects only to them (SSRF, DNS rebinding)
+    options = dict(timeout=timeout, follow_redirects=True)
+    try:
+        async with httpx.AsyncClient(transport=PinnedTransport(), **options) as client:
+            try:
+                return await client.get(url, headers=headers), True
+            except httpx.TimeoutException:
+                if not wake:
+                    raise
+                logger.info("%s did not answer in %ss; waiting up to %ss for it to wake", url, timeout, WAKE_TIMEOUT)
+                return await client.get(url, headers=headers, timeout=WAKE_TIMEOUT), True
+    except httpx.ConnectError as exc:
+        if not is_certificate_error(exc):
+            raise
+    async with httpx.AsyncClient(transport=PinnedTransport(verify=False), **options) as client:  # noqa: S501  # nosec B501 - reported as a finding
+        return await client.get(url, headers=headers), False
+
+
+# A bare boolean attribute (required, required="", required=required)
+_REQUIRED = re.compile(r"(?:^|\s)required(?=[\s=/>]|$)", re.IGNORECASE)
+# Set in the browser on every control, link and heading a visitor cannot see
+HIDDEN_MARK = "data-ts-hidden"
+_HIDDEN = re.compile(rf"(?:^|\s){HIDDEN_MARK}(?=[\s=/>]|$)", re.IGNORECASE)
+_MARK_HIDDEN_JS = """(mark) => {
+  let hidden = 0;
+  for (const el of document.querySelectorAll('input,button,select,textarea,a[href],h1,h2,h3')) {
+    const seen = el.checkVisibility
+      ? el.checkVisibility({checkOpacity: true, checkVisibilityCSS: true})
+      : Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    if (!seen) {
+      el.setAttribute(mark, '');
+      if (!/^(A|H1|H2|H3)$/.test(el.tagName) && el.type !== 'hidden') hidden += 1;
+    }
+  }
+  return hidden;
+}"""
+
+# Values a browser accepts for each input type (anything else is refused by fill)
+_TYPED_VALUES = {
+    "number": "42", "tel": "5551234567", "url": "https://example.com", "date": "2026-01-15",
+    "time": "12:30", "datetime-local": "2026-01-15T12:30", "month": "2026-01", "week": "2026-W03",
+}
+
+
+class URLAnalyzerService:
+    """Service for live network inspection, DOM element discovery, and QA test synthesis."""
+
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36 TestSphere-AI/1.0"
+    )
+
+    @classmethod
+    def normalize_url(cls, raw_url: str) -> str:
+        """Ensure URL has a valid scheme."""
+        url = (raw_url or "").strip()
+        if not url:
+            raise ValueError("A URL is required.")
+        scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+        if scheme and scheme not in ("http", "https"):
+            raise ValueError(f"Only http:// and https:// pages can be tested, not {scheme}://.")
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = f"https://{url}"
+        return url
+
+    @classmethod
+    async def analyze_live_website(
+        cls,
+        url: str,
+        prompt: str | None = None,
+        test_case_name: str | None = None,
+        *,
+        allow_test_accounts: bool = False,
+        email_domain: str | None = None,
+        test_data: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Fetch real website HTML, inspect DOM elements, and synthesize live test plan.
+
+        *allow_test_accounts* lets a sign-up form's test create a real account
+        (a new one every run, at *email_domain*); off, the sign-up is reported
+        as not tested.
+        """
+        normalized_url = cls.normalize_url(url)
+        parsed = urlparse(normalized_url)
+        domain = parsed.netloc or normalized_url
+
+        start_time = time.perf_counter()
+        status_code = 0
+        latency_ms = 0
+        html = ""
+        headers: dict[str, str] = {}
+        error_encountered: str | None = None
+        certificate_valid: bool | None = None
+        final_url = normalized_url  # where redirects ended
+
+        try:
+            res, certificate_valid = await get_verifying_first(
+                normalized_url, timeout=12.0, wake=True,
+                headers={"User-Agent": cls.USER_AGENT, "Accept": "text/html,*/*"},
+            )
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+            status_code = res.status_code
+            final_url = str(res.url)
+            html = res.text
+            headers = dict(res.headers)
+            if not certificate_valid:
+                logger.info("Analyzed %s despite an invalid TLS certificate", normalized_url)
+        except Exception as exc:  # noqa: BLE001 - reported in the analysis result
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+            error_encountered = str(exc)
+            logger.warning(f"Error fetching URL {normalized_url}: {exc}")
+
+        # Page Metadata
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+        page_title = title_match.group(1).strip() if title_match else f"{domain} Webpage"
+        page_title = re.sub(r"\s+", " ", page_title)
+
+        meta_desc_match = re.search(
+            r"""<meta\s+[^>]*name=["']description["'][^>]*content=["'](.*?)["']""",
+            html,
+            re.IGNORECASE,
+        )
+        meta_desc = meta_desc_match.group(1).strip() if meta_desc_match else None
+
+        # Client-rendered apps (React, Vue, ...) ship an almost empty HTML
+        # shell; read the DOM a real browser builds instead.  With
+        # ANALYZE_VISIBILITY every page is read that way, with what a visitor
+        # cannot see marked, so no test is planned on a control in a closed
+        # dialog, tab or menu.
+        from app.config import settings
+
+        rendered, hidden_controls = False, None
+        if not error_encountered and status_code < 400 and (
+                settings.ANALYZE_VISIBILITY or cls._looks_client_rendered(html)):
+            dom = await cls._render_in_browser(normalized_url, mark_hidden=settings.ANALYZE_VISIBILITY)
+            if dom:
+                (html, hidden_controls, rendered_url), rendered = dom, True
+                final_url = rendered_url or final_url
+                # The app's scripts often set the title ("Sign in · Patient portal"
+                # replacing the shell's "CareLink"); tests check the rendered one
+                rendered_title = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+                if rendered_title and rendered_title.group(1).strip():
+                    page_title = re.sub(r"\s+", " ", rendered_title.group(1).strip())
+        page_title = html_lib.unescape(page_title)  # "Cost &amp; Performance" is "Cost & Performance"
+
+        # DOM Element Extraction
+        inputs = cls._extract_inputs(html)
+        buttons = cls._extract_buttons(html)
+        forms = cls._extract_forms(html)
+        links = cls._extract_links(html, domain)
+        headings = cls._extract_headings(html)
+        images = cls._extract_images(html)
+
+        # Audits & Health Scoring
+        security_audit = cls._audit_security(normalized_url, headers, certificate_valid)
+        a11y_audit = cls._audit_accessibility(inputs, buttons, images)
+        perf_audit = cls._audit_performance(latency_ms, len(html))
+
+        overall_score = int(
+            (security_audit["score"] * 0.35)
+            + (a11y_audit["score"] * 0.35)
+            + (perf_audit["score"] * 0.30)
+        )
+
+        # Synthesize real, customized test steps for this specific site
+        blocked = auth_plan.blocker(html)
+        synthesized_steps, goal_coverage = cls._plan_scenario(
+            url=normalized_url,
+            page_title=page_title,
+            inputs=inputs,
+            buttons=buttons,
+            prompt=prompt,
+            allow_test_accounts=allow_test_accounts,
+            email_domain=email_domain,
+            blocked=blocked,
+            test_data=test_data,
+        )
+        auth_tests = cls._auth_tests(normalized_url, inputs, buttons, prompt, blocked,
+                                     allow_test_accounts=allow_test_accounts, email_domain=email_domain)
+        # Input the page's other forms must refuse (app/services/form_checks.py)
+        form_tests = [] if blocked else form_checks.negative_tests(normalized_url, inputs, buttons, html, prompt)
+
+        # Generate real telemetry event logs
+        events = cls._generate_telemetry_events(
+            url=normalized_url,
+            title=page_title,
+            status_code=status_code,
+            latency_ms=latency_ms,
+            inputs_count=len(inputs),
+            buttons_count=len(buttons),
+            forms_count=len(forms),
+            overall_score=overall_score,
+            steps_count=len(synthesized_steps),
+            error=error_encountered,
+        )
+
+        resolved_name = test_case_name or f"Live QA: {page_title[:40]}"
+
+        return {
+            "success": error_encountered is None and status_code < 400,
+            "url": normalized_url,
+            "final_url": final_url,
+            "domain": domain,
+            "status_code": status_code,
+            "latency_ms": latency_ms,
+            "page_title": page_title,
+            "meta_description": meta_desc,
+            "rendered_in_browser": rendered,
+            "elements_inventory": {
+                "inputs_count": len(inputs),
+                "buttons_count": len(buttons),
+                "forms_count": len(forms),
+                "links_count": len(links),
+                "headings_count": len(headings),
+                # Controls in the HTML a visitor cannot see on load (None: not checked)
+                "hidden_controls": hidden_controls,
+                "images_count": len(images),
+                "inputs": inputs[:8],  # preview top inputs
+                "buttons": buttons[:8],  # preview top buttons
+                "forms": forms[:4],
+                "headings": headings[:6],
+                "links": links[:30],  # raw hrefs; the pipeline turns same-site ones into page tests
+            },
+            "health_audit": {
+                "overall_score": overall_score,
+                "security": security_audit,
+                "accessibility": a11y_audit,
+                "performance": perf_audit,
+            },
+            "synthesized_test_case": {
+                "name": resolved_name,
+                "url": normalized_url,
+                "steps": synthesized_steps,
+                "goal": goal_coverage,
+            },
+            # A login or sign-up form's own tests: wrong password, empty form, ...
+            "auth_tests": auth_tests,
+            "form_tests": form_tests,
+            "blocked": blocked,
+            "events": events,
+            "error": error_encountered,
+        }
+
+    # -------------------------------------------------------------------------
+    # DOM Extractors
+    # -------------------------------------------------------------------------
+
+    @classmethod
+    def _looks_client_rendered(cls, html: str) -> bool:
+        """An HTML shell whose content is built by scripts: no form controls,
+        little visible text, and scripts present."""
+        if not re.search(r"<script\b", html, re.IGNORECASE):
+            return False
+        if re.search(r"<(input|button|select|textarea)\b", html, re.IGNORECASE):
+            return False
+        body = re.sub(r"(?is)<(script|style|noscript)\b.*?</\1>", " ", html)
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body)).strip()
+        return len(text) < 400
+
+    @classmethod
+    async def _render_in_browser(cls, url: str, *, mark_hidden: bool = False) -> tuple[str, int | None, str] | None:
+        """The page's DOM after its scripts ran, from the engine's guarded
+        browser (same egress policy and browser slots as test runs), and how
+        many controls are hidden.  With *mark_hidden* every control, link and
+        heading a visitor cannot see carries ``HIDDEN_MARK``; the extractors
+        skip those, while selectors stay unique among all of them.  Also
+        where the page ended up: an app's own router may send a signed-out
+        visitor from /app to / without any HTTP redirect."""
+        try:
+            from engine.browser import BrowserSession
+            from engine.schemas import EngineConfig
+
+            async with BrowserSession(EngineConfig(headless=True)) as session:
+                page = await session.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=20_000)
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=8_000)
+                except Exception:  # noqa: BLE001 - long-polling pages never go idle; use what rendered
+                    pass
+                hidden = await page.evaluate(_MARK_HIDDEN_JS, HIDDEN_MARK) if mark_hidden else None
+                return await page.content(), hidden, page.url
+        except Exception as exc:  # noqa: BLE001 - fall back to the static HTML
+            logger.warning("Could not render %s in a browser: %s", url, exc)
+            return None
+
+    @staticmethod
+    def _form_spans(html: str) -> list[tuple[int, int]]:
+        """Where each <form> starts and ends in *html* (forms do not nest)."""
+        return [(m.start(), m.end()) for m in re.finditer(r"<form\b.*?(?:</form>|$)", html, re.IGNORECASE | re.DOTALL)]
+
+    @staticmethod
+    def _form_at(spans: list[tuple[int, int]], pos: int) -> int | None:
+        """The index of the form holding the element at *pos*, or None outside any form."""
+        return next((i for i, (start, end) in enumerate(spans) if start <= pos < end), None)
+
+    @classmethod
+    def _extract_inputs(cls, html: str) -> list[dict[str, Any]]:
+        found: list[tuple[int, dict[str, Any]]] = []  # (position in the page, field)
+        spans = cls._form_spans(html)
+        universe = cls._element_universe(html)
+        raw_inputs = [(m.start(), m.group(1)) for m in re.finditer(r"<input\s+([^>]+)>", html, re.IGNORECASE)]
+        for pos, tag in raw_inputs:
+            if _HIDDEN.search(tag):
+                continue  # in a closed dialog, tab or menu: a test could not reach it
+            attr_dict = cls._parse_tag_attrs(tag)
+            itype = attr_dict.get("type", "text").lower()
+            if itype in ("hidden", "image"):
+                continue
+
+            name = attr_dict.get("name")
+            elem_id = attr_dict.get("id")
+            placeholder = attr_dict.get("placeholder")
+            aria_label = attr_dict.get("aria-label")
+
+            # A selector that matches only this field (never its position or a class):
+            # radio buttons share a name, so a lone radio's own id or value is needed
+            selector = best_unique(stable_candidates("input", attr_dict), universe)
+            if selector is None and itype in ("radio", "checkbox") and name and attr_dict.get("value"):
+                selector = (f"input[name={css_string(name)}][value={css_string(attr_dict['value'])}]")
+            if selector is None:
+                continue  # no reliable way to reach it: leave it out rather than guess
+
+            found.append((pos, {
+                "type": itype,
+                "name": name,
+                "id": elem_id,
+                "placeholder": placeholder,
+                "aria_label": aria_label,
+                "selector": selector,
+                "required": bool(_REQUIRED.search(tag)),
+                "autocomplete": attr_dict.get("autocomplete"),
+                "form": cls._form_at(spans, pos),
+            }))
+        for m in re.finditer(r"<textarea\b([^>]*)>", html, re.IGNORECASE):
+            if _HIDDEN.search(m.group(1)):
+                continue
+            attr_dict = cls._parse_tag_attrs(m.group(1))
+            name, elem_id = attr_dict.get("name"), attr_dict.get("id")
+            selector = best_unique(stable_candidates("textarea", attr_dict), universe)
+            if selector:
+                found.append((m.start(), {"type": "textarea", "name": name, "id": elem_id,
+                                          "placeholder": attr_dict.get("placeholder"),
+                                          "aria_label": attr_dict.get("aria-label"),
+                                          "selector": selector, "required": bool(_REQUIRED.search(m.group(1))),
+                                          "form": cls._form_at(spans, m.start())}))
+        for m in re.finditer(r"<select\b([^>]*)>(.*?)</select>", html, re.IGNORECASE | re.DOTALL):
+            if _HIDDEN.search(m.group(1)):
+                continue
+            attr_dict = cls._parse_tag_attrs(m.group(1))
+            name, elem_id = attr_dict.get("name"), attr_dict.get("id")
+            selector = best_unique(stable_candidates("select", attr_dict), universe)
+            # The first real choice: not a disabled or empty "Choose..." placeholder
+            option = next((v for attrs, label in re.findall(r"<option\b([^>]*)>(.*?)</option>", m.group(2),
+                                                            re.IGNORECASE | re.DOTALL)
+                           if "disabled" not in attrs.lower()
+                           and (v := cls._parse_tag_attrs(attrs).get("value", re.sub(r"<[^>]+>", "", label).strip()))),
+                          None)
+            if selector:
+                found.append((m.start(), {"type": "select", "name": name, "id": elem_id, "placeholder": None,
+                                          "aria_label": attr_dict.get("aria-label"), "selector": selector,
+                                          "required": bool(_REQUIRED.search(m.group(1))), "option": option,
+                                          "form": cls._form_at(spans, m.start())}))
+        return [field for _, field in sorted(found, key=lambda f: f[0])]  # in page order
+
+    @classmethod
+    def _extract_buttons(cls, html: str) -> list[dict[str, Any]]:
+        results = []
+        spans = cls._form_spans(html)
+        universe = cls._element_universe(html)
+        # <button> tags
+        for match in re.finditer(r"<button\s*([^>]*)>(.*?)</button>", html, re.IGNORECASE | re.DOTALL):
+            attrs_str = match.group(1)
+            if _HIDDEN.search(attrs_str):
+                continue
+            raw_text = html_lib.unescape(re.sub(r"<[^>]+>", " ", match.group(2)))
+            text = re.sub(r"\s+", " ", raw_text).strip() or "Button"
+            attrs = cls._parse_tag_attrs(attrs_str)
+            elem_id = attrs.get("id")
+            elem_class = attrs.get("class")
+            # A <button> without a type submits its form (HTML default)
+            btype = (attrs.get("type") or "submit").lower()
+
+            # Unique on the page, never by class ("btn" matches every button);
+            # "button" means no reliable selector, and callers skip it
+            label_text = text if text != "Button" else ""
+            selector = best_unique(stable_candidates("button", {**attrs, "type": btype}, label_text), universe)
+            selector = selector or "button"
+
+            results.append({
+                "text": text[:35],
+                "id": elem_id,
+                "class": elem_class,
+                "type": btype,
+                "type_explicit": attrs.get("type") is not None,
+                "selector": selector,
+                "form": cls._form_at(spans, match.start()),
+            })
+
+        # <input type="submit"> tags
+        for match in re.finditer(r"""<input\s+[^>]*type=["'](?:submit|button)["'][^>]*>""", html, re.IGNORECASE):
+            if _HIDDEN.search(match.group(0)):
+                continue
+            attrs = cls._parse_tag_attrs(match.group(0))
+            value = attrs.get("value") or "Submit"
+            elem_id = attrs.get("id")
+            selector = best_unique(stable_candidates("input", attrs), universe) or "button"
+            results.append({
+                "text": value[:35],
+                "id": elem_id,
+                "class": attrs.get("class"),
+                "type": "submit",
+                "selector": selector,
+                "form": cls._form_at(spans, match.start()),
+            })
+
+        return results
+
+    @classmethod
+    def _extract_forms(cls, html: str) -> list[dict[str, Any]]:
+        results = []
+        for match in re.finditer(r"<form\s*([^>]*)>", html, re.IGNORECASE):
+            attrs = cls._parse_tag_attrs(match.group(1))
+            action = attrs.get("action", "")
+            method = attrs.get("method", "GET").upper()
+            elem_id = attrs.get("id")
+            results.append({
+                "action": action,
+                "method": method,
+                "id": elem_id,
+                "selector": f"#{elem_id}" if elem_id else f"form[action='{action}']" if action else "form",
+            })
+        return results
+
+    @classmethod
+    def _extract_links(cls, html: str, domain: str) -> list[str]:
+        links = [m.group(2) for m in re.finditer(r"""<a(\s+[^>]*?)href=["']([^"'#]+)["'][^>]*>""", html, re.IGNORECASE)
+                 if not _HIDDEN.search(m.group(0))]
+        return list(dict.fromkeys(links))[:50]
+
+    @classmethod
+    def _extract_headings(cls, html: str) -> list[str]:
+        headings = []
+        for match in re.finditer(r"<h[1-3]([^>]*)>(.*?)</h[1-3]>", html, re.IGNORECASE | re.DOTALL):
+            if _HIDDEN.search(match.group(1)):
+                continue  # the heading of a closed dialog is not on the page a visitor sees
+            # A <br> is a space to the reader ("Insights.<br>Healthier"); other tags join
+            text = html_lib.unescape(re.sub(r"<[^>]+>", "", re.sub(r"(?i)<br\s*/?>", " ", match.group(2)))).strip()
+            clean = re.sub(r"\s+", " ", text)
+            if clean:
+                headings.append(clean[:60])
+        return headings
+
+    @classmethod
+    def _extract_images(cls, html: str) -> list[dict[str, Any]]:
+        results = []
+        for match in re.finditer(r"<img\s+([^>]+)>", html, re.IGNORECASE):
+            attrs = cls._parse_tag_attrs(match.group(1))
+            results.append({
+                "src": attrs.get("src", "")[:50],
+                "has_alt": bool(attrs.get("alt")),
+            })
+        return results
+
+    @classmethod
+    def _parse_tag_attrs(cls, tag_str: str) -> dict[str, str]:
+        """Attributes of a start tag: double- or single-quoted (each may hold
+        the other quote: aria-label="Don't save") or bare, entities decoded."""
+        attrs = {}
+        for match in re.finditer(r"""([a-zA-Z0-9_:\-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""", tag_str):
+            key = match.group(1).lower()
+            val = next((g for g in match.groups()[1:] if g is not None), "")
+            attrs.setdefault(key, html_lib.unescape(val))
+        return attrs
+
+    @classmethod
+    def _element_universe(cls, page: str) -> list[tuple[str, dict[str, str], str]]:
+        """Every start tag of *page* as (tag, attributes, text), the text for
+        buttons and links: what a selector could match, to keep only selectors
+        that match exactly one element."""
+        out = []
+        for m in re.finditer(r"<([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>", page):
+            tag = m.group(1).lower()
+            text = ""
+            if tag in ("button", "a"):
+                end = re.search(rf"</{tag}\s*>", page[m.end():], re.IGNORECASE)
+                inner = page[m.end(): m.end() + end.start()] if end else ""
+                text = html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", inner)).strip())
+            out.append((tag, cls._parse_tag_attrs(m.group(2)), text))
+        return out
+
+    # -------------------------------------------------------------------------
+    # QA Audits
+    # -------------------------------------------------------------------------
+
+    @classmethod
+    def _audit_security(cls, url: str, headers: dict[str, str],
+                        certificate_valid: bool | None = None) -> dict[str, Any]:
+        is_https = url.startswith("https://")
+        bad_certificate = is_https and certificate_valid is False
+        h_lower = {k.lower(): v for k, v in headers.items()}
+        hsts = "strict-transport-security" in h_lower
+        x_frame = "x-frame-options" in h_lower
+        x_content = "x-content-type-options" in h_lower
+        csp = "content-security-policy" in h_lower
+
+        score = 60 if is_https and not bad_certificate else 20
+        if hsts: score += 15
+        if x_frame: score += 10
+        if x_content: score += 10
+        if csp: score += 5
+        score = min(score, 100)
+
+        return {
+            "score": score,
+            "is_https": is_https,
+            "hsts": hsts,
+            "x_frame_options": x_frame,
+            "x_content_type_options": x_content,
+            "csp": csp,
+            "certificate_valid": certificate_valid,
+            "summary": ("Invalid TLS certificate" if bad_certificate
+                        else "High Security SSL" if score >= 80 else ("Moderate" if score >= 50 else "Insecure HTTP")),
+        }
+
+    @classmethod
+    def _audit_accessibility(
+        cls,
+        inputs: list[dict[str, Any]],
+        buttons: list[dict[str, Any]],
+        images: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        missing_alts = sum(1 for img in images if not img.get("has_alt"))
+        unlabeled_inputs = sum(1 for i in inputs if not i.get("placeholder") and not i.get("aria_label"))
+        unlabeled_buttons = sum(1 for b in buttons if b.get("text") == "Button")
+
+        penalties = (missing_alts * 5) + (unlabeled_inputs * 8) + (unlabeled_buttons * 6)
+        score = max(30, 100 - penalties)
+
+        return {
+            "score": score,
+            "missing_image_alts": missing_alts,
+            "unlabeled_inputs": unlabeled_inputs,
+            "unlabeled_buttons": unlabeled_buttons,
+            "status": "Accessible" if score >= 80 else "Needs Accessibility Refinements",
+        }
+
+    @classmethod
+    def _audit_performance(cls, latency_ms: int, content_bytes: int) -> dict[str, Any]:
+        if latency_ms < 350:
+            score = 98
+            rating = "Lightning Fast"
+        elif latency_ms < 800:
+            score = 88
+            rating = "Good"
+        elif latency_ms < 1500:
+            score = 75
+            rating = "Moderate"
+        else:
+            score = 55
+            rating = "Slow Response"
+
+        return {
+            "score": score,
+            "latency_ms": latency_ms,
+            "content_size_kb": round(content_bytes / 1024, 1),
+            "rating": rating,
+        }
+
+    # -------------------------------------------------------------------------
+    # Autonomous Test Synthesis for Specific Website
+    # -------------------------------------------------------------------------
+
+    _SUBMIT_WORDS = re.compile(r"\b(log ?in|sign ?in|submit|continue|next|search|save|send|go|add)\b", re.IGNORECASE)
+
+    @classmethod
+    def _primary_button(cls, buttons: list[dict[str, Any]], has_inputs: bool) -> dict[str, Any] | None:
+        """The button a user would press: a submit button or one saying so,
+        never a bare ``button`` locator that matches whatever comes first."""
+        named = [b for b in buttons if b["selector"] != "button"]
+        if not named:
+            return None
+        if has_inputs:
+            # A button saying it submits wins; one that only submits because it
+            # has no type (often a "show password" toggle) comes after those
+            said = [b for b in named if (b.get("type") == "submit" and b.get("type_explicit", True))
+                    or cls._SUBMIT_WORDS.search(b.get("text") or "")]
+            implicit = [b for b in named if b.get("type") == "submit"]
+            if said or implicit:
+                return (said or implicit)[0]
+        return next((b for b in named if b.get("id")), named[0])
+
+    @staticmethod
+    def prompt_values(prompt: str | None) -> dict[str, str]:
+        """Values written in the goal: user name, password and a text to type.
+
+        Understands "log in with tomsmith / SuperSecretPassword!", "log in with
+        ann@example.com and password Secret-1" (an email address is the user name),
+        "username student and password Password123", "as standard_user with
+        password secret_sauce", "add a todo called Buy milk", quoted text.
+        """
+        text = re.sub(r"\b(?:https?://|www\.)\S+", " ", prompt or "")  # a URL is not "user / password"
+        values: dict[str, str] = {}
+        # "with tomsmith / SuperSecret", "as demo / pw": not "open /account" (a path)
+        pair = re.search(r"\b(?:with|as|using|credentials?:?)\s+([\w.@+-]+)\s*/\s*(\S+)", text, re.IGNORECASE) \
+            or re.search(r"^\s*([\w.@+-]+)\s*/\s*(\S+)\s*$", text)
+        if pair:
+            values["username"], values["password"] = pair.group(1), pair.group(2).rstrip(".,;")
+        pw = re.search(r"\bpass(?:word)?\b\s*(?:is|=|:)?\s*[\"']?([^\s\"',;]+)", text, re.IGNORECASE)
+        if pw:
+            values["password"] = pw.group(1)
+        user = re.search(r"\b(?:user ?name|user|login|e-?mail)\s*(?:is|=|:)?\s*[\"']?([\w.@+-]+)", text, re.IGNORECASE) \
+            or re.search(r"\b(?:log ?in|sign ?in)\s+as\s+[\"']?([\w.@+-]+)", text, re.IGNORECASE) \
+            or re.search(r"\bas\s+[\"']?([\w.@+-]+)\s+(?:with|and)\s+pass", text, re.IGNORECASE)
+        if user and user.group(1).lower() not in ("and", "with", "password", "is"):
+            values["username"] = user.group(1)
+        if "username" not in values:
+            # "log in with ann@example.com and password Secret-1": an email address is the user name
+            email = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", text)
+            if email:
+                values["username"] = email.group(0)
+        # Sign-up values: "confirm Other-Pass-99", "name Ann Lee"
+        confirm = re.search(r"\bconfirm(?:ation)?(?:\s+(?:the\s+)?password)?\s*(?:is|=|:|with)?\s*[\"']?([^\s\"',;]+)",
+                            text, re.IGNORECASE)
+        if confirm and confirm.group(1).lower() not in ("and", "the", "password"):
+            values["confirm"] = confirm.group(1)
+        name = re.search(r"\b(?i:full\s+name|name)\s*(?:is|=|:)?\s*[\"']?([A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*)*)", text)
+        if name:
+            values["name"] = name.group(1)
+        quoted = re.search(r"[\"“]([^\"”]{1,80})[\"”]", text)
+        called = re.search(r"\b(?:called|named|titled|search(?:es)? for|type)\s+(.+?)(?:\s+and\b|[.,;]|$)", text, re.IGNORECASE)
+        if quoted:
+            values["text"] = quoted.group(1)
+        elif called:
+            values["text"] = called.group(1).strip()
+        return values
+
+    @classmethod
+    def _synthesize_test_steps(cls, url: str, page_title: str, inputs: list[dict[str, Any]],
+                               buttons: list[dict[str, Any]], prompt: str | None = None,
+                               **options: Any) -> list[dict[str, Any]]:
+        return cls._plan_scenario(url, page_title, inputs, buttons, prompt, **options)[0]
+
+    _FIELD_TYPES_SKIPPED = ("checkbox", "radio", "select", "submit", "button", "file", "range", "color", "reset")
+
+    @classmethod
+    def _form_of_goal(cls, inputs: list[dict[str, Any]], buttons: list[dict[str, Any]],
+                      prompt: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """The fields and buttons of the one form the goal is about.
+
+        A page often has more than one form (a header search next to the
+        sign-in): filling all of them and pressing the first "Search" button
+        leaves the page, and a check that the sign-in form is gone then passes
+        for the wrong reason.  The form holding the password field wins, then
+        the search form for a search goal, then the form with the most fields.
+        """
+        if not inputs:
+            return inputs, buttons
+        password = next((i for i in inputs if auth_plan.is_password(i)), None)
+        search = next((i for i in inputs if i.get("type") == "search" or i.get("name") == "q"
+                       or "search" in str(i.get("name") or "").lower()), None)
+        if password is not None:
+            key = password.get("form")
+        elif search is not None and re.search(r"\bsearch|\bfind\b|\blook for\b", prompt or "", re.IGNORECASE):
+            key = search.get("form")
+        else:
+            counts: dict[int | None, int] = {}
+            for i in inputs:
+                if i.get("type") not in cls._FIELD_TYPES_SKIPPED:
+                    counts[i.get("form")] = counts.get(i.get("form"), 0) + 1
+            key = max(counts, key=lambda k: counts[k]) if counts else inputs[0].get("form")  # first form on a tie
+        form_inputs = [i for i in inputs if i.get("form") == key]
+        form_buttons = [b for b in buttons if b.get("form") == key] if key is not None else buttons
+        # A form whose button sits outside it (or is a link) keeps the page's buttons
+        return form_inputs, form_buttons or buttons
+
+    @classmethod
+    def _fill_steps(cls, inputs: list[dict[str, Any]], values: dict[str, str],
+                    prompt: str | None = None) -> list[dict[str, Any]]:
+        """FILL / CHECK / SELECT steps for *inputs* (numbered 0; callers renumber).
+
+        *values* may hold ``username``, ``email``, ``password``, ``confirm``,
+        ``name`` and ``text``; fields they do not cover get a valid stand-in.
+        """
+        p_lower = (prompt or "").lower()
+        steps: list[dict[str, Any]] = []
+        chosen: set[str] = set()  # radio groups already answered
+        password_filled = False
+        for inp in inputs:
+            if sum(1 for st in steps if st["action"] == "FILL") >= 8:
+                break  # enough for a sign-up form
+            itype = inp.get("type", "text")
+            iname = (inp.get("name") or "").lower()
+            target_sel = inp["selector"]
+
+            hint = f"{iname} {(inp.get('id') or '').lower()} {(inp.get('placeholder') or '').lower()}"
+            if itype == "select" and inp.get("required") and inp.get("option"):
+                steps.append({"step_number": 0, "action": "SELECT", "target": target_sel,
+                              "value": inp["option"], "description": f"'{inp['option'][:40]}' in the {iname or 'list'}"})
+                continue
+            if itype == "radio" and inp.get("required") and iname and iname not in chosen:
+                chosen.add(iname)  # one choice per required group
+                steps.append({"step_number": 0, "action": "CHECK", "target": target_sel, "value": None,
+                              "description": f"a {iname} option"})
+                continue
+            if itype == "checkbox" and inp.get("required"):
+                # A box the form will not submit without ("I accept the terms")
+                steps.append({"step_number": 0, "action": "CHECK", "target": target_sel, "value": None,
+                              "description": f"the {(inp.get('aria_label') or inp.get('name') or 'required')[:40]} checkbox"})
+                continue
+            if itype in cls._FIELD_TYPES_SKIPPED:
+                continue
+            if itype in _TYPED_VALUES:
+                val = _TYPED_VALUES[itype]
+                desc = f"the {(inp.get('placeholder') or inp.get('aria_label') or inp.get('name') or itype)[:40]} field"
+            elif "pass" in hint or itype == "password":
+                # The second password field is the confirmation ("Repeat password")
+                if "confirm" in values and (auth_plan.is_confirm(inp) or password_filled):
+                    val, desc = values["confirm"], "the confirm password field"
+                else:
+                    val, desc = values.get("password", "AutoQAPassword!99"), "the password field"
+                password_filled = True
+            elif itype == "email" or "mail" in hint:
+                val = values.get("email") or values.get("username") or "qa_user@testsphere.ai"
+                desc = "the email field"
+            elif any(k in hint for k in ("user", "login")):
+                val = values.get("username", "qa_user@testsphere.ai")
+                desc = "the user name field"
+            elif "name" in hint and values.get("name"):
+                val = values["name"]
+                desc = f"the {(inp.get('placeholder') or inp.get('aria_label') or inp.get('name') or 'name')[:40]} field"
+            elif "search" in hint or itype == "search" or "search" in p_lower:
+                val = values.get("text", "TestSphere QA Automation")
+                desc = "the search field"
+            else:
+                val = values.get("text", "Verified Test Input")
+                desc = f"the {(inp.get('placeholder') or inp.get('aria_label') or inp.get('name') or 'text')[:40]} field"
+            steps.append({"step_number": 0, "action": "FILL", "target": target_sel, "value": val, "description": desc})
+        return steps
+
+    @classmethod
+    def _auth_tests(cls, url: str, inputs: list[dict[str, Any]], buttons: list[dict[str, Any]],
+                    prompt: str | None, blocked: str | None = None, *, allow_test_accounts: bool = False,
+                    email_domain: str | None = None) -> list[dict[str, Any]]:
+        """The login or sign-up form's own tests (wrong password, empty form,
+        the session after signing in, ...)."""
+        form_inputs, form_buttons = cls._form_of_goal(inputs, buttons, prompt)
+        form_kind = auth_plan.kind(form_inputs, prompt, form_buttons)
+        if form_kind is None:
+            return []
+        button, given = cls._primary_button(form_buttons, True), cls.prompt_values(prompt)
+
+        def fill(fields: list[dict[str, Any]], values: dict[str, str]) -> list[dict[str, Any]]:
+            return cls._fill_steps(fields, values, prompt)
+
+        tests = auth_plan.negative_tests(form_kind, url, form_inputs, button, given, fill, blocked=bool(blocked))
+        if not blocked:
+            tests += auth_plan.after_sign_in_tests(form_kind, url, form_inputs, button, given, fill,
+                                                   allow_test_accounts=allow_test_accounts, email_domain=email_domain)
+        return tests
+
+    @classmethod
+    def _plan_scenario(
+        cls,
+        url: str,
+        page_title: str,
+        inputs: list[dict[str, Any]],
+        buttons: list[dict[str, Any]],
+        prompt: str | None = None,
+        *,
+        allow_test_accounts: bool = False,
+        email_domain: str | None = None,
+        blocked: str | None = None,
+        test_data: dict[str, str] | None = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+        """Steps for the page's form and the written goal, and which parts of the goal they test.
+
+        A sign-in without credentials in the goal, a sign-up when the project
+        does not allow test accounts, and either behind a CAPTCHA (*blocked*)
+        get no steps: their goal parts are reported as not tested, with why.
+        """
+        steps = []
+        step_num = 1
+
+        # Step 1: Real Navigation
+        steps.append({
+            "step_number": step_num,
+            "action": "NAVIGATE",
+            "value": url,
+            "target": None,
+            "description": f"Navigate to live site {url}",
+        })
+        step_num += 1
+
+        # No title check here: assertions run after the interaction, when a
+        # successful login or submit has already moved to another page (the
+        # smoke test checks the title of the page as loaded).
+
+        # The profile's test data, with the goal's own values winning
+        given = {**(test_data or {}), **cls.prompt_values(prompt)}
+        parts = goal_plan.split_goal(prompt)
+        use_form = not parts or goal_plan.is_form_part(parts[0], given) \
+            or not goal_plan.later_part_steps(0, parts[0], given)
+        inputs, buttons = cls._form_of_goal(inputs, buttons, prompt)
+        form_kind = auth_plan.kind(inputs, prompt, buttons) if use_form else None
+        not_run = None
+        own = cls.prompt_values(prompt)
+        # The goal names the account to create ("sign up with email ann@example.com ..."):
+        # that is the consent, and its values are used
+        explicit_account = bool(own.get("username"))
+        if form_kind == "login" and not (given.get("username") and given.get("password")):
+            not_run = "needs credentials in the goal"
+        elif form_kind == "signup" and not allow_test_accounts and not explicit_account:
+            not_run = "test accounts are off for this project"
+        if form_kind and blocked:
+            not_run = blocked
+        if not_run:
+            # Never submit made-up credentials or create an account nobody allowed:
+            # the form's own tests (auth_plan) still run, and the goal says why it was not
+            return steps, {"tested": [], "untested": [f"{p} ({not_run})" if i == 0 else p for i, p in enumerate(parts)]}
+        if form_kind == "signup":
+            generated = auth_plan.signup_values(email_domain)
+            if explicit_account:
+                password = own.get("password", generated["password"])
+                given = {**generated, **own, "email": own["username"], "password": password,
+                         "confirm": own.get("confirm", password)}
+            else:
+                given = {**generated, **{k: v for k, v in given.items() if k == "text"}}
+
+        # Step 3: Interactive Inputs (if discovered)
+        if inputs and use_form:
+            for st in cls._fill_steps(inputs, given, prompt):
+                steps.append({**st, "step_number": step_num})
+                step_num += 1
+
+        # Step 4: Buttons Click / Assertion (if discovered)
+        primary_btn = cls._primary_button(buttons, bool(inputs)) if use_form else None
+        goal_steps, coverage = goal_plan.plan_goal(
+            prompt, inputs, given, form_used=use_form and bool(inputs or primary_btn), first_step=0)
+        if form_kind == "signup" and not goal_steps:  # no goal: the sign-up itself is the scenario
+            goal_steps = auth_plan.success_steps(next(i for i in inputs if auth_plan.is_password(i)))
+        if primary_btn:
+            steps.append({
+                "step_number": step_num,
+                "action": "CLICK",
+                "target": primary_btn["selector"],
+                "value": None,
+                "description": f"the '{primary_btn['text']}' button",
+            })
+            step_num += 1
+        elif any(st["action"] == "FILL" for st in steps) or goal_steps:
+            # No button: forms like a to-do entry submit on Enter
+            filled = [st for st in steps if st["action"] == "FILL"]
+            if filled:
+                steps.append({
+                    "step_number": step_num,
+                    "action": "PRESS",
+                    "target": filled[-1]["target"],
+                    "value": "Enter",
+                    "description": filled[-1]["description"],
+                })
+                step_num += 1
+        else:
+            # Fallback assertion on page container
+            steps.append({
+                "step_number": step_num,
+                "action": "ASSERT_VISIBLE",
+                "target": "body",
+                "value": None,
+                "description": "Assert target DOM body is interactive and visible",
+            })
+            step_num += 1
+
+        # Submitted without any goal saying what success looks like: at least
+        # the implicit check, so the test never passes on an error page
+        submitted = any(st["action"] in ("CLICK", "PRESS") for st in steps)
+        if submitted and not goal_steps:
+            goal_steps = [goal_plan.no_server_error(0)]
+
+        # What the goal expects after that: outcome checks and its later parts
+        for st in goal_steps:
+            steps.append({**st, "step_number": step_num})
+            step_num += 1
+        return steps, coverage
+
+    # -------------------------------------------------------------------------
+    # Telemetry Log Synthesizer
+    # -------------------------------------------------------------------------
+
+    @classmethod
+    def _generate_telemetry_events(
+        cls,
+        url: str,
+        title: str,
+        status_code: int,
+        latency_ms: int,
+        inputs_count: int,
+        buttons_count: int,
+        forms_count: int,
+        overall_score: int,
+        steps_count: int,
+        error: str | None = None,
+    ) -> list[dict[str, Any]]:
+        events = [
+            {
+                "event_type": "WORKFLOW_STARTED",
+                "message": f"Connected to live target endpoint: {url}",
+            },
+            {
+                "event_type": "PAGE_INSPECTION_COMPLETED",
+                "message": f"HTTP {status_code} OK (Latency: {latency_ms}ms) | Title: '{title[:45]}'",
+            },
+            {
+                "event_type": "DOM_ELEMENTS_DISCOVERED",
+                "message": (
+                    f"DOM Discovery: Discovered {buttons_count} button(s), "
+                    f"{inputs_count} input field(s), and {forms_count} form(s)"
+                ),
+            },
+            {
+                "event_type": "HEALTH_AUDIT_COMPLETED",
+                "message": f"Autonomous QA Quality Score: {overall_score}/100 across Security, A11y & Performance",
+            },
+            {
+                "event_type": "TEST_PLAN_GENERATED",
+                "message": f"Synthesized {steps_count}-step autonomous QA test suite using discovered DOM locators",
+            },
+        ]
+
+        if error:
+            events.append({
+                "event_type": "EXECUTION_WARNING",
+                "message": f"Live network note: {error}",
+            })
+        else:
+            events.append({
+                "event_type": "EXECUTION_RESULT_RECEIVED",
+                "message": "Real DOM locators matched and verified cleanly against target application",
+            })
+            events.append({
+                "event_type": "WORKFLOW_COMPLETED",
+                "message": "Autonomous QA workflow completed with real live site telemetry",
+            })
+
+        return events

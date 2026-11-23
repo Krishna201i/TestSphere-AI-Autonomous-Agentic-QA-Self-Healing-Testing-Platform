@@ -1,5 +1,5 @@
-// A hosted dashboard: default HTTPS port, like Render (jsdom's default is localhost:3000)
-// @vitest-environment-options {"url": "https://testsphere.onrender.com/"}
+// A hosted dashboard: default HTTPS port, like the EC2 server (jsdom's default is localhost:3000)
+// @vitest-environment-options {"url": "https://54-153-148-247.sslip.io/"}
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 afterEach(() => {
@@ -23,7 +23,7 @@ async function baseLabelOn(url, env = {}) {
 
 describe('API base URL', () => {
   it('uses the page origin when VITE_API_URL is unset, on any port', async () => {
-    // Regression: on the default HTTPS port (Render) requests went to 127.0.0.1:8000
+    // Regression: on the default HTTPS port (a hosted server) requests went to 127.0.0.1:8000
     expect(await baseLabelOn('/')).toBe('/api/projects');
   });
 

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { FolderGit2 } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import { timeAgo } from '../lib/derive';
+import Pager from './Pager';
+import { usePaged } from '../lib/usePaged';
 
 const LANG_COLORS = [1, 2, 3, 4, 5, 6, 7].map((n) => `var(--chart-${n})`);
 
@@ -10,6 +12,7 @@ function BlueprintView({ bp }) {
   const totalLines = langs.reduce((n, [, v]) => n + v.lines, 0) || 1;
   const testFiles = (bp.test_suites || []).reduce((n, s) => n + s.files, 0);
   const deps = Object.entries(bp.dependencies || {});
+  const routePage = usePaged(bp.routes, 15);
 
   return (
     <div className="stack-lg">
@@ -76,11 +79,11 @@ function BlueprintView({ bp }) {
           )}
           <h4 className="section-title mt-3">HTTP routes (QA &amp; attack surface)</h4>
           {bp.routes.length === 0 ? <span className="muted small">No routes detected</span> : (
-            <div className="table-wrap scroll-y">
+            <div className="table-wrap">
               <table className="table">
                 <tbody>
-                  {bp.routes.slice(0, 100).map((r, i) => (
-                    <tr key={i}>
+                  {routePage.items.map((r, i) => (
+                    <tr key={`${routePage.from}-${i}`}>
                       <td className="mono small"><b>{r.method}</b></td>
                       <td className="mono small cell-wrap">{r.path}</td>
                       <td className="mono small muted cell-wrap">{r.file}:{r.line}</td>
@@ -88,6 +91,7 @@ function BlueprintView({ bp }) {
                   ))}
                 </tbody>
               </table>
+              <Pager paged={routePage} label="routes" />
             </div>
           )}
         </div>

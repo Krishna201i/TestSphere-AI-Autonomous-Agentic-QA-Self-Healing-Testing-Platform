@@ -12,14 +12,18 @@ import { initializeApp, getApps } from 'firebase/app';
 import {
   GithubAuthProvider,
   GoogleAuthProvider,
+  RecaptchaVerifier,
   createUserWithEmailAndPassword,
   getAuth,
   getRedirectResult,
+  linkWithCredential,
   linkWithPopup,
   onAuthStateChanged,
   reauthenticateWithPopup,
   sendPasswordResetEmail,
+  signInAnonymously,
   signInWithEmailAndPassword,
+  signInWithPhoneNumber,
   signInWithPopup,
   signInWithRedirect,
   signOut as firebaseSignOut,
@@ -49,9 +53,19 @@ const FIREBASE_ERRORS = {
   'auth/web-storage-unsupported':
     'This browser blocks the storage sign-in needs (private mode or blocked site data). Allow site data, or sign in with email.',
   'auth/account-exists-with-different-credential':
-    'An account with this email already exists with another sign-in method. Sign in with Google or your email, '
-    + 'then connect GitHub in Profile → Integrations.',
-  'auth/credential-already-in-use': 'This GitHub account is already linked to another TestSphere account.',
+    'This email already has a TestSphere account. Sign in once the way you first did (Google or email) and '
+    + 'GitHub will be linked to it, so either works from then on.',
+  'auth/credential-already-in-use':
+    'This GitHub login already belongs to a separate TestSphere account (made by signing in with GitHub before). '
+    + 'To merge them: sign in with GitHub, delete that account in Profile, then sign in with Google and connect GitHub.',
+  'auth/invalid-phone-number': 'Enter the phone number with its country code, e.g. +91 98765 43210.',
+  'auth/missing-phone-number': 'Enter your phone number.',
+  'auth/invalid-verification-code': 'That code is not right. Check the SMS and try again.',
+  'auth/code-expired': 'The code expired. Send a new one.',
+  'auth/quota-exceeded': 'The SMS limit for this project is reached. Try again later or sign in another way.',
+  'auth/captcha-check-failed': 'The robot check failed. Reload the page and try again.',
+  'auth/admin-restricted-operation': 'This sign-in method is turned off for this project.',
+  'auth/user-mismatch': 'That is a different GitHub account from the one linked here. Pick the linked account in the GitHub window.',
   'auth/too-many-requests': 'Too many attempts. Wait a minute, or reset your password.',
   'auth/network-request-failed': 'Cannot reach Firebase. Check your internet connection.',
   'auth/operation-not-allowed':
@@ -80,9 +94,10 @@ function toUser(u) {
   return {
     uid: u.uid,
     email: u.email,
-    name: u.displayName,
+    // Phone and guest accounts have no name or email: show something readable
+    name: u.displayName || (u.email ? null : u.phoneNumber || (u.isAnonymous ? 'Guest' : null)),
     photo: u.photoURL,
-    provider: u.providerData?.[0]?.providerId || 'password',
+    provider: u.isAnonymous ? 'anonymous' : u.providerData?.[0]?.providerId || 'password',
   };
 }
 
@@ -92,6 +107,37 @@ export function AuthProvider({ children }) {
   const [notice, setNotice] = useState(null);
   const authRef = useRef(null);
   const systemRef = useRef(null);
+  // A GitHub sign-in refused because the email already has an account (one
+  // account per email): linked to that account once the user signs in to it
+  const pendingGitHubRef = useRef(null);
+  // True while such a GitHub sign-in waits for the existing account's sign-in
+  const [linkNeeded, setLinkNeeded] = useState(false);
+  // What happened to that link, shown in the dashboard after signing in
+  const [accountNotice, setAccountNotice] = useState(null);
+  const phoneRef = useRef(null); // the SMS confirmation in progress
+
+  const rememberPendingGitHub = useCallback((err) => {
+    if (err?.code !== 'auth/account-exists-with-different-credential') return;
+    pendingGitHubRef.current = GithubAuthProvider.credentialFromError(err);
+    setLinkNeeded(Boolean(pendingGitHubRef.current));
+  }, []);
+
+  const linkPendingGitHub = useCallback(async () => {
+    const pending = pendingGitHubRef.current;
+    const user = authRef.current?.currentUser;
+    if (!pending || !user) return;
+    pendingGitHubRef.current = null;
+    setLinkNeeded(false);
+    try {
+      await linkWithCredential(user, pending);
+      setAccountNotice({ ok: true, text: 'GitHub is now linked: you can sign in with Google or GitHub.' });
+    } catch (err) {
+      // Signing in itself worked; say why GitHub is not linked instead of hiding it
+      if (err?.code !== 'auth/provider-already-linked') {
+        setAccountNotice({ ok: false, text: `GitHub could not be linked to this account. ${authMessage(err)}` });
+      }
+    }
+  }, []);
 
   const start = useCallback(async () => {
     setState({ status: 'loading', mode: null, user: null, error: null });
@@ -128,18 +174,22 @@ export function AuthProvider({ children }) {
       },
     });
     getRedirectResult(fbAuth).then((res) => { if (res) recordLogin().catch(() => {}); })
-      .catch((err) => setNotice(authMessage(err)));
+      .catch((err) => {
+        rememberPendingGitHub(err);
+        setNotice(authMessage(err));
+      });
     onAuthStateChanged(fbAuth, (u) => {
       setState({ status: u ? 'signedIn' : 'signedOut', mode: 'firebase', user: u ? toUser(u) : null, error: null });
     });
-  }, []);
+  }, [rememberPendingGitHub]);
 
   useEffect(() => { start(); }, [start]);
 
   const signIn = useCallback(async (email, password) => {
     await signInWithEmailAndPassword(authRef.current, email.trim(), password);
+    await linkPendingGitHub();
     recordLogin().catch(() => {});
-  }, []);
+  }, [linkPendingGitHub]);
 
   const signUp = useCallback(async (name, email, password) => {
     const cred = await createUserWithEmailAndPassword(authRef.current, email.trim(), password);
@@ -155,6 +205,7 @@ export function AuthProvider({ children }) {
     try {
       await signInWithPopup(authRef.current, makeProvider());
     } catch (err) {
+      rememberPendingGitHub(err);
       if (!NEEDS_REDIRECT.includes(err?.code)) throw err;
       // A redirect only comes back signed in when Firebase's auth domain is this
       // site's own (browsers partition the storage it needs across domains);
@@ -163,8 +214,9 @@ export function AuthProvider({ children }) {
       await signInWithRedirect(authRef.current, makeProvider());
       return;
     }
+    await linkPendingGitHub();
     recordLogin().catch(() => {});
-  }, []);
+  }, [rememberPendingGitHub, linkPendingGitHub]);
   const signInWithGoogle = useCallback(() => signInWithProvider(() => new GoogleAuthProvider()), [signInWithProvider]);
   // Identity only: repository access is asked for separately (githubRepoToken)
   const signInWithGitHub = useCallback(() => signInWithProvider(() => new GithubAuthProvider()), [signInWithProvider]);
@@ -180,8 +232,18 @@ export function AuthProvider({ children }) {
     const provider = new GithubAuthProvider();
     provider.addScope('repo');
     const linked = user.providerData.some((p) => p.providerId === 'github.com');
-    const result = linked ? await reauthenticateWithPopup(user, provider) : await linkWithPopup(user, provider);
-    return GithubAuthProvider.credentialFromResult(result)?.accessToken || null;
+    try {
+      const result = linked ? await reauthenticateWithPopup(user, provider) : await linkWithPopup(user, provider);
+      return GithubAuthProvider.credentialFromResult(result)?.accessToken || null;
+    } catch (err) {
+      // The GitHub login already belongs to another TestSphere account (e.g. one
+      // made by signing in with GitHub before): it can't be linked, but GitHub
+      // still granted repository access, which is all connecting needs
+      const token = err?.code === 'auth/credential-already-in-use'
+        ? GithubAuthProvider.credentialFromError(err)?.accessToken : null;
+      if (token) return token;
+      throw err;
+    }
   }, []);
 
   /** Everything needed to tell why sign-in fails, checked live. */
@@ -210,16 +272,43 @@ export function AuthProvider({ children }) {
 
   const resetPassword = useCallback((email) => sendPasswordResetEmail(authRef.current, email.trim()), []);
 
+  /** A guest account: no email or password; its data stays with this browser's session. */
+  const signInAsGuest = useCallback(async () => {
+    await signInAnonymously(authRef.current);
+    recordLogin().catch(() => {});
+  }, []);
+
+  /** Text an SMS code to *phone* (with country code); the invisible robot check sits on *buttonId*. */
+  const sendPhoneCode = useCallback(async (phone, buttonId) => {
+    const verifier = new RecaptchaVerifier(authRef.current, buttonId, { size: 'invisible' });
+    try {
+      phoneRef.current = await signInWithPhoneNumber(authRef.current, phone.replace(/[\s()-]/g, ''), verifier);
+    } catch (err) {
+      verifier.clear();
+      throw err;
+    }
+  }, []);
+
+  const confirmPhoneCode = useCallback(async (code) => {
+    if (!phoneRef.current) throw Object.assign(new Error('Send a code first.'), { code: 'auth/code-expired' });
+    await phoneRef.current.confirm(code.trim());
+    phoneRef.current = null;
+    await linkPendingGitHub();
+    recordLogin().catch(() => {});
+  }, [linkPendingGitHub]);
+
   const signOut = useCallback(async () => {
     clearSavedWorkspaces(); // the next person on this browser starts clean
     if (authRef.current) await firebaseSignOut(authRef.current);
   }, []);
 
   const value = useMemo(() => ({
-    ...state, notice, clearNotice: () => setNotice(null), diagnose,
+    ...state, notice, clearNotice: () => setNotice(null), diagnose, linkNeeded,
+    accountNotice, clearAccountNotice: () => setAccountNotice(null),
     retry: start, signIn, signUp, signInWithGoogle, signInWithGitHub, githubRepoToken, resetPassword, signOut,
-  }), [state, notice, diagnose, start, signIn, signUp, signInWithGoogle, signInWithGitHub, githubRepoToken,
-    resetPassword, signOut]);
+    signInAsGuest, sendPhoneCode, confirmPhoneCode,
+  }), [state, notice, diagnose, linkNeeded, accountNotice, start, signIn, signUp, signInWithGoogle, signInWithGitHub,
+    githubRepoToken, resetPassword, signOut, signInAsGuest, sendPhoneCode, confirmPhoneCode]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

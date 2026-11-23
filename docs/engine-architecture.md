@@ -38,11 +38,13 @@ The Browser Execution Engine in [`engine/`](file:///engine/) is the deterministi
                Full-Page Screenshots              DOM Snapshots
 ```
 
+Paths in the diagram are relative to `backend/`.
+
 ---
 
 ## 2. Core Subsystems
 
-### 2.1 Browser Session Management (`engine/browser.py`)
+### 2.1 Browser Session Management (`backend/engine/browser.py`)
 Encapsulates the lifecycle of Playwright browser instances, browser contexts, and page tabs:
 - **`BrowserSession`**:
   - Context isolation: Each test run executes inside an isolated `BrowserContext` to avoid cookie and local storage leakage between test cases.
@@ -50,7 +52,7 @@ Encapsulates the lifecycle of Playwright browser instances, browser contexts, an
   - Headless & Headed execution: Default headless mode for CI/CD environments; headed mode toggle for local debugging.
   - Lifecycle hooks: Asynchronous initialization (`start()`) and graceful termination (`close()`) ensuring no orphaned browser child processes.
 
-### 2.2 Smart Locator Strategy (`engine/locators.py`)
+### 2.2 Smart Locator Strategy (`backend/engine/locators.py`)
 Solves modern dynamic web locator brittleness using multi-tiered fallback strategies:
 - **`LocatorResolver`**:
   - Evaluates primary selectors (`data-testid`, unique CSS IDs).
@@ -61,7 +63,7 @@ Solves modern dynamic web locator brittleness using multi-tiered fallback strate
     4. Structural CSS hierarchies and relative XPath expressions.
   - Implements configurable timeouts with fast failure when elements are absent, providing immediate context to the self-healing analyzer.
 
-### 2.3 Action Execution Pipeline (`engine/runner.py`)
+### 2.3 Action Execution Pipeline (`backend/engine/runner.py`)
 Executes granular actions against resolved DOM elements:
 - Supported actions:
   - `NAVIGATE`: Page navigation with network-idle synchronization.
@@ -69,19 +71,20 @@ Executes granular actions against resolved DOM elements:
   - `FILL`: Text input with pre-clearing and typing delay options.
   - `SELECT_OPTION`: Dropdown selection by value or visible label.
   - `HOVER`: Pointer hover for flyout menus and tooltip activations.
+  - `DRAG`: Drags the target element onto the element named by the step's value (a selector).
   - `PRESS_KEY`: Keyboard keystrokes (`Enter`, `Tab`, `Escape`).
   - `ASSERT_VISIBLE`: Verifies presence and visibility of elements.
   - `ASSERT_TEXT`: Verifies text containment within target elements.
   - `WAIT_FOR`: Synchronizes on element states or specific timeout durations.
 - Telemetry: Each action records `started_at`, `duration_ms`, `status` (`PASSED`, `FAILED`, `ERROR`), and detailed failure traces.
 
-### 2.4 Diagnostic Artifacts Capture (`engine/artifacts.py`)
+### 2.4 Diagnostic Artifacts Capture (`backend/engine/artifacts.py`)
 Generates deep forensic diagnostic data when tests pass or fail:
 - **Screenshots**: High-resolution PNG captures taken immediately upon step completion or assertion failure.
 - **DOM Snapshots**: Serialized HTML trees of the page at failure time, enabling the LLM healing agent to examine the current DOM structure without browser access.
 - **Artifact Indexing**: Saves artifacts into structured directories partitioned by run ID and step index (`artifacts/{run_id}/{step_index}/`).
 
-### 2.5 Failure Detection & Root Cause Analysis (`engine/detector.py`)
+### 2.5 Failure Detection & Root Cause Analysis (`backend/engine/detector.py`)
 Analyzes raw Playwright exceptions into semantic failure classifications:
 - **`FailureClassifier`**:
   - `LOCATOR_CHANGED`: Element exists in DOM but attributes (ID, class) have changed.
@@ -92,7 +95,7 @@ Analyzes raw Playwright exceptions into semantic failure classifications:
 
 ---
 
-## 3. Schemas & Data Contracts (`engine/schemas.py`)
+## 3. Schemas & Data Contracts (`backend/engine/schemas.py`)
 
 - **`Target`**: Represents a DOM element target with `primary_locator`, fallback selectors, element tag, and human-readable description.
 - **`StepAction`**: Enumeration of supported browser automation operations.

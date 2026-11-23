@@ -1,0 +1,490 @@
+"""
+Tests for the /security and /audit API routers (scanner network stubbed,
+isolated in-memory store).
+"""
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from app.api.security import get_active_scanner, get_scanner
+from app.config import settings
+from app.main import app
+from security import PassiveScanner, ScopePolicy
+
+HARDENED = {
+    "content-type": "text/html",
+    "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+}
+
+
+@pytest.fixture
+def state():
+    return {"headers": {"content-type": "text/html"}}
+
+
+@pytest.fixture
+def client(state):
+    """Scanner network stubbed; storage is the per-test in-memory store (conftest)."""
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, headers=state["headers"], text=""))
+    app.dependency_overrides[get_scanner] = lambda: PassiveScanner(ScopePolicy.of("app.test"), transport=transport)
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+def _scan(client, url="http://app.test/"):
+    resp = client.post("/api/security/scan", json={"url": url})
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _by_id(findings):
+    return {f["check_id"]: f for f in findings}
+
+
+# ── Scan ──────────────────────────────────────────────────────
+
+
+def test_scan_returns_sorted_findings_and_summary(client) -> None:
+    body = _scan(client)
+    assert body["summary"] == {"medium": 2, "low": 2, "high": 1}
+    assert body["findings"][0]["check_id"] == "SEC-TRANSPORT-HTTP"
+    assert all(len(f["key"]) == 16 and f["status"] == "open" for f in body["findings"])
+
+
+def test_ai_triage_enriches_and_reorders_findings(client, monkeypatch) -> None:
+    """When AI triage is on, each finding carries `ai` and is ordered by priority."""
+    from app.api import security as sec
+    from security.ai import AIInsight
+
+    async def fake_triage(url, findings, **kw):
+        # Rank one real finding first regardless of severity.
+        out = {}
+        for f in findings:
+            pri = 1 if f.check_id == "SEC-HDR-XCTO" else 5
+            out[f.key] = AIInsight(priority=pri, summary=f"note:{f.check_id}",
+                                   explanation="why", remediation="do X")
+        return out
+
+    monkeypatch.setattr(sec.security_ai, "enabled", lambda: True)
+    monkeypatch.setattr(sec.security_ai, "triage", fake_triage)
+
+    body = _scan(client)
+    assert body.get("ai_triage") is True
+    assert body["findings"][0]["check_id"] == "SEC-HDR-XCTO"  # AI priority wins ordering
+    assert all(f["ai"]["summary"] == f"note:{f['check_id']}" for f in body["findings"])
+
+
+def test_ai_triage_failure_leaves_findings_intact(client, monkeypatch) -> None:
+    """A triage that returns nothing must not alter the rule-based result."""
+    from app.api import security as sec
+
+    async def empty_triage(url, findings, **kw):
+        return {}
+
+    monkeypatch.setattr(sec.security_ai, "enabled", lambda: True)
+    monkeypatch.setattr(sec.security_ai, "triage", empty_triage)
+
+    body = _scan(client)
+    assert "ai_triage" not in body
+    assert all("ai" not in f for f in body["findings"])
+
+
+def test_out_of_scope_is_403_and_audited(client) -> None:
+    resp = client.post("/api/security/scan", json={"url": "https://elsewhere.test/"})
+    assert resp.status_code == 403
+    assert "authorized scope" in resp.json()["detail"]
+    assert client.get("/api/audit").json()[0]["level"] == "error"
+
+
+def test_unreachable_target_is_502(client) -> None:
+    def boom(request):
+        raise httpx.ConnectError("refused", request=request)
+    app.dependency_overrides[get_scanner] = lambda: PassiveScanner(
+        ScopePolicy.of("app.test"), transport=httpx.MockTransport(boom))
+    assert client.post("/security/scan", json={"url": "https://app.test/"}).status_code == 502
+
+
+def test_scan_includes_headers_and_remediation(client, state) -> None:
+    state["headers"] = {"content-type": "text/html", "Server": "nginx/1.25.3", "set-cookie": "sid=TOKEN"}
+    body = _scan(client, "https://app.test/")
+
+    assert ["Server", "nginx/1.25.3"] in body["response_headers"]
+    assert ["set-cookie", "…redacted…"] in body["response_headers"]
+    assert "TOKEN" not in str(body)
+
+    findings = _by_id(body["findings"])
+    csp = findings["SEC-HDR-CSP"]["remediation"]
+    assert csp["kind"] == "header"
+    assert {"kind": "added", "text": "Content-Security-Policy: default-src 'self'; frame-ancestors 'none'"} in csp["diff"]
+    assert "add_header Content-Security-Policy" in csp["snippets"]["nginx"]
+    leak = findings["SEC-DISCLOSURE"]["remediation"]
+    assert {"kind": "removed", "text": "Server: nginx/1.25.3"} in leak["diff"]
+
+
+# ── Persistence lifecycle ─────────────────────────────────────
+
+
+def test_findings_persist_and_rescan_does_not_duplicate(client) -> None:
+    _scan(client)
+    _scan(client)
+    stored = client.get("/api/security/findings").json()
+    assert len(stored) == 5
+    assert len({f["key"] for f in stored}) == 5
+
+
+def test_approve_then_retest_is_stored(client, state) -> None:
+    csp = _by_id(_scan(client)["findings"])["SEC-HDR-CSP"]
+
+    approved = client.post(f"/api/security/findings/{csp['key']}/approve", json={"actor": "krishna"}).json()
+    assert approved["approved_by"] == "krishna" and approved["approved_at"]
+
+    failed = client.post(f"/api/security/findings/{csp['key']}/retest", json={}).json()
+    assert (failed["retest_result"], failed["status"]) == ("fail", "open")
+
+    state["headers"] = HARDENED
+    fixed = client.post(f"/api/security/findings/{csp['key']}/retest", json={}).json()
+    assert (fixed["retest_result"], fixed["status"]) == ("pass", "resolved")
+
+    stored = _by_id(client.get("/api/security/findings").json())["SEC-HDR-CSP"]
+    assert stored["status"] == "resolved" and stored["approved_by"] == "krishna"
+
+
+def test_rescan_resolves_findings_that_disappeared(client, state) -> None:
+    _scan(client)
+    state["headers"] = HARDENED
+    body = _scan(client)
+    resolved_ids = {f["check_id"] for f in body["resolved"]}
+    assert {"SEC-HDR-CSP", "SEC-HDR-FRAME", "SEC-HDR-XCTO", "SEC-HDR-REFERRER"} <= resolved_ids
+    assert all(f["retest_result"] == "pass" for f in body["resolved"])
+
+
+def test_reappearing_finding_is_reopened_as_regression(client, state) -> None:
+    key = _by_id(_scan(client)["findings"])["SEC-HDR-CSP"]["key"]
+    client.post(f"/api/security/findings/{key}/approve", json={})
+    state["headers"] = HARDENED
+    _scan(client)  # resolves it
+    state["headers"] = {"content-type": "text/html"}
+    again = _by_id(_scan(client)["findings"])["SEC-HDR-CSP"]
+    assert again["status"] == "open"
+    assert again["approved_by"] is None and again["retest_result"] is None
+    assert any("Regression" in e["message"] for e in client.get("/api/audit").json())
+
+
+def test_unknown_finding_is_404(client) -> None:
+    assert client.post("/api/security/findings/nope/approve", json={}).status_code == 404
+    assert client.post("/api/security/findings/nope/retest", json={}).status_code == 404
+
+
+def test_audit_trail_records_scan_approval_retest(client) -> None:
+    key = _by_id(_scan(client)["findings"])["SEC-HDR-CSP"]["key"]
+    client.post(f"/api/security/findings/{key}/approve", json={"actor": "krishna"})
+    client.post(f"/api/security/findings/{key}/retest", json={"actor": "krishna"})
+
+    events = client.get("/api/audit").json()
+    kinds = [e["kind"] for e in events]
+    assert kinds[-1] == "scan"  # oldest last
+    assert "approval" in kinds and kinds.count("retest") == 2  # started + result
+    approval = next(e for e in events if e["kind"] == "approval")
+    assert approval["actor"] == "krishna" and approval["ref"] == key
+
+
+def test_stateless_retest_still_works(client, state) -> None:
+    csp = _by_id(_scan(client)["findings"])["SEC-HDR-CSP"]
+    state["headers"] = HARDENED
+    body = {k: v for k, v in csp.items() if k in (
+        "check_id", "source", "title", "severity", "component", "target_url", "evidence")}
+    assert client.post("/api/security/retest", json=body).json()["retest_result"] == "pass"
+
+
+def test_default_scanner_scope_is_config_driven(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "SECURITY_SCAN_ALLOWED_HOSTS", "staging.test, ")
+    scanner = get_scanner()
+    # Passive visits may go to any public site; the /.git and /.env probes only to listed hosts
+    assert scanner.scope.allows("https://example.com/")
+    assert scanner.can_probe("https://staging.test/") and scanner.can_probe("http://127.0.0.1:8000/")
+    assert not scanner.can_probe("https://example.com/")
+    # The active scanner keeps the configured list
+    active = get_active_scanner().scope
+    assert active.allows("https://staging.test/") and not active.allows("https://example.com/")
+    # With SECURITY_PASSIVE_ANY_HOST off, passive scans are back to the list too
+    monkeypatch.setattr(settings, "SECURITY_PASSIVE_ANY_HOST", False)
+    assert not get_scanner().scope.allows("https://example.com/")
+
+
+def test_timestamps_are_utc_aware(client) -> None:
+    _scan(client)
+    event = client.get("/api/audit").json()[0]
+    finding = client.get("/api/security/findings").json()[0]
+    assert event["at"].endswith("+00:00")
+    assert finding["first_seen"].endswith("+00:00")
+
+
+# ── Active (DAST) scanning ────────────────────────────────────
+
+def _vuln_active_transport():
+    """A target that reflects 'q' unescaped — the active scanner should find XSS."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        from urllib.parse import parse_qs, urlsplit
+        q = parse_qs(urlsplit(str(request.url)).query).get("q", [""])[0]
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=f"<h1>{q}</h1>")
+    return httpx.MockTransport(handler)
+
+
+@pytest.fixture
+def active_client(state, monkeypatch):
+    from app.api.security import get_active_scanner, get_scanner
+    from security import ActiveScanner
+
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", True)
+    passive = httpx.MockTransport(lambda r: httpx.Response(200, headers=state["headers"], text=""))
+    app.dependency_overrides[get_scanner] = lambda: PassiveScanner(ScopePolicy.of("app.test"), transport=passive)
+    app.dependency_overrides[get_active_scanner] = lambda: ActiveScanner(
+        ScopePolicy.of("app.test"), transport=_vuln_active_transport())
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+def test_active_scan_finds_and_persists_xss(active_client) -> None:
+    resp = active_client.post("/api/security/scan", json={"url": "http://app.test/search?q=hi", "active": True})
+    assert resp.status_code == 200, resp.text
+    ids = _by_id(resp.json()["findings"])
+    assert "SEC-XSS-REFLECTED" in ids and ids["SEC-XSS-REFLECTED"]["severity"] == "high"
+    # It is tracked like any other finding
+    assert any(f["check_id"] == "SEC-XSS-REFLECTED" for f in active_client.get("/api/security/findings").json())
+
+
+def test_active_scan_is_refused_when_the_server_has_it_off(client, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", False)
+    resp = client.post("/api/security/scan", json={"url": "http://app.test/search?q=hi", "active": True})
+    assert resp.status_code == 403 and "Active scanning is turned off" in resp.json()["detail"]
+
+
+def test_passive_scan_still_runs_without_the_active_flag(active_client) -> None:
+    resp = active_client.post("/api/security/scan", json={"url": "http://app.test/search?q=hi"})
+    assert resp.status_code == 200
+    assert not any(f["check_id"] == "SEC-XSS-REFLECTED" for f in resp.json()["findings"])
+
+
+def test_an_active_finding_can_be_retested(active_client) -> None:
+    key = _by_id(active_client.post(
+        "/api/security/scan", json={"url": "http://app.test/search?q=hi", "active": True}).json()["findings"])["SEC-XSS-REFLECTED"]["key"]
+    resp = active_client.post(f"/api/security/findings/{key}/retest", json={})
+    assert resp.status_code == 200 and resp.json()["retest_result"] == "fail"  # still vulnerable
+
+
+def test_signed_in_users_attack_only_sites_they_verified(active_client, monkeypatch, fresh_store) -> None:
+    """With sign-in on, proof of ownership is the gate (guests included); a
+    SECURITY_ACTIVE_SCAN_USERS list narrows it, and an empty list is never
+    "anyone may attack anything"."""
+    from datetime import UTC, datetime
+
+    from app import auth
+    from app.models import SCAN_TARGETS
+
+    monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
+    tokens = {"guest": {"uid": "anon1", "firebase": {"sign_in_provider": "anonymous"}},
+              "bob": {"uid": "bob", "email": "b@x.example", "firebase": {"sign_in_provider": "password"}},
+              "ann": {"uid": "ann", "email": "a@x.example", "firebase": {"sign_in_provider": "password"}}}
+    monkeypatch.setattr(auth, "verify_token", lambda t: tokens[t])
+    body = {"url": "http://app.test/search?q=hi", "active": True}
+
+    # Empty list while the server does not require proof: nobody
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "")
+    monkeypatch.setattr(settings, "REQUIRE_DOMAIN_VERIFICATION", "off")
+    resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": "Bearer ann"})
+    assert resp.status_code == 403 and "needs proof of site ownership" in resp.json()["detail"]
+
+    # Proof required: any account, but only for a site it verified
+    monkeypatch.setattr(settings, "REQUIRE_DOMAIN_VERIFICATION", "on")
+    for who in ("guest", "ann"):
+        resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": f"Bearer {who}"})
+        assert resp.status_code == 403 and "not verified" in resp.json()["detail"], who
+    fresh_store.insert(SCAN_TARGETS, owner_uid="ann", host="app.test", url="http://app.test", token="t",
+                       verified_at=datetime.now(UTC).isoformat())
+    resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": "Bearer ann"})
+    assert resp.status_code == 200
+    resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": "Bearer bob"})
+    assert resp.status_code == 403  # ann's proof is not bob's
+
+    # A list narrows it to the listed accounts
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "ann, carol")
+    for who in ("guest", "bob"):
+        resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": f"Bearer {who}"})
+        assert resp.status_code == 403, who
+    resp = active_client.post("/api/security/scan", json=body, headers={"Authorization": "Bearer ann"})
+    assert resp.status_code == 200
+    key = _by_id(resp.json()["findings"])["SEC-XSS-REFLECTED"]["key"]
+
+    # Taken off the list: the active finding can no longer be retested either
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "carol")
+    resp = active_client.post(f"/api/security/findings/{key}/retest", json={}, headers={"Authorization": "Bearer ann"})
+    assert resp.status_code == 403 and "cannot be retested" in resp.json()["detail"]
+
+
+# ── Event loop: a slow store must not stall other requests ───
+
+
+async def test_saving_a_scan_does_not_block_the_event_loop(fresh_store) -> None:
+    """Saving reads and writes each finding; on Firestore each is a network round
+    trip. They run in a thread, so the event loop (every other request) keeps going."""
+    import asyncio
+    import time
+
+    from app.database.session import set_store
+    from app.database.store import MemoryStore
+
+    class SlowStore(MemoryStore):  # every call costs a round trip
+        def find(self, *a, **k):
+            time.sleep(0.03)
+            return super().find(*a, **k)
+
+        def _create(self, *a, **k):
+            time.sleep(0.03)
+            return super()._create(*a, **k)
+
+        def _update(self, *a, **k):
+            time.sleep(0.03)
+            return super()._update(*a, **k)
+
+    set_store(SlowStore())
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, headers={"content-type": "text/html"}, text=""))
+    app.dependency_overrides[get_scanner] = lambda: PassiveScanner(ScopePolicy.of("app.test"), transport=transport)
+    gaps: list[float] = []
+    done = asyncio.Event()
+
+    async def ticker() -> None:  # how long the loop goes without running anything else
+        last = time.perf_counter()
+        while not done.is_set():
+            await asyncio.sleep(0.005)
+            now = time.perf_counter()
+            gaps.append(now - last)
+            last = now
+
+    try:
+        tick = asyncio.create_task(ticker())
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as client:
+            started = time.perf_counter()
+            resp = await client.post("/api/security/scan", json={"url": "http://app.test/"})
+            took = time.perf_counter() - started
+        done.set()
+        await tick
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200, resp.text
+    assert took > 0.3  # the slow store really was slow
+    assert max(gaps) < 0.15, f"event loop blocked for {max(gaps):.2f}s"
+
+
+def test_a_passive_scan_never_resolves_what_only_the_active_scanner_checks(active_client) -> None:
+    """A passive-only rescan used to mark the XSS found by an active scan as resolved
+    (retest PASS), and the next active scan then reported it as a "regression"."""
+    url = "http://app.test/search?q=hi"
+    active_client.post("/api/security/scan", json={"url": url, "active": True})
+    passive = active_client.post("/api/security/scan", json={"url": url}).json()
+    assert not any(r["check_id"] == "SEC-XSS-REFLECTED" for r in passive["resolved"])
+    xss = next(f for f in active_client.get("/api/security/findings").json() if f["check_id"] == "SEC-XSS-REFLECTED")
+    assert xss["status"] == "open" and xss["retest_result"] is None
+
+    # The next active scan finds it again: still the same open finding, not a regression
+    again = active_client.post("/api/security/scan", json={"url": url, "active": True}).json()
+    assert not any(r["check_id"] == "SEC-XSS-REFLECTED" for r in again["reopened"])
+
+
+def test_the_stateless_retest_uses_the_check_that_found_it(active_client, monkeypatch) -> None:
+    """An active finding sent to /security/retest went to the passive scanner and came back "pass"."""
+    url = "http://app.test/search?q=hi"
+    xss = _by_id(active_client.post("/api/security/scan", json={"url": url, "active": True}).json()["findings"])[
+        "SEC-XSS-REFLECTED"]
+    body = {k: v for k, v in xss.items() if k in (
+        "check_id", "source", "title", "severity", "component", "target_url", "evidence")}
+    assert active_client.post("/api/security/retest", json=body).json()["retest_result"] == "fail"  # still vulnerable
+
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN", False)
+    assert active_client.post("/api/security/retest", json=body).status_code == 403
+
+    dep = {**body, "check_id": "SEC-DEP-PYSEC-1"}
+    assert active_client.post("/api/security/retest", json=dep).status_code == 422
+
+
+def test_a_hosted_server_never_scans_its_own_internal_ports(monkeypatch) -> None:
+    """Loopback is in every scan scope (local development), so on a hosted server any
+    signed-in user could scan the server's own internal services and read their headers."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    hits = []
+
+    class Internal(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            hits.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<p>internal admin</p>")
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Internal)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/admin"
+    client = TestClient(app)
+    try:
+        monkeypatch.setattr(settings, "ALLOW_PRIVATE_TARGETS", False)  # a hosted server
+        resp = client.post("/api/security/scan", json={"url": url})
+        assert resp.status_code == 403 and "private or internal" in resp.json()["detail"]
+        assert hits == []
+
+        monkeypatch.setattr(settings, "ALLOW_PRIVATE_TARGETS", True)  # local development
+        assert client.post("/api/security/scan", json={"url": url}).status_code == 200
+        assert hits[0] == "/admin"  # then the root's /.git/HEAD and /.env probes
+    finally:
+        server.shutdown()
+
+
+def test_a_malformed_port_is_refused_not_a_server_error(client) -> None:
+    resp = client.post("/api/security/scan", json={"url": "http://app.test:99999/"})
+    assert resp.status_code == 403 and "invalid port" in resp.json()["detail"]
+
+
+async def _fake_triage(url, findings, **kw):
+    from security.ai import AIInsight
+
+    return {f.key: AIInsight(priority=1, summary=f"note:{f.check_id}", explanation="why", remediation="do X")
+            for f in findings}
+
+
+def test_the_ai_triage_is_kept_on_the_findings(client, monkeypatch) -> None:
+    """It was only in the scan's answer: the findings list (and reports) never showed it."""
+    from app.api import security as sec
+
+    monkeypatch.setattr(sec.security_ai, "enabled", lambda: True)
+    monkeypatch.setattr(sec.security_ai, "triage", _fake_triage)
+    _scan(client)
+
+    listed = client.get("/api/security/findings").json()
+    assert listed and all(f["ai"]["summary"] == f"note:{f['check_id']}" for f in listed)
+
+
+def test_an_active_scan_of_an_unverified_host_is_refused_until_it_is_verified(active_client, monkeypatch) -> None:
+    from app import auth
+    from app.database.session import get_store
+    from tests.app.test_domain_verification import _verified
+
+    monkeypatch.setattr(settings, "AUTH_REQUIRED", True)
+    monkeypatch.setattr(settings, "SECURITY_ACTIVE_SCAN_USERS", "ann")
+    monkeypatch.setattr(settings, "REQUIRE_DOMAIN_VERIFICATION", "on")
+    monkeypatch.setattr(auth, "verify_token", lambda t: {"uid": "ann", "firebase": {"sign_in_provider": "password"}})
+    body = {"url": "http://app.test/search?q=hi", "active": True}
+    headers = {"Authorization": "Bearer ann"}
+
+    refused = active_client.post("/api/security/scan", json=body, headers=headers)
+    assert refused.status_code == 403 and "not verified" in refused.json()["detail"]
+
+    _verified(get_store(), "ann", "app.test")
+    allowed = active_client.post("/api/security/scan", json=body, headers=headers)
+    assert allowed.status_code == 200, allowed.text
+    assert any(f["check_id"] == "SEC-XSS-REFLECTED" for f in allowed.json()["findings"])

@@ -10,7 +10,7 @@ TestSphere-AI unifies three distinct architectural domains into a unified QA aut
 2. **Member 2: Browser Execution Engine** ([`engine/`](file:///engine/))
    - Executes test actions deterministically on real Chromium/Firefox/WebKit browsers.
    - Captures screenshots, DOM state dumps, and execution timings.
-3. **Member 3: Platform Backend & APIs** ([`backend/`](file:///backend/))
+3. **Member 3: Platform Backend & APIs** ([`backend/`](../backend/app/))
    - Manages state (projects, test cases, executions, findings, audit trail) in Cloud Firestore (or a local JSON file offline).
    - Exposes REST APIs, orchestration pipelines, and real-time SSE streams.
 
@@ -21,7 +21,7 @@ TestSphere-AI unifies three distinct architectural domains into a unified QA aut
 TestSphere-AI features an offline-first design. All 1,102 automated tests run offline with **zero external API calls and zero costs**.
 
 ### 2.1 Offline Mode (`LLM_PROVIDER=mock`)
-Default setting out of the box. Utilizes registered scenario providers (`agents/planner/mock_scenarios.py`) simulating realistic LLM responses:
+Default setting out of the box. Utilizes registered scenario providers (`backend/agents/planner/mock_scenarios.py`) simulating realistic LLM responses:
 ```bash
 # In .env:
 LLM_PROVIDER=mock
@@ -50,7 +50,7 @@ LLM_MODEL=claude-sonnet-5-5
 LLM_PROVIDER=api
 LLM_API_KEY=AIza...
 LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
-LLM_MODEL=gemini-2.5-flash
+LLM_MODEL=gemini-3.8-flash   # older Gemini models are closed to new keys (HTTP 404)
 ```
 
 Leave `LLM_PROVIDER=mock` for tests and CI; no key or network is needed.
@@ -63,8 +63,8 @@ You can invoke the entire autonomous QA pipeline programmatically in Python:
 
 ```python
 import asyncio
-from backend.database.session import get_db_session
-from backend.orchestration.orchestrator import PlatformWorkflowOrchestrator
+from app.database.session import get_db_session
+from app.orchestration.orchestrator import PlatformWorkflowOrchestrator
 from agents.planner.schemas import ApplicationContext, PageElement
 
 async def run_autonomous_qa():
@@ -133,7 +133,7 @@ eventSource.onerror = (err) => {
 
 ### 4.3 Passive Security Scan
 
-`POST /api/security/scan` runs the passive scanner (`security/`) against one URL: a single GET per page, no attack payloads. Findings use the shared `Finding` schema and come back most severe first.
+`POST /api/security/scan` runs the passive scanner (`security/`) against one URL: a single GET per page, no attack payloads. Pass `"active": true` (where the server has `SECURITY_ACTIVE_SCAN` on) to also run the active (DAST) scanner — reflected XSS, SQL injection and open-redirect probes, scope-limited to the same allowlist. Findings use the shared `Finding` schema and come back most severe first.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/security/scan   -H "Content-Type: application/json" -d '{"url": "http://127.0.0.1:5173/"}'
@@ -151,5 +151,6 @@ Verify that all components are properly wired together by running the complete i
 
 ```powershell
 # Run engine tests, backend tests, and agent test suites
-python -m pytest tests/engine/ tests/backend/ tests/test_planner_pipeline.py -v
+cd backend
+python -m pytest tests/engine/ tests/app/ tests/test_planner_pipeline.py -v
 ```

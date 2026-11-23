@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Github, LogIn, RefreshCw, ShieldCheck, Stethoscope, UserPlus, Wand2 } from 'lucide-react';
+import { CheckCircle2, Github, LogIn, Phone, RefreshCw, ShieldCheck, Stethoscope, User, UserPlus, Wand2 } from 'lucide-react';
 import { authMessage, useAuth } from '../state/Auth';
 import { Logo } from '../components/TopNav';
 import { API_BASE_LABEL } from '../services/api';
@@ -126,12 +126,17 @@ const HEADINGS = {
   signin: ['Sign in', 'Welcome back. Sign in to your workspace.'],
   signup: ['Create your account', 'Start testing a site in a few minutes.'],
   reset: ['Reset your password', 'We will email you a link to choose a new one.'],
+  phone: ['Sign in with your phone', 'We will text you a 6-digit code.'],
 };
 
 function Login() {
-  const { signIn, signUp, signInWithGoogle, signInWithGitHub, resetPassword, notice: sessionNotice, clearNotice } = useAuth();
-  const [mode, setMode] = useState('signin'); // signin | signup | reset
-  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const {
+    signIn, signUp, signInWithGoogle, signInWithGitHub, resetPassword, signInAsGuest, sendPhoneCode, confirmPhoneCode,
+    linkNeeded, notice: sessionNotice, clearNotice,
+  } = useAuth();
+  const [mode, setMode] = useState('signin'); // signin | signup | reset | phone
+  const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', code: '' });
+  const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -152,6 +157,19 @@ function Login() {
     }
   }
 
+  function onPhoneSubmit(e) {
+    e.preventDefault();
+    if (codeSent) {
+      attempt(() => confirmPhoneCode(form.code));
+    } else {
+      attempt(async () => {
+        await sendPhoneCode(form.phone, 'phone-send');
+        setCodeSent(true);
+        setNotice(`Code sent to ${form.phone}.`);
+      });
+    }
+  }
+
   function onSubmit(e) {
     e.preventDefault();
     if (mode === 'signin') attempt(() => signIn(form.email, form.password));
@@ -168,6 +186,7 @@ function Login() {
     setMode(next);
     setError(null);
     setNotice(null);
+    setCodeSent(false);
   }
 
   const [title, subtitle] = HEADINGS[mode];
@@ -179,7 +198,17 @@ function Login() {
       </div>
       {sessionNotice && <div className="subbox small cell-wrap bad-text" role="alert">{sessionNotice}</div>}
 
-      {mode !== 'reset' && (
+      {linkNeeded && (
+        <div className="subbox small cell-wrap" role="status">
+          <b>This email already has a TestSphere account.</b> Sign in the way you first did (usually Google) and GitHub
+          is added to it, so either works from then on.
+          <button type="button" className="btn btn-primary btn-block mt-2" disabled={busy} onClick={() => attempt(signInWithGoogle)}>
+            <GoogleMark /> Continue with Google to add GitHub
+          </button>
+        </div>
+      )}
+
+      {(mode === 'signin' || mode === 'signup') && (
         <>
           <button type="button" className="btn btn-block" disabled={busy} onClick={() => attempt(signInWithGoogle)}>
             <GoogleMark /> Continue with Google
@@ -187,10 +216,37 @@ function Login() {
           <button type="button" className="btn btn-block" disabled={busy} onClick={() => attempt(signInWithGitHub)}>
             <Github size={18} aria-hidden="true" /> Continue with GitHub
           </button>
+          <button type="button" className="btn btn-block" disabled={busy} onClick={() => switchTo('phone')}>
+            <Phone size={18} aria-hidden="true" /> Continue with phone
+          </button>
           <div className="auth-or"><span>or with email</span></div>
         </>
       )}
 
+      {mode === 'phone' && (
+        <form className="auth-form" onSubmit={onPhoneSubmit}>
+          <label className="field">
+            Phone number
+            <input className="input" type="tel" value={form.phone} onChange={set('phone')} autoComplete="tel" required
+              placeholder="+91 98765 43210" disabled={codeSent} />
+          </label>
+          {codeSent && (
+            <label className="field">
+              Code from the SMS
+              <input className="input" inputMode="numeric" value={form.code} onChange={set('code')} required
+                autoComplete="one-time-code" maxLength={6} placeholder="123456" />
+            </label>
+          )}
+          {error && <div className="error-text" role="alert">{error}</div>}
+          {notice && <div className="ok-text small" role="status">{notice}</div>}
+          <button type="submit" id="phone-send" className="btn btn-primary btn-block" disabled={busy}>
+            {codeSent ? (busy ? 'Checking…' : 'Sign in') : (busy ? 'Sending…' : 'Send code')}
+          </button>
+          {codeSent && <button type="button" className="link-btn small" onClick={() => switchTo('phone')}>Use another number</button>}
+        </form>
+      )}
+
+      {mode !== 'phone' && (
       <form className="auth-form" onSubmit={onSubmit}>
         {mode === 'signup' && (
           <label className="field">
@@ -220,12 +276,21 @@ function Login() {
           {mode === 'reset' && (busy ? 'Sending…' : 'Send reset link')}
         </button>
       </form>
+      )}
 
       <p className="small m-0 self-center">
         {mode === 'signin' && <>New to TestSphere? <button type="button" className="link-btn" onClick={() => switchTo('signup')}>Create an account</button></>}
         {mode === 'signup' && <>Already have an account? <button type="button" className="link-btn" onClick={() => switchTo('signin')}>Sign in</button></>}
-        {mode === 'reset' && <button type="button" className="link-btn" onClick={() => switchTo('signin')}>Back to sign in</button>}
+        {(mode === 'reset' || mode === 'phone') && <button type="button" className="link-btn" onClick={() => switchTo('signin')}>Back to sign in</button>}
       </p>
+      {mode === 'signin' && (
+        <p className="hint m-0 self-center">
+          <button type="button" className="link-btn" disabled={busy} onClick={() => attempt(signInAsGuest)}>
+            <User size={14} aria-hidden="true" /> Try it as a guest
+          </button>{' '}
+          (no account; your work is lost when you sign out)
+        </p>
+      )}
 
       <div className="auth-foot">
         <Diagnostics />

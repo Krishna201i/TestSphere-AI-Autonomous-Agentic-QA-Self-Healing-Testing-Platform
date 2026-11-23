@@ -1,0 +1,9 @@
+[Unit]
+Description=TestSphere pull-based deploy (new image of main -> health check -> rollback on failure)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/testsphere/app/deploy/aws-ec2/cd/pull-deploy.sh
+TimeoutStartSec=1200

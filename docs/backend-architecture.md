@@ -13,7 +13,7 @@ TestSphere-AI's backend serves as the persistence, API coordination, and lifecyc
                                               v
                            +-------------------------------------+
                            |         FastAPI Application         |
-                           |          (backend/main.py)          |
+                           |            (app/main.py)            |
                            +------------------+------------------+
                                               |
                      +------------------------+------------------------+
@@ -21,19 +21,19 @@ TestSphere-AI's backend serves as the persistence, API coordination, and lifecyc
                      v                                                 v
          +-----------------------+                         +-----------------------+
          |     REST Routers      |                         |   Workflow / Stream   |
-         |  (backend/api/*.py)   |                         | (backend/api/workflow)|
+         |    (app/api/*.py)     |                         | (app/api/workflow.py) |
          +-----------+-----------+                         +-----------+-----------+
                      |                                                 |
                      v                                                 v
          +-----------------------+                         +-----------------------+
          |     Service Layer     |                         |  Orchestration Bridge |
-         |(backend/services/*.py)|                         | (backend/orchestration|
+         |  (app/services/*.py)  |                         | (app/orchestration/)  |
          +-----------+-----------+                         +-----------+-----------+
                      |                                                 |
                      v                                                 +--------+
          +-----------------------+                                              |
          |   Store interface     |                                              v
-         | (backend/database/)   |                                   +---------------------+
+         |    (app/database/)    |                                   +---------------------+
          +-----------+-----------+                                   | Member 1 (Agents)   |
                      |                                               | Member 2 (Engine)   |
                      v                                               +---------------------+
@@ -43,11 +43,13 @@ TestSphere-AI's backend serves as the persistence, API coordination, and lifecyc
          +-----------------------+
 ```
 
+Paths in the diagram are relative to `backend/`.
+
 ---
 
 ## 2. Storage & Data Model
 
-All persistence goes through the `Store` interface in [`backend/database/store.py`](../backend/database/store.py):
+All persistence goes through the `Store` interface in [`backend/app/database/store.py`](../backend/app/database/store.py):
 named collections of documents with integer ids, equality filters and ordering. Backends:
 
 | `DATABASE_BACKEND` | Implementation | Use |
@@ -56,8 +58,11 @@ named collections of documents with integer ids, equality filters and ordering. 
 | `local` | `LocalStore` (JSON file, atomic writes) | Offline local development (`LOCAL_DB_PATH`) |
 | `memory` | `MemoryStore` | Tests |
 
-Every backend passes the same contract tests (`tests/backend/test_store.py`), including Firestore via the official emulator.
-Ids are per-collection counters (in Firestore: `_meta/counters`, incremented transactionally); every document has
+Every backend passes the same contract tests (`backend/tests/app/test_store.py`), including Firestore via the official emulator.
+Ids are per-collection integers. In Firestore an insert claims the next id with `create()` (which never overwrites an
+existing document) and raises the collection's hint `_meta/counters_<collection>.next` with the atomic `Maximum`
+transform, so concurrent inserts never wait on a transaction and deleted ids are never reused; a collection without a
+hint continues from the older shared `_meta/counters` document. Every document has
 `id`, `created_at` and `updated_at` (ISO 8601 UTC strings).
 
 ### Collections
@@ -80,24 +85,24 @@ their test cases and those test cases' executions.
 
 ## 3. Service Layer Architecture
 
-The service layer in [`backend/services/`](file:///backend/services/) enforces transaction atomicity, business logic, and error boundaries:
+The service layer in [`backend/app/services/`](../backend/app/services/) enforces transaction atomicity, business logic, and error boundaries:
 
-- **`ProjectService`** (`backend/services/project_service.py`):
+- **`ProjectService`** (`backend/app/services/project_service.py`):
   Manages workspace creation, retrieval, updates, and cascading teardown.
-- **`ApplicationService`** (`backend/services/application_service.py`):
+- **`ApplicationService`** (`backend/app/services/application_service.py`):
   Handles target application configurations and URL normalization.
-- **`TestCaseService`** (`backend/services/test_case_service.py`):
+- **`TestCaseService`** (`backend/app/services/test_case_service.py`):
   Validates incoming test case structures, checks element reference integrity, and persists generated tests.
-- **`TestExecutionService`** (`backend/services/test_execution_service.py`):
+- **`TestExecutionService`** (`backend/app/services/test_execution_service.py`):
   Logs execution runs, tracks step statuses, records metrics, and archives visual artifacts.
-- **`ServiceExceptions`** (`backend/services/exceptions.py`):
+- **`ServiceExceptions`** (`backend/app/services/exceptions.py`):
   Centralized domain exception hierarchy (`EntityNotFoundError`, `ValidationError`, `ConflictError`) cleanly mapped to standard HTTP status codes.
 
 ---
 
 ## 4. REST API Specification
 
-The FastAPI application mounts routes defined in [`backend/api/`](file:///backend/api/):
+The FastAPI application mounts routes defined in [`backend/app/api/`](../backend/app/api/):
 
 ### 4.1 Project Endpoints (`/api/projects`)
 - `POST /api/projects`: Create a new project.
@@ -124,6 +129,14 @@ The FastAPI application mounts routes defined in [`backend/api/`](file:///backen
 - `GET /api/test-executions`: Query execution history with pagination.
 - `GET /api/test-executions/{execution_id}`: Get execution details, step logs, and screenshots.
 
+### 4.4a Test Studio (`/api/projects/{id}/studio`, `/api/studio`)
+Plain-English tests ([`backend/app/api/studio.py`](../backend/app/api/studio.py), logic in [`backend/app/services/test_studio.py`](../backend/app/services/test_studio.py)):
+- `POST /api/projects/{id}/studio/draft`: `{instruction, start_path?}` → steps written by the configured model (rule-based planner without one, or when the model fails; `source` and `note` say which), each checked against the live page (`status`: `found`, `text`, `page`, `unverified`, `invalid`), plus `not_covered`, `problems` and `quarantine`. Rate-limited like runs.
+- `POST /api/projects/{id}/studio/verify`: re-check edited steps (the page analysis is reused for 5 minutes).
+- `GET|POST /api/projects/{id}/studio/tests`, `PUT /api/projects/{id}/studio/tests/{test_id}`: list, save, change. A saved test is a test case with `external_id` `studio-…`, so every pipeline run executes it and self-healing writes repaired locators back into it; one with an `unverified` step is saved quarantined. Steps with an `invalid` step, or without a check, are refused (422).
+- `GET /api/studio/tests/{test_id}/playwright`: any saved test as a Playwright `.spec.ts` download.
+- Run one test alone with `POST /api/workflow/plan-and-execute` and its `test_case_id`.
+
 ### 4.5 Orchestration & Workflow Stream (`/api/workflow`)
 - `POST /api/workflow/plan-and-execute`: High-level endpoint accepting application context, generating tests via AI agents, executing on Playwright, and applying self-healing if needed.
 - `GET /api/workflow/stream/{execution_id}`: **Server-Sent Events (SSE)** endpoint streaming real-time execution steps, locator healing events, and screenshot URLs to the frontend dashboard.
@@ -132,6 +145,6 @@ The FastAPI application mounts routes defined in [`backend/api/`](file:///backen
 
 ## 5. Security & Error Handling
 
-- **CORS Middleware**: Configured in [`backend/main.py`](file:///backend/main.py) with configurable origins for local development and production deployments.
-- **Request Validation**: Pydantic v2 schemas in [`backend/api/schemas.py`](file:///backend/api/schemas.py) strictly validate payloads before passing to services.
+- **CORS Middleware**: Configured in [`backend/app/main.py`](../backend/app/main.py) with configurable origins for local development and production deployments.
+- **Request Validation**: Pydantic v2 schemas in [`backend/app/api/schemas.py`](../backend/app/api/schemas.py) strictly validate payloads before passing to services.
 - **Database Session Lifecycles**: Dependency injection via `get_db()` ensures thread-safe session allocation and deterministic teardown upon request completion.
