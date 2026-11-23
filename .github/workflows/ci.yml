@@ -174,23 +174,24 @@ jobs:
           --config p/javascript --config p/react --config p/dockerfile --config p/github-actions
           --exclude build --exclude tests --exclude frontend/node_modules --exclude frontend/dist
 
-  # The production image (what the EC2 server runs): builds, and the tools the
-  # backend shells out to work inside it
+  # The production images (what the EC2 server runs): both build, the tools
+  # the backend shells out to work inside it, and the two containers work
+  # together (the frontend serves the dashboard and proxies /api)
   docker:
-    name: Docker image (build, smoke test)
+    name: Docker images (build, smoke test)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Build
-        run: docker build -t testsphere:ci .
+        run: docker compose build
 
-      - name: Tools inside the image
+      - name: Tools inside the backend image
         run: |
           set -eu
-          run() { docker run --rm testsphere:ci "$@"; }
-          test "$(run id -u)" = 10001 || { echo "the image must run as uid 10001"; exit 1; }
+          run() { docker run --rm testsphere-backend:local "$@"; }
+          test "$(run id -u)" = 10001 || { echo "the backend image must run as uid 10001"; exit 1; }
           run git --version
           # Ingestion clones repositories with git
           run sh -c 'git clone -q --depth 1 https://github.com/octocat/Hello-World.git /tmp/repo && test -f /tmp/repo/README'
@@ -201,15 +202,30 @@ jobs:
               assert pg.inner_text('h1') == 'ok'; b.close()
           print('chromium ok')"
 
-      - name: Server starts and serves the dashboard
+      - name: The two containers serve the dashboard and the API
         run: |
           set -eu
-          docker run -d --name ts -p 8000:8000 -e AUTH_REQUIRED=false -e DATABASE_BACKEND=local testsphere:ci
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/api/health && break; sleep 2; done
-          curl -sf http://127.0.0.1:8000/api/health | grep -q '"status":"ok"'
-          curl -sf -o /dev/null -w '%{content_type}\n' http://127.0.0.1:8000/ | grep -q text/html
-          echo "server ok"
+          docker compose up -d --wait --wait-timeout 120
+          base=http://127.0.0.1:8080
+          # API through the frontend's proxy
+          curl -sf "$base/api/health" | grep -q '"status":"ok"'
+          curl -sf "$base/api/system" | grep -q '"service"'
+          curl -sf -o /dev/null "$base/openapi.json"
+          # Dashboard from nginx, with the security headers; unknown paths fall back to it
+          curl -sf -D headers.txt -o index.html "$base/"
+          grep -qi '^content-type: text/html' headers.txt
+          grep -qi "^content-security-policy: default-src 'self'" headers.txt
+          grep -qi '^x-frame-options: DENY' headers.txt
+          grep -q '<div id="root"' index.html
+          curl -sf "$base/some/page" | grep -q '<div id="root"'
+          # Built assets load and are cached
+          asset=$(grep -o '/assets/[^"]*\.js' index.html | head -1)
+          curl -sf -D asset-headers.txt -o /dev/null "$base$asset"
+          grep -qi 'cache-control: .*immutable' asset-headers.txt
+          # The backend is not published: only the frontend port is open
+          if curl -sf --max-time 3 http://127.0.0.1:8000/api/health; then echo "the backend port must not be published"; exit 1; fi
+          echo "frontend + backend ok"
 
       - name: Container logs
         if: failure()
-        run: docker logs ts 2>&1 | tail -100 || true
+        run: docker compose logs --tail 100 || true

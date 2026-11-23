@@ -1,5 +1,9 @@
-# HTTPS with an automatic Let's Encrypt certificate for $DOMAIN
+# HTTPS with an automatic Let's Encrypt certificate for $DOMAIN, in front of
+# the frontend container (dashboard + /api proxy to the backend)
 {$DOMAIN} {
 	encode gzip
-	reverse_proxy api:8000
+	reverse_proxy {$UPSTREAM:frontend:8080} {
+		# Live pipeline events (server-sent events) go out as they arrive
+		flush_interval -1
+	}
 }

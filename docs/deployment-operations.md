@@ -200,31 +200,32 @@ itself, and logs a one-time warning with a link that creates the missing index.
 
 ## 3. Docker Containerization
 
-The repository's [`Dockerfile`](../Dockerfile) builds one image with the API,
-the dashboard and headless Chromium:
+TestSphere runs as **two containers**, one per image:
 
-- **Stage 1** (`node:24-slim`): `npm ci` and `npm run build` for the dashboard.
-- **Stage 2** (`python:3.11-slim`): the hash-checked lock (`pip install --require-hashes -r backend/requirements.txt`),
-  Chromium with its system libraries (`playwright install --with-deps chromium`), the backend packages and
-  the built dashboard. The image mirrors the repository: Python in `/app/backend` (the working directory,
-  so data lives in `/app/backend/data`) and the dashboard in `/app/frontend/dist`. Runs as an unprivileged
-  user (uid 10001) with a `HEALTHCHECK` on `/api/health`.
+| Image | Dockerfile | Contents |
+| --- | --- | --- |
+| **backend** | [`backend/Dockerfile`](../backend/Dockerfile) | `python:3.11-slim` with the hash-checked lock (`pip install --require-hashes -r requirements.txt`), Chromium and its system libraries (`playwright install --with-deps chromium`), git, and the backend packages. Serves only the API on port 8000; the same image runs the pipeline worker (`python -m app.worker`). Runs as uid 10001 with a `HEALTHCHECK` on `/api/health`. Data lives in `/app/backend/data`. |
+| **frontend** | [`frontend/Dockerfile`](../frontend/Dockerfile) | The dashboard built with `npm ci && npm run build` (`node:24-slim`), served by unprivileged nginx (`nginx-unprivileged`, uid 101) on port 8080. nginx proxies `/api`, `/docs` and `/openapi.json` to the backend ([`frontend/nginx/`](../frontend/nginx/)), so the browser sees one origin: no CORS and no `VITE_API_URL`. Live pipeline events (SSE) are proxied unbuffered; the dashboard's own files get the same security headers as the API; hashed assets are cached for a year and `index.html` is always revalidated. |
+
+The frontend finds the backend through `BACKEND_HOST` (default `backend:8000`) and resolves it on each request
+with `NGINX_RESOLVER` (default Docker's `127.0.0.11`), so a recreated backend container is picked up without
+restarting nginx. The frontend image holds no settings: the same image runs anywhere, and the Firebase sign-in
+configuration comes from the backend (`/api/system`) at run time.
+
+Locally, with [`docker-compose.yml`](../docker-compose.yml) at the root:
 
 ```bash
-docker build -t testsphere .
-
-# Production-like: Firebase sign-in and Firestore
-docker run -p 8000:8000 --env-file .env testsphere
-
-# Offline try-out without sign-in (the image sets APP_ENV=production, so
-# running open has to be chosen explicitly)
-docker run -p 8000:8000 -e AUTH_REQUIRED=false -e DATABASE_BACKEND=local testsphere
+cp .env.example .env          # optional: settings; offline defaults otherwise
+docker compose up --build     # dashboard and API on http://localhost:8080
 ```
 
-`PORT` (default 8000) sets the listening port. The image does not include `tests/` or `docs/`.
+The defaults run offline (local JSON database, sign-in off, mock model); anything set in `.env` overrides them.
+Only the frontend's port is published (`FRONTEND_PORT`, default 8080); the backend is reachable only from the
+frontend container. The images do not include `tests/`, `scripts/` or `docs/`.
 
-Production runs this image on AWS EC2 with Docker Compose (API, worker and Caddy for HTTPS), secrets in SSM
-Parameter Store and no SSH: see [`deploy/aws-ec2/README.md`](../deploy/aws-ec2/README.md) for setup, updates and rollback.
+Production runs the same two images on AWS EC2 with Docker Compose (backend, worker, frontend, and Caddy for
+HTTPS), secrets in SSM Parameter Store and no SSH: see [`deploy/aws-ec2/README.md`](../deploy/aws-ec2/README.md)
+for setup, continuous deployment and rollback.
 
 ### 3.1 Separate pipeline worker
 
@@ -234,7 +235,7 @@ With a worker:
 
 1. Set `PIPELINE_EXECUTION=worker` on **both** the API and the worker (same environment otherwise,
    including Firestore credentials; the worker refuses to start without a shared database).
-2. Run the worker: `python -m app.worker` (Docker: `docker run --env-file .env testsphere python -m app.worker`;
+2. Run the worker: `python -m app.worker` (Docker: `docker run --env-file .env testsphere-backend python -m app.worker`;
    on AWS EC2: the `worker` service in [`deploy/aws-ec2/docker-compose.yml`](../deploy/aws-ec2/docker-compose.yml)).
 
 The API then only queues runs. The worker claims the oldest queued run atomically (several workers never
@@ -246,7 +247,7 @@ Interactive runs from the Pipeline page (`/api/workflow/*`) still execute in the
 
 ## 4. Continuous Integration
 
-Deployment is a separate workflow, [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml): after CI passes on `main` it builds the image and publishes it to ghcr.io, and a timer on the EC2 instance pulls it, checks its health and rolls back on failure (off until `DEPLOY_ENABLED` is set; see [`deploy/aws-ec2`](../deploy/aws-ec2/README.md#continuous-deployment)).
+Deployment is a separate workflow, [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml): after CI passes on `main` it builds the backend and frontend images and publishes them to ghcr.io, and a timer on the EC2 instance pulls them, checks their health and rolls back on failure (off until `DEPLOY_ENABLED` is set; see [`deploy/aws-ec2`](../deploy/aws-ec2/README.md#continuous-deployment)).
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every pull request and on pushes to `main`:
 

@@ -1,30 +1,41 @@
-# TestSphere on one EC2 instance: API (+ dashboard), pipeline worker, Caddy for HTTPS.
-#   cd /opt/testsphere/app/deploy/aws-ec2 && ./fetch-env.sh && docker compose up -d --build
+# TestSphere on one EC2 instance, four containers from two images:
+#   caddy     HTTPS on 80/443 (Let's Encrypt for $DOMAIN) -> frontend
+#   frontend  dashboard (nginx), proxies /api to backend      [testsphere-frontend image]
+#   backend   FastAPI API                                     [testsphere image]
+#   worker    pipeline runs and the scheduler                 [testsphere image]
+#
+#   cd /opt/testsphere/app/deploy/aws-ec2 && ./fetch-env.sh \
+#     && GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
 # Secrets come from SSM Parameter Store (/testsphere/*) via fetch-env.sh into
 # /opt/testsphere/secrets.env; settings that are not secret live here.
+#
+# Images: continuous deployment (cd/pull-deploy.sh) writes the published
+# ghcr.io digests to this folder's .env as TESTSPHERE_IMAGE and
+# TESTSPHERE_FRONTEND_IMAGE, so nothing builds on the instance. Without them
+# `--build` builds both here.
 
-x-testsphere: &testsphere
+x-logging: &logging
+  # Docker keeps container logs forever by default; cap them at 3 × 10 MB
+  driver: json-file
+  options: {max-size: 10m, max-file: "3"}
+
+x-backend: &backend
   build:
-    context: ../..
+    context: ../../backend
     args:
-      GIT_COMMIT: ${GIT_COMMIT:-}   # GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
-  # Built here by default; continuous deployment (cd/pull-deploy.sh) sets the
-  # published ghcr.io image in this folder's .env, so nothing builds on the instance
-  image: ${TESTSPHERE_IMAGE:-testsphere:latest}
+      GIT_COMMIT: ${GIT_COMMIT:-}
+  image: ${TESTSPHERE_IMAGE:-testsphere-backend:latest}
   restart: unless-stopped
-  logging: &logging
-    # Docker keeps container logs forever by default; cap them at 3 × 10 MB
-    driver: json-file
-    options: {max-size: 10m, max-file: "3"}
+  logging: *logging
   env_file: /opt/testsphere/secrets.env
-  environment: &env
+  environment:
     APP_ENV: production
     # Runs are queued by the API and executed by the worker, so an API restart
     # never interrupts a scan
     PIPELINE_EXECUTION: worker
     # 2 GB instance: one browser at a time; further runs queue
     ENGINE_MAX_BROWSERS: "1"
-    # The dashboard is served by the API on the same origin, so no CORS origins
+    # The frontend container proxies /api on the same origin, so no CORS origins
     DASHBOARD_URL: https://${DOMAIN}
     LOG_FORMAT: json
     # Security scanning scope: ONLY hosts we own or are authorized to test
@@ -47,14 +58,13 @@ x-testsphere: &testsphere
     - testsphere-data:/app/backend/data   # artifacts (screenshots, traces) the API serves and the worker writes
 
 services:
-  api:
-    <<: *testsphere
-    # Behind Caddy: trust its X-Forwarded-* headers (the API port is not published)
-    command: ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log --proxy-headers --forwarded-allow-ips '*'"]
+  backend:
+    <<: *backend
+    # Port 8000 is reachable only by the frontend container, never published
     expose: ["8000"]
 
   worker:
-    <<: *testsphere
+    <<: *backend
     command: ["python", "-m", "app.worker"]
     healthcheck:
       # The image's check probes the API's HTTP port, which the worker has none
@@ -63,7 +73,19 @@ services:
       interval: 60s
       timeout: 15s
       start_period: 60s
-    depends_on: [api]
+    depends_on: [backend]
+
+  frontend:
+    build: ../../frontend
+    # The image published for this commit by .github/workflows/deploy.yml
+    # (cd/pull-deploy.sh pins its digest); with --build, built here instead
+    image: ${TESTSPHERE_FRONTEND_IMAGE:-ghcr.io/krishna201i/testsphere-frontend:${GIT_COMMIT:-main}}
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      BACKEND_HOST: backend:8000
+    expose: ["8080"]
+    depends_on: [backend]
 
   caddy:
     image: caddy:2.10.2-alpine
@@ -72,11 +94,14 @@ services:
     ports: ["80:80", "443:443"]
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN, e.g. 54-153-148-247.sslip.io}
+      # Where HTTPS traffic goes (read by the Caddyfile). Changing it recreates
+      # this container, so a new Caddyfile is always picked up with it
+      UPSTREAM: frontend:8080
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-    depends_on: [api]
+    depends_on: [frontend]
 
 volumes:
   testsphere-data:

@@ -1,0 +1,40 @@
+# TestSphere locally in two containers: the dashboard (nginx) and the backend.
+#   docker compose up --build        # then open http://localhost:8080
+# The dashboard proxies /api to the backend, so the browser sees one origin.
+# Settings come from .env (cp .env.example .env); the defaults below run
+# offline: local JSON database, sign-in off, mock AI model.
+# Production (EC2, HTTPS, worker, Firestore): deploy/aws-ec2/docker-compose.yml
+
+services:
+  backend:
+    build:
+      context: backend
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+    image: testsphere-backend:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_BACKEND: ${DATABASE_BACKEND:-local}
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
+      DASHBOARD_URL: ${DASHBOARD_URL:-http://localhost:8080}
+    expose: ["8000"]
+    volumes:
+      - backend-data:/app/backend/data
+    restart: unless-stopped
+
+  frontend:
+    build: frontend
+    image: testsphere-frontend:local
+    environment:
+      BACKEND_HOST: backend:8000
+    ports: ["${FRONTEND_PORT:-8080}:8080"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  backend-data:

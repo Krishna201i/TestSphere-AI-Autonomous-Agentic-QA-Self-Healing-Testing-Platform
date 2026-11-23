@@ -180,7 +180,7 @@ def write_report(results: list[ScenarioResult], md_path: Path, csv_path: Path) -
         "",
         "Do the tests TestSphere writes for a login or sign-up page catch real bugs, without failing a",
         "healthy site? Produced by `python -m scripts.generation_eval` against the local site in",
-        "`tests/fixtures/auth_app.py`; the rule-based planner every run uses, no LLM.",
+        "`backend/tests/fixtures/auth_app.py`; the rule-based planner every run uses, no LLM.",
         "",
         "* **Feature checks**: assertions other than \"the body is visible\" or the page title.",
         "* **Healthy fails**: tests failing on the working site, on the first run and on the next one",
