@@ -107,7 +107,13 @@ def fixes_for(findings: list[dict]) -> tuple[Fix, list[Manual]]:
             fix.set_headers[name] = value
             fix.sources[name] = cid
         elif cid == "SEC-DISCLOSURE":
-            evidence = " ".join(f.get("evidence") or []).lower()
+            raw_evidence = f.get("evidence") or []
+            if isinstance(raw_evidence, str):
+                evidence = raw_evidence.lower()
+            elif isinstance(raw_evidence, (list, tuple)):
+                evidence = " ".join(str(item) for item in raw_evidence).lower()
+            else:
+                evidence = str(raw_evidence).lower()
             leaking = {h for h in LEAKY_HEADERS if h.lower() in evidence} or {"Server", "X-Powered-By"}
             fix.remove_headers |= leaking
             for h in leaking:

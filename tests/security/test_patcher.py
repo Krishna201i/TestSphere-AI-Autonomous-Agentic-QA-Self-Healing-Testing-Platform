@@ -224,6 +224,19 @@ def test_unsupported_findings_and_repos_explain_why(tmp_path):
     assert "No supported app" in reasons["SEC-HDR-FRAME"]
 
 
+def test_disclosure_evidence_accepts_a_plain_string():
+    """A scanner may return evidence as text rather than a list of entries."""
+    fix, manual = fixes_for([finding("SEC-DISCLOSURE", evidence="Server: nginx/1.25")])
+    assert fix.remove_headers == {"Server"}
+    assert manual == []
+
+
+def test_disclosure_evidence_accepts_list_entries():
+    fix, manual = fixes_for([finding("SEC-DISCLOSURE", evidence=["x-powered-by: Express"])])
+    assert fix.remove_headers == {"X-Powered-By"}
+    assert manual == []
+
+
 def test_findings_group_into_one_fix():
     fix, manual = fixes_for([finding("SEC-HDR-CSP"), finding("SEC-DISCLOSURE", evidence=["x-powered-by: PHP"]),
                              finding("SEC-MIXED-CONTENT")])
