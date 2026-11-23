@@ -486,54 +486,63 @@ def _patch_nginx(text: str, fix: Fix) -> tuple[str, list[tuple[str, str]]]:
     return text, done
 
 
+def _json_value_spans(content: str, start: int) -> dict[str, tuple[int, int]]:
+    """Locate direct values in an already validated JSON object."""
+    decoder = json.JSONDecoder()
+    spans: dict[str, tuple[int, int]] = {}
+    pos = start + 1  # opening brace
+    while True:
+        while content[pos] in " \t\r\n":
+            pos += 1
+        if content[pos] == "}":
+            return spans
+        key, pos = decoder.raw_decode(content, pos)
+        while content[pos] in " \t\r\n":
+            pos += 1
+        pos += 1  # colon
+        while content[pos] in " \t\r\n":
+            pos += 1
+        value_start = pos
+        _, pos = decoder.raw_decode(content, pos)
+        if key in spans:
+            raise ValueError("Duplicate JSON key")
+        spans[key] = (value_start, pos)
+        while content[pos] in " \t\r\n":
+            pos += 1
+        if content[pos] == ",":
+            pos += 1
+
+
 def _patch_package_json(content: str, package_name: str, fixed_version: str) -> tuple[str, bool]:
-    """Update a dependency version in package.json, preserving indentation and formatting."""
+    """Edit direct dependency values only, preserving all other JSON text."""
     try:
         data = json.loads(content)
+        if not isinstance(data, dict):
+            return content, False
+        sections = _json_value_spans(content, len(content) - len(content.lstrip()))
+        edits: list[tuple[int, int, str]] = []
+        for section in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+            deps = data.get(section)
+            if not isinstance(deps, dict):
+                continue
+            spans = _json_value_spans(content, sections[section][0])
+            for name, old_spec in deps.items():
+                if name.lower() != package_name.lower():
+                    continue
+                # Aliases, URLs and compound ranges need an ecosystem-aware
+                # resolver; replacing them with a registry pin changes meaning.
+                match = re.fullmatch(r"(\^|~|>=)?v?[0-9][A-Za-z0-9.!+_-]*", old_spec) if isinstance(old_spec, str) else None
+                if match is None:
+                    return content, False
+                new_spec = (match.group(1) or "") + fixed_version
+                if new_spec != old_spec:
+                    edits.append((*spans[name], json.dumps(new_spec)))
     except (ValueError, TypeError):
         return content, False
 
-    found_section = None
-    real_pkg_name = package_name
-    for sec in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
-        deps = data.get(sec)
-        if isinstance(deps, dict):
-            for k in deps:
-                if k.lower() == package_name.lower():
-                    found_section = sec
-                    real_pkg_name = k
-                    break
-        if found_section:
-            break
-
-    if not found_section:
-        return content, False
-
-    pattern = re.compile(
-        r'([ \t]*"' + re.escape(real_pkg_name) + r'"\s*:\s*")([^"]*)(")',
-        re.IGNORECASE
-    )
-    match = pattern.search(content)
-    if not match:
-        return content, False
-
-    old_spec = match.group(2)
-    if old_spec.startswith("^"):
-        new_spec = f"^{fixed_version}"
-    elif old_spec.startswith("~"):
-        new_spec = f"~{fixed_version}"
-    elif old_spec.startswith(">="):
-        new_spec = f">={fixed_version}"
-    else:
-        new_spec = fixed_version
-
-    new_content = pattern.sub(r'\g<1>' + new_spec + r'\g<3>', content, count=1)
-    try:
-        json.loads(new_content)
-    except (ValueError, TypeError):
-        return content, False
-
-    return new_content, True
+    for start, end, replacement in sorted(edits, reverse=True):
+        content = content[:start] + replacement + content[end:]
+    return content, bool(edits)
 
 
 def _patch_requirements_txt(content: str, package_name: str, fixed_version: str) -> tuple[str, bool]:
@@ -806,7 +815,9 @@ def build_patch(root: Path, findings: list[dict], site_url: str | None = None) -
                     patched_any = True
 
             if not patched_any:
-                manual.append(Manual(cid, f"Vulnerable package '{pkg_name}' (fixed in {fixed_version}) was not found in package.json, requirements*.txt, or pyproject.toml."))
+                manual.append(Manual(cid, f"No supported editable declaration for '{pkg_name}' (fixed in {fixed_version}) "
+                                     "was found in package.json, requirements*.txt, or pyproject.toml. "
+                                     "It may be absent, already at the requested version, or use an unsupported specification; manual review is required."))
 
     for topic, cid in fix.sources.items():
         if topic not in handled and not any(m.check_id == cid for m in manual):

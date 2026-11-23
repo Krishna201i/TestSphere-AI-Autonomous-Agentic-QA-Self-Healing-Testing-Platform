@@ -430,7 +430,7 @@ def test_dependency_bump_not_found_in_manifest_goes_to_manual(tmp_path):
     assert result.files == []
     assert len(result.manual) == 1
     assert result.manual[0].check_id == "SEC-DEP-MISSING-01"
-    assert "not found in package.json" in result.manual[0].reason
+    assert "No supported editable declaration" in result.manual[0].reason
 
 
 @pytest.mark.parametrize("target_inside", [False, True])
@@ -532,3 +532,71 @@ def test_supported_dependency_name_and_version_tokens(package, version):
 
     assert fix.dependencies == [("SEC-DEP-VALID", package, version)]
     assert manual == []
+
+
+def test_package_bump_only_edits_dependency_sections(tmp_path):
+    import json
+
+    original = '''{
+  "scripts": {"axios": "node axios.js"},
+  "custom": {"dependencies": {"axios": "leave-me-alone"}},
+  "dependencies": {"axios": "^1.6.2", "react": "18.2.0"},
+  "devDependencies": {"axios": "~1.6.2"},
+  "peerDependencies": {"axios": ">=1.6.2"},
+  "optionalDependencies": {"axios": "1.6.2"}
+}
+'''
+    root = write(tmp_path / "repo", {"package.json": original})
+    findings = [finding("SEC-DEP-AXIOS", package="axios", fixed_in="1.8.2")]
+
+    result = build_patch(root, findings, SITE)
+
+    assert len(result.files) == 1
+    expected = original.replace("1.6.2", "1.8.2")
+    assert result.files[0].content == expected
+    assert json.loads(expected)["scripts"]["axios"] == "node axios.js"
+    git_apply(root, result.patch)
+    assert (root / "package.json").read_text(encoding="utf-8") == expected
+    assert build_patch(root, findings, SITE).files == []
+
+
+@pytest.mark.parametrize("content", ["[]", "null", '"text"', "42", '{"dependencies": []}'])
+def test_non_object_package_manifests_require_manual_review(tmp_path, content):
+    root = write(tmp_path / "repo", {"package.json": content + "\n"})
+
+    result = build_patch(root, [finding("SEC-DEP-AXIOS", package="axios", fixed_in="1.8.2")], SITE)
+
+    assert result.files == []
+    assert len(result.manual) == 1
+
+
+@pytest.mark.parametrize("spec", [None, {"version": "1.6.2"}, "file:../axios", "npm:other-package@1.6.2", "^1.6.2 || ^2.0.0"])
+def test_package_bump_leaves_unsupported_specs_for_manual_review(tmp_path, spec):
+    import json
+
+    root = write(tmp_path / "repo", {"package.json": json.dumps({"dependencies": {"axios": spec}}) + "\n"})
+
+    result = build_patch(root, [finding("SEC-DEP-AXIOS", package="axios", fixed_in="1.8.2")], SITE)
+
+    assert result.files == []
+    assert len(result.manual) == 1
+
+
+def test_package_bump_handles_escaped_json_keys():
+    from security.patcher import _patch_package_json
+
+    original = r'{"dependencies": {"\u0061xios": "^1.6.2"}}'
+    content, changed = _patch_package_json(original, "axios", "1.8.2")
+
+    assert changed is True
+    assert content == original.replace("1.6.2", "1.8.2")
+
+
+@pytest.mark.parametrize("original", [
+    '{"dependencies":{"axios":"1.6.2","axios":"1.6.3"}}',
+    '{"dependencies":{"axios":"1.6.2"},"dependencies":{"axios":"1.6.3"}}',
+])
+def test_package_bump_refuses_duplicate_json_keys(original):
+    from security.patcher import _patch_package_json
+
+    assert _patch_package_json(original, "axios", "1.8.2") == (original, False)
