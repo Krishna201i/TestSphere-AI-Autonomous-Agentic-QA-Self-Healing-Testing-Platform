@@ -17,3 +17,7 @@ e932dc0280c183975fd16a12a18703d663653d60:.gitleaksignore:generic-api-key:4
 # replaced with a fake key in the next commit. History is not rewritten (main is never force-pushed).
 6e4b9a3eeb9a9b56493196b2a13dccea989fb43c:tests/test_ingestion_auth_risks.py:gcp-api-key:107
 6e4b9a3eeb9a9b56493196b2a13dccea989fb43c:tests/test_ingestion_auth_risks.py:gcp-api-key:110
+
+# Fake key (ts_live_abcdef123456) in a test that checks credentials are redacted from agent
+# timelines (tests/test_agent_timeline.py, on vinamra-branch)
+2f473fec6da0d18ebdf8b5bc6de34d6bd5e5cbe6:tests/test_agent_timeline.py:generic-api-key:24
