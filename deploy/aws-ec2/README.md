@@ -93,9 +93,6 @@ aws ssm send-command --instance-ids INSTANCE_ID --document-name AmazonCloudWatch
 **Firestore** is backed up on Google's side: `gcloud firestore backups schedules create --database='(default)'
 --recurrence=daily --retention=7d` (needs the Blaze plan).
 
-**From outside:** [`.github/workflows/uptime.yml`](../../.github/workflows/uptime.yml) checks `/api/health` every
-15 minutes once the repository variable `UPTIME_URL` is set; GitHub emails a failed run.
-
 Costs: about $1–2 a month (2 agent metrics, 5 alarms, incremental snapshots); `aws freetier
 get-account-plan-state` shows whether the project is on the free or paid plan.
 
