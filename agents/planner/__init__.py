@@ -12,6 +12,9 @@ from agents.planner.planner import (
 # Test Prioritization
 from agents.planner.prioritization import (
     PrioritizationResult,
+    RiskPrioritizationConfig,
+    RiskPrioritizationContext,
+    RiskPrioritizationResult,
     TestPrioritizer,
     add_test_reasoning,
 )
@@ -53,6 +56,9 @@ __all__ = [
     # Prioritization
     "TestPrioritizer",
     "PrioritizationResult",
+    "RiskPrioritizationConfig",
+    "RiskPrioritizationContext",
+    "RiskPrioritizationResult",
     "add_test_reasoning",
     # Input schemas
     "ApplicationContext",

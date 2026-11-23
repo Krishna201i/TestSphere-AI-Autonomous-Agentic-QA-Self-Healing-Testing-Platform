@@ -15,6 +15,9 @@ from __future__ import annotations
 
 from agents.planner.prioritization import (
     PrioritizationResult,
+    RiskPrioritizationConfig,
+    RiskPrioritizationContext,
+    RiskPrioritizationResult,
     TestPrioritizer,
     add_test_reasoning,
 )
@@ -156,3 +159,103 @@ class TestAddTestReasoning:
         )
         annotated = add_test_reasoning([case])
         assert annotated[0].generated_reasoning == "Custom pre-existing reasoning."
+
+
+class TestRiskBasedPrioritization:
+    """Tests for opt-in risk-based test scheduling."""
+
+    def test_disabled_by_default_preserves_original_order(self):
+        prioritizer = TestPrioritizer()
+        cases = [
+            _make_case("TC-1", priority=TestPriority.LOW),
+            _make_case("TC-2", priority=TestPriority.CRITICAL),
+            _make_case("TC-3", priority=TestPriority.MEDIUM),
+        ]
+        # When config is None or disabled, return original order without reordering or exclusion
+        res_default = prioritizer.prioritize_by_risk(cases)
+        assert [c.test_id for c in res_default] == ["TC-1", "TC-2", "TC-3"]
+
+        cfg_disabled = RiskPrioritizationConfig(enabled=False)
+        res_disabled = prioritizer.prioritize_by_risk(cases, config=cfg_disabled)
+        assert [c.test_id for c in res_disabled] == ["TC-1", "TC-2", "TC-3"]
+
+    def test_risk_prioritization_orders_by_combined_risk(self):
+        prioritizer = TestPrioritizer()
+        # TC-LOGIN: high change relevance and high failure history
+        tc_login = _make_case("TC-LOGIN", priority=TestPriority.HIGH, page_url="/login")
+        # TC-CHECKOUT: critical, but no change and low failure
+        tc_checkout = _make_case("TC-CHECKOUT", priority=TestPriority.CRITICAL, page_url="/checkout")
+        # TC-ABOUT: low priority, low failure, no change
+        tc_about = _make_case("TC-ABOUT", priority=TestPriority.LOW, page_url="/about")
+
+        context = RiskPrioritizationContext(
+            changed_files=["src/auth/login_service.py"],
+            failure_history={"TC-LOGIN": 0.80, "TC-CHECKOUT": 0.10, "TC-ABOUT": 0.0},
+            flaky_risk_scores={"TC-LOGIN": 0.20, "TC-CHECKOUT": 0.05, "TC-ABOUT": 0.0},
+            test_file_mappings={"TC-LOGIN": ["src/auth/login_service.py"]},
+        )
+        cfg = RiskPrioritizationConfig(enabled=True)
+
+        results = prioritizer.prioritize_by_risk_with_explanations(
+            [tc_about, tc_checkout, tc_login], context=context, config=cfg
+        )
+
+        assert len(results) == 3
+        # TC-LOGIN should be first because of change relevance (1.0) and failure history (0.8)
+        assert results[0].test_case.test_id == "TC-LOGIN"
+        assert results[0].change_relevance == 1.0
+        assert results[0].failure_history == 0.8
+        assert results[0].risk_score > results[1].risk_score
+        assert results[2].test_case.test_id == "TC-ABOUT"
+
+        # Verify all tests preserved
+        sorted_cases = prioritizer.prioritize_by_risk(
+            [tc_about, tc_checkout, tc_login], context=context, config=cfg
+        )
+        assert [c.test_id for c in sorted_cases] == ["TC-LOGIN", "TC-CHECKOUT", "TC-ABOUT"]
+
+    def test_graceful_handling_without_git_history(self):
+        prioritizer = TestPrioritizer()
+        cases = [
+            _make_case("TC-A", priority=TestPriority.CRITICAL),
+            _make_case("TC-B", priority=TestPriority.LOW),
+        ]
+        # Empty context simulates repository without git history
+        context = RiskPrioritizationContext(changed_files=[])
+        cfg = RiskPrioritizationConfig(enabled=True)
+
+        results = prioritizer.prioritize_by_risk_with_explanations(cases, context=context, config=cfg)
+        assert len(results) == 2
+        assert results[0].change_relevance == 0.0
+        assert results[1].change_relevance == 0.0
+        # Criticality still distinguishes them
+        assert results[0].test_case.test_id == "TC-A"
+        assert results[0].risk_score > results[1].risk_score
+
+    def test_risk_explanation_contains_breakdown(self):
+        prioritizer = TestPrioritizer()
+        tc = _make_case("TC-1", priority=TestPriority.CRITICAL, page_url="/auth/login")
+        context = RiskPrioritizationContext(
+            changed_files=["src/auth/login.py"],
+            failure_history={"TC-1": 0.50},
+            flaky_risk_scores={"TC-1": 0.25},
+        )
+        cfg = RiskPrioritizationConfig(enabled=True)
+        results = prioritizer.prioritize_by_risk_with_explanations([tc], context=context, config=cfg)
+        exp = results[0].explanation
+        assert "Risk:" in exp
+        assert "ChangeRelevance" in exp
+        assert "FailureHistory" in exp
+        assert "Criticality" in exp
+        assert "FlakyRisk" in exp
+
+    def test_invalid_weights_raise_value_error(self):
+        import pytest
+        with pytest.raises(ValueError, match="Total risk factor weight"):
+            RiskPrioritizationConfig(
+                enabled=True,
+                weight_change_relevance=0.0,
+                weight_failure_history=0.0,
+                weight_criticality=0.0,
+                weight_flaky_risk=0.0,
+            )

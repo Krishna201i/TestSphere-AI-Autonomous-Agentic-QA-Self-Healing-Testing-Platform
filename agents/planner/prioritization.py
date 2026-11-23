@@ -18,7 +18,8 @@ was prioritized at its level.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 
 from agents.planner.schemas import TestCase
 from agents.schemas.enums import TestCategory, TestPriority
@@ -78,6 +79,54 @@ class PrioritizationResult:
 
     test_case: TestCase
     score: int
+    explanation: str
+
+
+@dataclass(frozen=True)
+class RiskPrioritizationConfig:
+    """Configuration for opt-in risk-based test scheduling.
+
+    Weights are explainable configuration values normalized between 0.0 and 1.0.
+    """
+
+    enabled: bool = False
+    weight_change_relevance: float = 0.35
+    weight_failure_history: float = 0.30
+    weight_criticality: float = 0.20
+    weight_flaky_risk: float = 0.15
+
+    def __post_init__(self) -> None:
+        total = (
+            self.weight_change_relevance
+            + self.weight_failure_history
+            + self.weight_criticality
+            + self.weight_flaky_risk
+        )
+        if total <= 0:
+            raise ValueError("Total risk factor weight must be greater than zero")
+
+
+@dataclass
+class RiskPrioritizationContext:
+    """Runtime context providing risk signals for test scheduling."""
+
+    changed_files: list[str] = field(default_factory=list)
+    failure_history: dict[str, float] = field(default_factory=dict)
+    criticality_scores: dict[str, float] = field(default_factory=dict)
+    flaky_risk_scores: dict[str, float] = field(default_factory=dict)
+    test_file_mappings: dict[str, list[str]] = field(default_factory=dict)
+
+
+@dataclass
+class RiskPrioritizationResult:
+    """Result of risk-based prioritization for a single test case."""
+
+    test_case: TestCase
+    risk_score: float
+    change_relevance: float
+    failure_history: float
+    criticality: float
+    flaky_risk: float
     explanation: str
 
 
@@ -223,6 +272,163 @@ class TestPrioritizer:
                 return 40
 
         return 0
+
+    def prioritize_by_risk(
+        self,
+        test_cases: list[TestCase],
+        context: RiskPrioritizationContext | None = None,
+        config: RiskPrioritizationConfig | None = None,
+    ) -> list[TestCase]:
+        """Prioritize test cases using risk-based scheduling when enabled.
+
+        Falls back to existing order when disabled or when no context is provided.
+        Never excludes any test cases.
+        """
+        if not test_cases:
+            return []
+        if config is None or not config.enabled:
+            return list(test_cases)
+        results = self.prioritize_by_risk_with_explanations(test_cases, context, config)
+        return [r.test_case for r in results]
+
+    def prioritize_by_risk_with_explanations(
+        self,
+        test_cases: list[TestCase],
+        context: RiskPrioritizationContext | None = None,
+        config: RiskPrioritizationConfig | None = None,
+    ) -> list[RiskPrioritizationResult]:
+        """Compute risk scores and return test cases with factor explanations.
+
+        Risk = 0.35 * ChangeRelevance + 0.30 * FailureHistory + 0.20 * Criticality + 0.15 * FlakyRisk
+        All factors and weights are normalized between 0.0 and 1.0.
+        """
+        if not test_cases:
+            return []
+        cfg = config or RiskPrioritizationConfig(enabled=True)
+        ctx = context or RiskPrioritizationContext()
+
+        results = [self._score_risk_case(tc, ctx, cfg) for tc in test_cases]
+        # Sort stably by risk_score descending
+        results.sort(key=lambda r: r.risk_score, reverse=True)
+        return results
+
+    def _score_risk_case(
+        self,
+        tc: TestCase,
+        context: RiskPrioritizationContext,
+        config: RiskPrioritizationConfig,
+    ) -> RiskPrioritizationResult:
+        """Compute normalized risk score and explanation for a test case."""
+        # 1. Change relevance (0.0 - 1.0)
+        change_rel, matched_files = self._compute_change_relevance(tc, context)
+
+        # 2. Failure history (0.0 - 1.0)
+        raw_fail = context.failure_history.get(tc.test_id, 0.0)
+        fail_hist = min(max(float(raw_fail), 0.0), 1.0)
+
+        # 3. Criticality (0.0 - 1.0)
+        if tc.test_id in context.criticality_scores:
+            crit = min(max(float(context.criticality_scores[tc.test_id]), 0.0), 1.0)
+        else:
+            _crit_map = {
+                TestPriority.CRITICAL: 1.0,
+                TestPriority.HIGH: 0.75,
+                TestPriority.MEDIUM: 0.50,
+                TestPriority.LOW: 0.25,
+            }
+            crit = _crit_map.get(tc.priority, 0.50)
+
+        # 4. Flaky risk (0.0 - 1.0)
+        raw_flaky = context.flaky_risk_scores.get(tc.test_id, 0.0)
+        flaky_risk = min(max(float(raw_flaky), 0.0), 1.0)
+
+        # Normalized weights
+        total_weight = (
+            config.weight_change_relevance
+            + config.weight_failure_history
+            + config.weight_criticality
+            + config.weight_flaky_risk
+        )
+        w_change = config.weight_change_relevance / total_weight
+        w_fail = config.weight_failure_history / total_weight
+        w_crit = config.weight_criticality / total_weight
+        w_flaky = config.weight_flaky_risk / total_weight
+
+        risk_score = (
+            w_change * change_rel
+            + w_fail * fail_hist
+            + w_crit * crit
+            + w_flaky * flaky_risk
+        )
+        risk_score = round(min(max(risk_score, 0.0), 1.0), 4)
+
+        match_desc = (
+            f"matched {len(matched_files)} changed file(s)"
+            if matched_files
+            else "no changed file match"
+        )
+        explanation = (
+            f"Risk: {risk_score:.4f} = {w_change:.2f}*ChangeRelevance({change_rel:.2f}) + "
+            f"{w_fail:.2f}*FailureHistory({fail_hist:.2f}) + "
+            f"{w_crit:.2f}*Criticality({crit:.2f}) + "
+            f"{w_flaky:.2f}*FlakyRisk({flaky_risk:.2f}). "
+            f"Signals: [Change: {match_desc}, FailHistory: {fail_hist:.2%}, "
+            f"Priority: {tc.priority.value}, FlakyRisk: {flaky_risk:.2%}]"
+        )
+
+        return RiskPrioritizationResult(
+            test_case=tc,
+            risk_score=risk_score,
+            change_relevance=change_rel,
+            failure_history=fail_hist,
+            criticality=crit,
+            flaky_risk=flaky_risk,
+            explanation=explanation,
+        )
+
+    def _compute_change_relevance(
+        self,
+        tc: TestCase,
+        context: RiskPrioritizationContext,
+    ) -> tuple[float, list[str]]:
+        """Determine whether the test case is relevant to recently changed files."""
+        if not context.changed_files:
+            return 0.0, []
+
+        changed_set = {f.lower() for f in context.changed_files}
+        matched: list[str] = []
+
+        # Check explicit test-file mappings
+        if tc.test_id in context.test_file_mappings:
+            for mapped in context.test_file_mappings[tc.test_id]:
+                mapped_lower = mapped.lower()
+                for ch in changed_set:
+                    if mapped_lower in ch or ch in mapped_lower:
+                        matched.append(ch)
+            if matched:
+                return 1.0, sorted(set(matched))
+
+        # Check keyword matches from page_url and name
+        tokens: set[str] = set()
+        if tc.page_url:
+            clean_url = re.sub(r"[^a-zA-Z0-9]", " ", tc.page_url.lower())
+            tokens.update(
+                t for t in clean_url.split() if len(t) >= 4 and t not in ("http", "https")
+            )
+        for word in tc.name.lower().split():
+            clean = re.sub(r"[^a-zA-Z0-9]", "", word)
+            if len(clean) >= 4:
+                tokens.add(clean)
+
+        for token in tokens:
+            for ch in changed_set:
+                if token in ch:
+                    matched.append(ch)
+
+        if matched:
+            return 0.8, sorted(set(matched))
+
+        return 0.0, []
 
 
 def add_test_reasoning(test_cases: list[TestCase]) -> list[TestCase]:
