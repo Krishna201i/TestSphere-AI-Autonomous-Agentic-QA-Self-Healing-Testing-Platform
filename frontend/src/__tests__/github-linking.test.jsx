@@ -9,6 +9,7 @@ const fb = vi.hoisted(() => ({
   linkWithCredential: vi.fn(),
   reauthenticateWithPopup: vi.fn(),
   signInAnonymously: vi.fn(),
+  setPersistence: vi.fn(async () => {}),
   signInWithPhoneNumber: vi.fn(),
   onAuthStateChanged: null,
 }));
@@ -21,12 +22,17 @@ vi.mock('firebase/auth', () => {
     static credentialFromResult(res) { return res.credential || null; }
   }
   class GoogleAuthProvider {}
+  class OAuthProvider {
+    constructor(id) { this.providerId = id; }
+    setCustomParameters(p) { this.params = p; }
+  }
   class RecaptchaVerifier {
     constructor(auth, button, options) { Object.assign(this, { button, options }); }
     clear() {}
   }
   return {
-    GithubAuthProvider, GoogleAuthProvider, RecaptchaVerifier,
+    GithubAuthProvider, GoogleAuthProvider, OAuthProvider, RecaptchaVerifier,
+    browserLocalPersistence: 'local', browserSessionPersistence: 'session', setPersistence: fb.setPersistence,
     getAuth: () => fb.auth,
     getRedirectResult: async () => null,
     onAuthStateChanged: (auth, cb) => { fb.onAuthStateChanged = cb; return () => {}; },
@@ -146,5 +152,34 @@ describe('Phone and guest sign-in', () => {
     await act(async () => fb.onAuthStateChanged({ uid: 'p1', isAnonymous: false, email: null, displayName: null,
       phoneNumber: '+919876543210', providerData: [{ providerId: 'phone' }] }));
     expect(auth().user).toMatchObject({ name: '+919876543210', provider: 'phone' });
+  });
+});
+
+describe('Email sign-in options and Microsoft', () => {
+  it('"Remember me" keeps the session across restarts; unticked, only until the browser closes', async () => {
+    const fa = await import('firebase/auth');
+    const auth = await renderAuth();
+    await act(() => auth().signIn(' ann@example.com ', 'pw', true));
+    expect(fb.setPersistence).toHaveBeenLastCalledWith(fb.auth, 'local');
+    expect(fa.signInWithEmailAndPassword).toHaveBeenLastCalledWith(fb.auth, 'ann@example.com', 'pw');
+    await act(() => auth().signIn('ann@example.com', 'pw', false));
+    expect(fb.setPersistence).toHaveBeenLastCalledWith(fb.auth, 'session');
+    // persistence is chosen before signing in
+    expect(fb.setPersistence.mock.invocationCallOrder.at(-1))
+      .toBeLessThan(fa.signInWithEmailAndPassword.mock.invocationCallOrder.at(-1));
+  });
+
+  it('signs in with a Microsoft account through the same popup flow', async () => {
+    fb.signInWithPopup.mockResolvedValueOnce({ user: {} });
+    const auth = await renderAuth();
+    await act(() => auth().signInWithMicrosoft());
+    const provider = fb.signInWithPopup.mock.calls[0][1];
+    expect(provider.providerId).toBe('microsoft.com');
+    expect(provider.params).toEqual({ prompt: 'select_account' });
+  });
+
+  it('says plainly when a sign-in method is not turned on for the site', async () => {
+    const { authMessage } = await import('../state/Auth');
+    expect(authMessage({ code: 'auth/operation-not-allowed' })).toContain('Enable it in Firebase console');
   });
 });

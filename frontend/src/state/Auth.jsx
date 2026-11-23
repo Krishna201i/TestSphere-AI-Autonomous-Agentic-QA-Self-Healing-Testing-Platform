@@ -12,7 +12,10 @@ import { initializeApp, getApps } from 'firebase/app';
 import {
   GithubAuthProvider,
   GoogleAuthProvider,
+  OAuthProvider,
   RecaptchaVerifier,
+  browserLocalPersistence,
+  browserSessionPersistence,
   createUserWithEmailAndPassword,
   getAuth,
   getRedirectResult,
@@ -21,6 +24,7 @@ import {
   onAuthStateChanged,
   reauthenticateWithPopup,
   sendPasswordResetEmail,
+  setPersistence,
   signInAnonymously,
   signInWithEmailAndPassword,
   signInWithPhoneNumber,
@@ -185,7 +189,9 @@ export function AuthProvider({ children }) {
 
   useEffect(() => { start(); }, [start]);
 
-  const signIn = useCallback(async (email, password) => {
+  /** "Remember me": stay signed in across browser restarts, or only until the browser closes. */
+  const signIn = useCallback(async (email, password, remember = true) => {
+    await setPersistence(authRef.current, remember ? browserLocalPersistence : browserSessionPersistence);
     await signInWithEmailAndPassword(authRef.current, email.trim(), password);
     await linkPendingGitHub();
     recordLogin().catch(() => {});
@@ -220,6 +226,12 @@ export function AuthProvider({ children }) {
   const signInWithGoogle = useCallback(() => signInWithProvider(() => new GoogleAuthProvider()), [signInWithProvider]);
   // Identity only: repository access is asked for separately (githubRepoToken)
   const signInWithGitHub = useCallback(() => signInWithProvider(() => new GithubAuthProvider()), [signInWithProvider]);
+  // Microsoft accounts (work, school and personal), once enabled in the Firebase console
+  const signInWithMicrosoft = useCallback(() => signInWithProvider(() => {
+    const provider = new OAuthProvider('microsoft.com');
+    provider.setCustomParameters({ prompt: 'select_account' });
+    return provider;
+  }), [signInWithProvider]);
 
   /**
    * A GitHub token with repository access, from a GitHub window: links GitHub to
@@ -305,9 +317,9 @@ export function AuthProvider({ children }) {
   const value = useMemo(() => ({
     ...state, notice, clearNotice: () => setNotice(null), diagnose, linkNeeded,
     accountNotice, clearAccountNotice: () => setAccountNotice(null),
-    retry: start, signIn, signUp, signInWithGoogle, signInWithGitHub, githubRepoToken, resetPassword, signOut,
+    retry: start, signIn, signUp, signInWithGoogle, signInWithGitHub, signInWithMicrosoft, githubRepoToken, resetPassword, signOut,
     signInAsGuest, sendPhoneCode, confirmPhoneCode,
-  }), [state, notice, diagnose, linkNeeded, accountNotice, start, signIn, signUp, signInWithGoogle, signInWithGitHub,
+  }), [state, notice, diagnose, linkNeeded, accountNotice, start, signIn, signUp, signInWithGoogle, signInWithGitHub, signInWithMicrosoft,
     githubRepoToken, resetPassword, signOut, signInAsGuest, sendPhoneCode, confirmPhoneCode]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

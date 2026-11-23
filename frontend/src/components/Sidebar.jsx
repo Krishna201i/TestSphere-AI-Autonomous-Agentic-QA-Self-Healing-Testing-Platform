@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import {
   CalendarClock, ChartColumn, ChevronRight, CirclePlay, Github, Layers, LayoutDashboard, Puzzle, ScrollText, Settings,
   Shield, Sparkles, Wand2,
@@ -26,20 +26,23 @@ export const NAV_SECONDARY = [
 ];
 
 export function Logo({ size = 40 }) {
+  // Unique gradient ids: with two logos on a page (one of them hidden), a shared
+  // id would point both at the hidden one's gradients and leave the other unfilled
+  const id = useId().replace(/:/g, '');
   return (
     <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
       <defs>
-        <linearGradient id="logoA" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id={`${id}a`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#3f9a68" />
           <stop offset="100%" stopColor="#123524" />
         </linearGradient>
-        <linearGradient id="logoB" x1="0" y1="1" x2="1" y2="0">
+        <linearGradient id={`${id}b`} x1="0" y1="1" x2="1" y2="0">
           <stop offset="0%" stopColor="#2f7d52" />
           <stop offset="100%" stopColor="#8fd6a8" />
         </linearGradient>
       </defs>
-      <path d="M24 3 42 13.5v21L24 45 6 34.5v-21Z" fill="url(#logoA)" />
-      <path d="M24 3 42 13.5 24 24 6 13.5Z" fill="url(#logoB)" opacity="0.9" />
+      <path d="M24 3 42 13.5v21L24 45 6 34.5v-21Z" fill={`url(#${id}a)`} />
+      <path d="M24 3 42 13.5 24 24 6 13.5Z" fill={`url(#${id}b)`} opacity="0.9" />
       <path d="M24 24v21L6 34.5v-21Z" fill="#17402c" opacity="0.85" />
       <path d="M24 13 33 18.2v10.5L24 34l-9-5.3V18.2Z" fill="#ffffff" opacity="0.92" />
     </svg>
