@@ -36,6 +36,11 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # setup-python reads the OS with lsb_release, which the Playwright image lacks
+      - name: Install lsb_release
+        working-directory: .
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends lsb-release
+
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version-file: backend/.python-version
@@ -131,6 +136,11 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # setup-python reads the OS with lsb_release, which the Playwright image lacks
+      - name: Install lsb_release
+        working-directory: .
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends lsb-release
+
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version-file: backend/.python-version
@@ -172,6 +182,11 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # setup-python reads the OS with lsb_release, which the Playwright image lacks
+      - name: Install lsb_release
+        working-directory: .
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends lsb-release
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
