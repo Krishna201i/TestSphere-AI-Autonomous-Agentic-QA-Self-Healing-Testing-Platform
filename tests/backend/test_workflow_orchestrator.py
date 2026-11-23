@@ -23,6 +23,7 @@ from agents.planner.schemas import (
 )
 from agents.schemas.enums import AssertionType, TestAction
 from backend.database.session import get_store
+from backend.models import TEST_EXECUTIONS
 from backend.models.test_execution import TestExecutionStatus
 from backend.orchestration.converters import (
     engine_result_to_execution_result,
@@ -308,6 +309,27 @@ class TestPlatformWorkflowOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["error_message"].startswith("Not executed: the browser could not start"))
         self.execution = self._reload_execution()
         self.assertEqual(self.execution.status, TestExecutionStatus.FAILED.value)
+
+    async def test_cannot_reexecute_running_execution(self) -> None:
+        self.db.update(TEST_EXECUTIONS, self.execution.id, status=TestExecutionStatus.RUNNING.value)
+        service = PlatformWorkflowOrchestrator()
+        with self.assertRaises(ValueError) as ctx:
+            await service.execute_test_run(db=self.db, execution_id=self.execution.id)
+        self.assertIn("already in progress (RUNNING)", str(ctx.exception))
+
+    async def test_cannot_reexecute_completed_execution(self) -> None:
+        self.db.update(TEST_EXECUTIONS, self.execution.id, status=TestExecutionStatus.PASSED.value)
+        service = PlatformWorkflowOrchestrator()
+        with self.assertRaises(ValueError) as ctx:
+            await service.execute_test_run(db=self.db, execution_id=self.execution.id)
+        self.assertIn("already completed (PASSED)", str(ctx.exception))
+
+    async def test_app_missing_base_url_raises_value_error(self) -> None:
+        ApplicationService.update_application(self.db, self.app.id, base_url="")
+        service = PlatformWorkflowOrchestrator()
+        with self.assertRaises(ValueError) as ctx:
+            await service.execute_test_run(db=self.db, execution_id=self.execution.id)
+        self.assertIn("no valid base_url configured", str(ctx.exception))
 
 
 class TestStoredSteps(unittest.IsolatedAsyncioTestCase):

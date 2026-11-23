@@ -309,6 +309,22 @@ class PlatformWorkflowOrchestrator:
         if not execution:
             raise ValueError(f"TestExecution #{execution_id} not found")
 
+        current_status = getattr(execution, "status", None) or (
+            execution.get("status") if isinstance(execution, dict) else None
+        )
+        if current_status == TestExecutionStatus.RUNNING.value:
+            raise ValueError(
+                f"TestExecution #{execution_id} is already in progress (RUNNING)"
+            )
+        if current_status in (
+            TestExecutionStatus.PASSED.value,
+            TestExecutionStatus.FAILED.value,
+            TestExecutionStatus.HEALED.value,
+        ):
+            raise ValueError(
+                f"TestExecution #{execution_id} has already completed ({current_status})"
+            )
+
         test_case = db.get(TEST_CASES, execution.test_case_id)
         if not test_case:
             raise ValueError(f"TestCase #{execution.test_case_id} not found")
@@ -316,6 +332,8 @@ class PlatformWorkflowOrchestrator:
         app = db.get(APPLICATIONS, test_case.application_id)
         if not app:
             raise ValueError(f"Application #{test_case.application_id} not found")
+        if not getattr(app, "base_url", None) or not str(app.base_url).strip():
+            raise ValueError(f"Application #{app.id} ('{getattr(app, 'name', 'unnamed')}') has no valid base_url configured")
 
         # Mark as RUNNING
         start_time = datetime.now(UTC)
