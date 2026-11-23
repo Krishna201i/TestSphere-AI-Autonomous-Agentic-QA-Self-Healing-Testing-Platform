@@ -4,7 +4,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from agents.memory.memory_schemas import HealingRecord
-from agents.memory.persistent_store import COLLECTION, PersistentMemoryStore
+from agents.memory.persistent_store import (
+    COLLECTION,
+    PersistentMemoryStore,
+    memory_owner,
+)
 from backend.database.store import LocalStore
 
 
@@ -51,3 +55,56 @@ def test_clear_wipes_the_collection(fresh_store) -> None:
     memory.store_healing_record(_record(1))
     memory.clear()
     assert PersistentMemoryStore(fresh_store).get_healing_history("#old") == []
+
+
+def test_owner_isolation_prevents_cross_tenant_healing_leak(fresh_store) -> None:
+    memory = PersistentMemoryStore(fresh_store)
+
+    with memory_owner("tenant_a"):
+        memory.store_healing_record(_record(1, old="#btn"))
+
+    with memory_owner("tenant_b"):
+        memory.store_healing_record(_record(2, old="#btn"))
+
+    # Tenant A only sees their own healed selector
+    with memory_owner("tenant_a"):
+        history_a = memory.get_healing_history("#btn")
+        assert len(history_a) == 1
+        assert history_a[0].new_selector == "#new1"
+
+    # Tenant B only sees their own healed selector
+    with memory_owner("tenant_b"):
+        history_b = memory.get_healing_history("#btn")
+        assert len(history_b) == 1
+        assert history_b[0].new_selector == "#new2"
+
+    # Unrelated Tenant C sees nothing
+    with memory_owner("tenant_c"):
+        assert memory.get_healing_history("#btn") == []
+
+    # Unscoped / system query sees both
+    history_all = memory.get_healing_history("#btn")
+    assert len(history_all) == 2
+
+
+def test_owner_isolation_survives_reload(tmp_path: Path) -> None:
+    path = tmp_path / "tenant_db.json"
+    first = PersistentMemoryStore(LocalStore(path))
+
+    with memory_owner("alice"):
+        first.store_healing_record(_record(1, old="#menu"))
+    with memory_owner("bob"):
+        first.store_healing_record(_record(2, old="#menu"))
+
+    # Fresh process / restarted store
+    restarted = PersistentMemoryStore(LocalStore(path))
+
+    with memory_owner("alice"):
+        records = restarted.get_healing_history("#menu")
+        assert len(records) == 1
+        assert records[0].new_selector == "#new1"
+
+    with memory_owner("bob"):
+        records = restarted.get_healing_history("#menu")
+        assert len(records) == 1
+        assert records[0].new_selector == "#new2"

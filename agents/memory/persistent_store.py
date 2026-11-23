@@ -67,24 +67,32 @@ class PersistentMemoryStore(InMemoryStore):
         super().__init__()
         self._store = store
         self._max_records = max_records
+        self._record_owners: dict[str, str | None] = {}
         self._load()
 
     # ── Write-through ─────────────────────────────────────────
 
     def store_execution(self, record: TestExecutionRecord) -> None:
         super().store_execution(record)  # validates first
+        owner = _owner.get()
+        self._record_owners[f"exec:{record.execution_id}"] = owner
         self._persist("execution", record)
 
     def store_element(self, record: ElementRecord) -> None:
         super().store_element(record)
+        owner = _owner.get()
+        self._record_owners[f"elem:{record.element_id}:{record.last_seen_timestamp}"] = owner
         self._persist("element", record)
 
     def store_healing_record(self, record: HealingRecord) -> None:
         super().store_healing_record(record)
+        owner = _owner.get()
+        self._record_owners[f"heal:{record.healing_id}"] = owner
         self._persist("healing", record)
 
     def clear(self) -> None:
         super().clear()
+        self._record_owners.clear()
         for kind in _KINDS:
             self._store.delete_where(COLLECTION, kind=kind)
 
@@ -92,7 +100,52 @@ class PersistentMemoryStore(InMemoryStore):
         """Rebuild the in-memory indexes from the stored records (e.g. after
         an account's records were erased)."""
         InMemoryStore.clear(self)
+        self._record_owners.clear()
         self._load()
+
+    # ── Read isolation by owner ───────────────────────────────
+
+    def _is_accessible(self, key: str) -> bool:
+        current_owner = _owner.get()
+        if current_owner is None:
+            return True
+        rec_owner = self._record_owners.get(key)
+        return rec_owner is None or rec_owner == current_owner
+
+    def get_healing_history(self, selector: str, *, limit: int = 20) -> list[HealingRecord]:
+        records = super().get_healing_history(selector, limit=self._max_records)
+        current_owner = _owner.get()
+        if current_owner is not None:
+            records = [r for r in records if self._is_accessible(f"heal:{r.healing_id}")]
+        return records[:limit]
+
+    def get_healing_history_for_replacement(
+        self, old_selector: str, new_selector: str, *, limit: int = 20
+    ) -> list[HealingRecord]:
+        records = super().get_healing_history_for_replacement(
+            old_selector, new_selector, limit=self._max_records
+        )
+        current_owner = _owner.get()
+        if current_owner is not None:
+            records = [r for r in records if self._is_accessible(f"heal:{r.healing_id}")]
+        return records[:limit]
+
+    def get_execution_history(self, test_id: str, *, limit: int = 50) -> list[TestExecutionRecord]:
+        records = super().get_execution_history(test_id, limit=self._max_records)
+        current_owner = _owner.get()
+        if current_owner is not None:
+            records = [r for r in records if self._is_accessible(f"exec:{r.execution_id}")]
+        return records[:limit]
+
+    def get_element_history(self, element_id: str) -> list[ElementRecord]:
+        records = super().get_element_history(element_id)
+        current_owner = _owner.get()
+        if current_owner is not None:
+            records = [
+                r for r in records
+                if self._is_accessible(f"elem:{r.element_id}:{r.last_seen_timestamp}")
+            ]
+        return records
 
     # ── Internals ─────────────────────────────────────────────
 
@@ -112,7 +165,17 @@ class PersistentMemoryStore(InMemoryStore):
             if model is None:
                 continue
             try:
-                loaders[row["kind"]](model.model_validate_json(row["data"]))
+                rec = model.model_validate_json(row["data"])
+                row_owner = row.get("owner_uid")
+                if row["kind"] == "execution":
+                    self._record_owners[f"exec:{rec.execution_id}"] = row_owner
+                    loaders["execution"](rec)
+                elif row["kind"] == "element":
+                    self._record_owners[f"elem:{rec.element_id}:{rec.last_seen_timestamp}"] = row_owner
+                    loaders["element"](rec)
+                elif row["kind"] == "healing":
+                    self._record_owners[f"heal:{rec.healing_id}"] = row_owner
+                    loaders["healing"](rec)
                 counts[row["kind"]] += 1
             except ValueError as exc:  # schema drift / bad row: skip, don't crash startup
                 logger.warning("Skipping unreadable %s memory record: %s", row["kind"], exc)
