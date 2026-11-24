@@ -285,14 +285,43 @@ def _js(text: str | None) -> str:
     return json.dumps(text or "")
 
 
-def to_playwright(name: str, steps: list[dict[str, Any]]) -> str:
-    """A saved test as a standalone Playwright Test file (TypeScript)."""
-    lines = ["import { test, expect } from '@playwright/test';", "",
-             "// Exported from TestSphere AI. Self-healing applies when it runs in TestSphere, not here.",
-             f"test({_js(name)}, async ({{ page }}) => {{"]
+_TITLE_TARGETS = {"head > title", "title"}
+
+
+def _relative(url: str | None, base_url: str | None) -> str | None:
+    """*url* as a path when it is on *base_url*'s site, so an exported suite
+    runs against whatever ``BASE_URL`` points at (staging, a preview deploy)."""
+    if not url or not base_url:
+        return url
+    from urllib.parse import urlsplit
+
+    u, b = urlsplit(url), urlsplit(base_url)
+    if not u.netloc or (u.scheme, u.netloc.lower()) != (b.scheme, b.netloc.lower()):
+        return url
+    return (u.path or "/") + (f"?{u.query}" if u.query else "") + (f"#{u.fragment}" if u.fragment else "")
+
+
+def to_playwright(name: str, steps: list[dict[str, Any]], *, base_url: str | None = None,
+                  standalone: bool = True) -> str:
+    """A saved test as a Playwright Test file (TypeScript).  With *base_url*,
+    pages on that site are opened by path (the config's ``baseURL`` picks the
+    host).  *standalone* False returns only the ``test(...)`` block, for a file
+    holding several tests."""
+    lines = (["import { test, expect } from '@playwright/test';", "",
+              "// Exported from TestSphere AI. Self-healing applies when it runs in TestSphere, not here."]
+             if standalone else [])
+    lines.append(f"test({_js(name)}, async ({{ page }}) => {{")
     for s in steps:
         a, t, v = s.get("action"), s.get("target"), s.get("value")
         loc = f"page.locator({_js(t)})" + (".first()" if t and _TEXT_SELECTOR.search(t) else "")
+        if t in _TITLE_TARGETS and a in ("ASSERT_CONTAINS_TEXT", "ASSERT_HAS_TEXT"):
+            # <title> is never visible on the page: Playwright checks it as the page title
+            pattern = re.escape(v or "") if a == "ASSERT_CONTAINS_TEXT" else f"^{re.escape(v or '')}$"
+            note = str(s.get("description") or "").replace("\n", " ")[:120]
+            lines += [f"  // {note}" if note else "", f"  await expect(page).toHaveTitle(new RegExp({_js(pattern)}));"]
+            continue
+        if a in ("NAVIGATE", "ASSERT_URL", "ASSERT_URL_EQUALS"):
+            v = _relative(v, base_url)
         code = {
             "NAVIGATE": f"await page.goto({_js(v)});",
             "CLICK": f"await {loc}.click();",
@@ -320,4 +349,4 @@ def to_playwright(name: str, steps: list[dict[str, Any]]) -> str:
         lines.append(f"  // {comment}" if comment else "")
         lines.append(f"  {code}")
     lines.append("});")
-    return "\n".join(line for line in lines if line != "") + "\n"
+    return "\n".join(line for line in lines if line != "") + ("\n" if standalone else "")

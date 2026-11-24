@@ -125,6 +125,31 @@ class GitHubClient:
             result["fork"] = f"{head_owner}/{head_repo}"
         return result
 
+    def pull_request_open(self, owner: str, repo: str, number: int) -> bool:
+        """Whether pull request *number* is still open (not merged or closed)."""
+        return self._call("GET", f"/repos/{owner}/{repo}/pulls/{number}").get("state") == "open"
+
+    def push_to_branch(self, owner: str, repo: str, branch: str, files: list[tuple[str, str]],
+                       message: str) -> str:
+        """One new commit with *files* on top of *branch* (an open pull request's
+        branch, so the pull request shows the update); returns the commit sha.
+        Fast-forward only: a branch someone else moved meanwhile is not overwritten."""
+        head = f"/repos/{owner}/{repo}"
+        ref = self._call("GET", f"{head}/git/ref/heads/{branch}")
+        parent = ref["object"]["sha"]
+        base = self._call("GET", f"{head}/git/commits/{parent}")
+        entries = []
+        for path, content in files:
+            blob = self._call("POST", f"{head}/git/blobs", json={"content": content, "encoding": "utf-8"})
+            entries.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+        tree = self._call("POST", f"{head}/git/trees", json={"base_tree": base["tree"]["sha"], "tree": entries})
+        if tree["sha"] == base["tree"]["sha"]:
+            return parent  # the branch already has these files
+        commit = self._call("POST", f"{head}/git/commits",
+                            json={"message": message, "tree": tree["sha"], "parents": [parent]})
+        self._call("PATCH", f"{head}/git/refs/heads/{branch}", json={"sha": commit["sha"], "force": False})
+        return commit["sha"]
+
     def _fork(self, owner: str, repo: str) -> tuple[str, str]:
         """The token owner's fork of *owner/repo* (made now, or the existing one)."""
         try:

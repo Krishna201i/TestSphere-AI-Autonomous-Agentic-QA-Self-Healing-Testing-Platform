@@ -48,6 +48,7 @@ include = ["app*", "agents*", "engine*", "security*", "ingestion*"]
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+markers = ["suite_export_on: keep the Playwright suite export on in a pipeline test"]
 
 [tool.ruff]
 target-version = "py311"

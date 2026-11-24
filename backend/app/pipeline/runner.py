@@ -440,6 +440,9 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
 
     # ── fix proposals: a patch for the open findings, for a human to approve ──
     await _stage_fix(state, project, security)
+    # ── the trusted tests as Playwright files for the repository, and pull requests ──
+    await _stage_suite(state, project, test_cases, results)
+    await _auto_pull_requests(state, project)
 
     # ── report ──
     _report(state, project, results, security)
@@ -1160,7 +1163,7 @@ async def _stage_fix(state: _RunState, project: Record, security: dict[str, Any]
         return
 
     previous = [r for r in db.find(FIX_PATCHES, project_id=project["id"], order_by="id", descending=True, limit=10,
-                                   **owned) if r.get("kind") != "tests"][:1]
+                                   **owned) if r.get("kind") not in ("tests", "suite")][:1]
     if previous and previous[0].get("patch") == built["patch"] and previous[0].get("repo") == repo:
         row = previous[0]
         reused = True
@@ -1181,6 +1184,118 @@ async def _stage_fix(state: _RunState, project: Record, security: dict[str, Any]
     state.stage("fix", "done", detail)
     state.save(fix_patch={"id": row["id"], "fixes": len(built["applied"]), "files": len(built["files"]),
                           "manual": len(built["manual"]), "pull_request": pr})
+
+
+def _add_to_stage(state: _RunState, key: str, status: str | None, note: str) -> None:
+    """Append *note* to a stage's detail; *status* replaces a skipped one."""
+    stage = next((s for s in state.doc["stages"] if s["key"] == key), None)
+    if stage is None:
+        return
+    current = stage.get("status")
+    new_status = status if status and current in ("skipped", "pending", None) else current
+    detail = stage.get("detail") or ""
+    if current == "skipped" and status:
+        detail = ""  # the earlier "skipped" reason no longer describes the stage
+    state.stage(key, new_status, f"{detail} · {note}" if detail else note)
+
+
+async def _stage_suite(state: _RunState, project: Record, test_cases: list[Record],
+                       results: list[dict[str, Any]]) -> None:
+    """Export the tests TestSphere trusts for this project as Playwright files
+    for its repository (``app/pipeline/suite_export.py``), stored as a patch
+    (``kind`` "suite") linked to the run as ``suite_patch``.  An unchanged
+    suite reuses the newest patch without reading the repository again."""
+    from app.api import patches
+    from app.api.integrations import git_auth
+    from app.pipeline import acceptance, suite_export
+    from ingestion import SourceError
+
+    db = state.db
+    repo = (project.get("repo_url") or "").strip()
+    if not repo or not settings.PIPELINE_EXPORT_SUITE:
+        return
+    fresh = [db.get(TEST_CASES, tc["id"]) or tc for tc in test_cases]
+    built = suite_export.build(fresh, results, base_url=project["app_url"], steps_of=acceptance.steps_of,
+                               github=suite_export.is_github(repo))
+    if built is None:
+        _add_to_stage(state, "fix", "done", "no passing, trusted test to commit to the repository yet")
+        return
+    owned = {"owner_uid": project.get("owner_uid")} if project.get("owner_uid") else {}
+    previous = next((r for r in db.find(FIX_PATCHES, project_id=project["id"], order_by="id", descending=True,
+                                        limit=20, **owned) if r.get("kind") == "suite"), None)
+    if previous and (previous.get("suite") or {}).get("hash") == built["hash"] and previous.get("repo") == repo:
+        state.save(suite_patch={"id": previous["id"], "tests": built["tests"], "pull_request": previous.get("pull_request"),
+                                "unchanged": True})
+        pr = previous.get("pull_request")
+        _add_to_stage(state, "fix", "done", f"test suite unchanged ({built['tests']} tests)"
+                      + (f", in pull request #{pr.get('number')}" if pr else ""))
+        return
+    try:
+        auth = await asyncio.to_thread(git_auth, db, project.get("owner_uid"), repo)
+        commit, current = await asyncio.to_thread(patches.read_files, repo, sorted(built["files"]), auth)
+    except SourceError as exc:
+        _add_to_stage(state, "fix", "failed", f"test suite not exported: could not read the repository ({exc})")
+        return
+    changed = {path: content for path, content in built["files"].items() if current.get(path) != content}
+    if not changed:
+        _add_to_stage(state, "fix", "done", f"the repository already has these {built['tests']} tests")
+        return
+    files = [{"path": path, "diff": suite_export.diff(path, current.get(path), content), "verified": None,
+              "check_note": None} for path, content in sorted(changed.items())]
+    record = {
+        "commit": commit, "frameworks": ["playwright"], "files": files, "contents": changed,
+        "applied": [{"check_id": "SUITE", "how": f"{built['tests']} browser test(s) as Playwright files",
+                     "file": f"{suite_export.ROOT}/"}],
+        "manual": [], "patch": "".join(f["diff"] for f in files),
+    }
+    row = await asyncio.to_thread(
+        patches.store_patch, db, record, target_url=project["app_url"], repo=repo, findings=[],
+        actor=state.doc["actor"], owner_uid=project.get("owner_uid"), run_id=state.id, project_id=project["id"],
+        kind="suite", suite={k: built[k] for k in ("tests", "verified", "groups", "workflow", "hash")})
+    state.save(suite_patch={"id": row["id"], "tests": built["tests"], "pull_request": None})
+    _add_to_stage(state, "fix", "done", f"{built['tests']} trusted test(s) exported as Playwright files "
+                                        f"({len(changed)} file(s) to add or change), ready for a pull request")
+
+
+async def _auto_pull_requests(state: _RunState, project: Record) -> None:
+    """With the project's ``auto_pr`` on, propose this run's patches without a
+    click: the test suite (pushed onto TestSphere's open suite pull request
+    when there is one, so runs never pile up pull requests) and the security
+    fixes.  A failure is noted on the stage; it never fails the run."""
+    from app.api import patches
+
+    if not project.get("auto_pr"):
+        return
+    db = state.db
+    uid = project.get("owner_uid")
+    notes = []
+    for field in ("suite_patch", "fix_patch"):
+        link = state.doc.get(field) or {}
+        row = db.get(FIX_PATCHES, link["id"]) if link.get("id") else None
+        if row is None or row.get("pull_request") or not row.get("contents"):
+            continue
+        what = "test suite" if field == "suite_patch" else "security fixes"
+        try:
+            pr = None
+            if row.get("kind") == "suite":
+                earlier = next((r for r in db.find(FIX_PATCHES, project_id=project["id"], order_by="id",
+                                                   descending=True, limit=20)
+                                if r.get("kind") == "suite" and r["id"] < row["id"] and r.get("pull_request")), None)
+                if earlier:
+                    pr = await asyncio.to_thread(patches.update_pull_request, db, row, earlier, uid)
+                    if pr:
+                        notes.append(f"{what}: new commit on pull request #{pr['number']}")
+            if pr is None:
+                pr = await asyncio.to_thread(patches.create_pull_request, db, row, uid)
+                notes.append(f"{what}: opened pull request #{pr['number']}")
+        except patches.PullRequestError as exc:
+            notes.append(f"{what}: pull request not opened ({exc})")
+            continue
+        state.save(**{field: {**link, "pull_request": pr}})
+        record_audit(db, actor=state.doc["actor"], kind="patch", ref=str(row["id"]), owner_uid=uid,
+                     message=f"Pipeline #{state.id} proposed its {what} in pull request #{pr['number']} on {row['repo']}")
+    if notes:
+        _add_to_stage(state, "fix", None, "auto pull request: " + "; ".join(notes))
 
 
 def _report(state: _RunState, project: Record, results: list[dict[str, Any]], security: dict[str, Any] | None) -> None:

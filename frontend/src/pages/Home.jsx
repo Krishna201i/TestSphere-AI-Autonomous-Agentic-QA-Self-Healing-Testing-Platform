@@ -90,7 +90,7 @@ export function SetupWizard({ onStarted, onCancel }) {
   const { system } = useWorkspace();
   const [step, setStep] = useState(0);
   const [form, setForm] = useState({
-    url: '', repo_url: '', prompt: '', sign_in_first: false, active_scan: false, schedule_minutes: '',
+    url: '', repo_url: '', prompt: '', sign_in_first: false, active_scan: false, schedule_minutes: '', auto_pr: false,
   });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -117,9 +117,10 @@ export function SetupWizard({ onStarted, onCancel }) {
         url: form.url.trim(), prompt: form.prompt.trim() || null, repo_url: form.repo_url.trim() || null,
         sign_in_first: form.sign_in_first, active_scan: form.active_scan,
       });
-      if (form.schedule_minutes) {
-        await updateProject(run.project_id, { schedule_minutes: Number(form.schedule_minutes) }).catch(() => {});
-      }
+      const later = {};
+      if (form.schedule_minutes) later.schedule_minutes = Number(form.schedule_minutes);
+      if (form.auto_pr && form.repo_url.trim()) later.auto_pr = true;
+      if (Object.keys(later).length) await updateProject(run.project_id, later).catch(() => {});
       onStarted(run);
     } catch (err) {
       setError(err.message);
@@ -169,6 +170,12 @@ export function SetupWizard({ onStarted, onCancel }) {
                 <button key={g} type="button" className="chip" onClick={() => setForm({ ...form, prompt: g })}>{g}</button>
               ))}
             </div>
+            {form.repo_url.trim() && (
+              <label className="check">
+                <input type="checkbox" checked={form.auto_pr} onChange={set('auto_pr')} />
+                Open a pull request with the tests that pass (Playwright files and a CI workflow), updated by later runs
+              </label>
+            )}
             <label className="check">
               <input type="checkbox" checked={form.sign_in_first} onChange={set('sign_in_first')} />
               Sign in first, then test the other pages signed in (put the login details in the goal above)
@@ -255,7 +262,7 @@ function StepActions({ step, run, onNavigate }) {
   }
   if (step.key === 'unit' && run.unit_tests) return <RepositoryTests result={run.unit_tests} />;
   if (step.key === 'fix') {
-    const ids = [run.fix_patch?.id, run.ai_fix?.id].filter(Boolean);
+    const ids = [run.fix_patch?.id, run.ai_fix?.id, run.suite_patch?.id].filter(Boolean);
     return ids.length ? <div className="stack">{ids.map((id) => <RunFixProposal key={id} patchId={id} />)}</div> : null;
   }
   if (step.key === 'report') {
@@ -284,7 +291,7 @@ function StepActions({ step, run, onNavigate }) {
 function hasActions(step, run) {
   if (!run || ACTIVE.includes(run.status)) return false;
   if (step.key === 'unit') return Boolean(run.unit_tests);
-  if (step.key === 'fix') return Boolean(run.fix_patch?.id || run.ai_fix?.id);
+  if (step.key === 'fix') return Boolean(run.fix_patch?.id || run.ai_fix?.id || run.suite_patch?.id);
   return ['execute', 'heal', 'security', 'report'].includes(step.key);
 }
 

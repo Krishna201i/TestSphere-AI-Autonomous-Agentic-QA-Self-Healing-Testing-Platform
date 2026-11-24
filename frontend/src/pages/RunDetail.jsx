@@ -432,6 +432,7 @@ export default function RunDetail({ params, onNavigate }) {
 
       {run.fix_patch?.id && <RunFixProposal patchId={run.fix_patch.id} />}
       {run.ai_fix?.id && <RunFixProposal patchId={run.ai_fix.id} />}
+      {run.suite_patch?.id && <RunFixProposal patchId={run.suite_patch.id} />}
 
       <div className={selected ? 'grid-side-main' : ''}>
         <section className="card">

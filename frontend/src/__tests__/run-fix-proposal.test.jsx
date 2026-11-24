@@ -80,4 +80,18 @@ describe('RunFixProposal', () => {
     await flush();
     expect(view.getByRole('alert').textContent).toContain('Fix patch not found');
   });
+
+  it('presents an exported test suite as tests to commit, not as fixes', async () => {
+    api.getFixPatch.mockResolvedValue({
+      ...PATCH, kind: 'suite', applied: [], manual: [],
+      suite: { tests: 6, verified: 4, workflow: true, groups: ['journeys', 'smoke'] },
+      files: [{ path: 'testsphere/tests/smoke.spec.ts', verified: null, diff: '+++ b/testsphere/tests/smoke.spec.ts\n' }],
+    });
+    const view = render(<RunFixProposal patchId={11} />);
+    await flush();
+    expect(view.getByRole('heading', { name: /Browser tests ready to commit/ })).toBeTruthy();
+    expect(view.container.textContent).toMatch(/6 test\(s\) that passed this run/);
+    expect(view.container.textContent).toMatch(/4 also shown to fail on a broken copy/);
+    expect(view.container.textContent).toMatch(/GitHub Actions workflow/);
+  });
 });

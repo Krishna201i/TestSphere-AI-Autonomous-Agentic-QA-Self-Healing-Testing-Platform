@@ -51,6 +51,9 @@ class _ProjectPipelineFields(BaseModel):
     deploy_on_pass: bool | None = Field(None, description="Deploy and verify automatically after a passing run")
     sign_in_first: bool | None = Field(None, description="Run the goal's sign-in test first; linked and route pages "
                                                          "then start signed in (the session is kept in memory only)")
+    auto_pr: bool | None = Field(None, description="Open pull requests without a click: the run's trusted tests as "
+                                                  "Playwright files (one pull request, updated by later runs) and its "
+                                                  "security fixes")
     generation_profile: GenerationProfile | None = Field(
         None, description="What the pipeline generates: test types, test data, AI test limit, strict, acceptance check")
     active_scan: bool | None = Field(None, description="Also run the active (DAST) security scan in the pipeline; "
@@ -152,6 +155,7 @@ class ProjectResponse(BaseModel):
     health_url: str | None = None
     deploy_on_pass: bool | None = None
     sign_in_first: bool | None = None
+    auto_pr: bool | None = None
     active_scan: bool | None = None
     generation_profile: dict | None = None
     allow_test_accounts: bool | None = None

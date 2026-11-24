@@ -502,7 +502,7 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
     slack_webhook_url: p.slack_webhook_url || '', notify_on: p.notify_on || 'failures',
     deploy_hook_url: p.deploy_hook_url || '', rollback_hook_url: p.rollback_hook_url || '',
     health_url: p.health_url || '', deploy_on_pass: Boolean(p.deploy_on_pass),
-    sign_in_first: Boolean(p.sign_in_first), active_scan: Boolean(p.active_scan),
+    sign_in_first: Boolean(p.sign_in_first), active_scan: Boolean(p.active_scan), auto_pr: Boolean(p.auto_pr),
   });
   const [form, setForm] = useState(() => fromProject(project));
   const [error, setError] = useState(null);
@@ -512,7 +512,7 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
     setForm(fromProject(project));
   }, [project.app_url, project.repo_url, project.prompt, project.slack_webhook_url, project.notify_on,
     project.deploy_hook_url, project.rollback_hook_url, project.health_url, project.deploy_on_pass,
-    project.sign_in_first, project.active_scan]); // eslint-disable-line react-hooks/exhaustive-deps
+    project.sign_in_first, project.active_scan, project.auto_pr]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function act(fn) {
     setError(null);
@@ -569,6 +569,13 @@ function ProjectRow({ project, latest, onRun, onChanged, onDeployed }) {
                     <input type="checkbox" checked={form.sign_in_first}
                       onChange={(e) => setForm({ ...form, sign_in_first: e.target.checked })} />
                     Sign in first: run the goal&apos;s login test, then test linked pages signed in (for example “log in with demo / secret”)
+                  </label>
+                  <label className="check">
+                    <input type="checkbox" checked={form.auto_pr} disabled={!form.repo_url}
+                      onChange={(e) => setForm({ ...form, auto_pr: e.target.checked })} />
+                    Open pull requests automatically: each run commits its trusted tests to the repository as Playwright
+                    files (one pull request, updated by later runs) and proposes its security fixes. Needs GitHub connected
+                    or a Git credential with write access.
                   </label>
                   <label className="check">
                     <input type="checkbox" checked={form.active_scan}

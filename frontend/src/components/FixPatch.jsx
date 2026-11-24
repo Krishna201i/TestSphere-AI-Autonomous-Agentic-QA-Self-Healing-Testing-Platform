@@ -224,8 +224,11 @@ export function RunFixProposal({ patchId }) {
 
   const opened = patch?.pull_request;
   const forTests = patch?.kind === 'tests';
+  const forSuite = patch?.kind === 'suite';
   const titleId = `run-fix-title-${patchId}`;
-  const title = forTests
+  const title = forSuite
+    ? (opened ? 'Browser tests, proposed to your repository' : 'Browser tests ready to commit to your repository')
+    : forTests
     ? (opened ? 'AI fix for failing tests, proposed' : 'AI fix for failing tests: ready for review')
     : (opened ? 'Fixes proposed' : 'Fixes ready for review');
   const v = patch?.verification;
@@ -239,6 +242,15 @@ export function RunFixProposal({ patchId }) {
       {!patch && !error && <div className="hint">Loading the proposed fixes…</div>}
       {patch && (
         <>
+          {forSuite && patch.suite && (
+            <p className="card-sub">
+              {patch.suite.tests} test(s) that passed this run and are trusted, exported as plain Playwright files
+              in <span className="mono">testsphere/</span>
+              {patch.suite.verified ? <> ({patch.suite.verified} also shown to fail on a broken copy of their page)</> : null}
+              {patch.suite.workflow ? <>, with a GitHub Actions workflow that runs them on every push</> : null}.
+              Your team keeps them even without TestSphere.
+            </p>
+          )}
           {forTests && v && (
             <p className="card-sub">
               TestSphere&apos;s AI changed the code, then ran the repository&apos;s tests again in the sandbox: {v.before.failed} failing

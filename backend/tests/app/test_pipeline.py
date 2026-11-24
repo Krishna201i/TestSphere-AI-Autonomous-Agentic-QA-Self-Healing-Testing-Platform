@@ -21,6 +21,14 @@ from app.pipeline import runner, scheduler, suite
 from app.services.project_service import ProjectService
 from security import OutOfScopeError, PassiveScanner, ScopePolicy
 
+
+@pytest.fixture(autouse=True)
+def _no_suite_export(request, monkeypatch):
+    """These tests check the security fix proposal; the exported test suite
+    (its own patch, tests/app/test_suite_export.py) is off unless a test asks."""
+    if "suite_export_on" not in request.keywords:
+        monkeypatch.setattr(settings, "PIPELINE_EXPORT_SUITE", False)
+
 URL = "http://app.test/login"
 
 
@@ -1147,3 +1155,14 @@ def test_security_proposals_ignore_test_fix_patches(fresh_store, stub_network, f
                        owner_uid="local-dev")
     second = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
     assert second["fix_patch"]["id"] == first["fix_patch"]["id"]
+
+
+@pytest.mark.suite_export_on
+def test_the_exported_suite_never_stands_in_for_the_security_proposal(fresh_store, stub_network, fix_repo):
+    """With the suite exported too, an unchanged security patch is still recognised
+    as unchanged (the suite patch in between is not "the previous proposal")."""
+    assert settings.PIPELINE_EXPORT_SUITE is True
+    project = make_project(fresh_store, repo_url=str(fix_repo))
+    first = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
+    second = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
+    assert first["fix_patch"]["id"] and second["fix_patch"]["id"] == first["fix_patch"]["id"]

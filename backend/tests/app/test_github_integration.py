@@ -216,3 +216,35 @@ def test_commit_status_on_a_pushed_run(gh):
     status_call = next(b for m, p, b in gh.calls if f"/statuses/{BASE}" in p)
     assert status_call == {"state": "failure", "description": "Run #9: 3/4 tests passed", "context": "TestSphere"}
     assert report_commit_status(get_store(), project, {**run, "commit_sha": None}) is False
+
+
+def test_push_to_branch_adds_one_commit_fast_forward_only():
+    calls = []
+
+    def fake(request):
+        calls.append((request.method, request.url.path, json.loads(request.content) if request.content else None))
+        path = request.url.path
+        if path.endswith("/git/ref/heads/testsphere/tests-3"):
+            return httpx.Response(200, json={"object": {"sha": "head1"}})
+        if path.endswith("/git/commits/head1"):
+            return httpx.Response(200, json={"tree": {"sha": "tree0"}})
+        if path.endswith("/git/blobs"):
+            return httpx.Response(201, json={"sha": "blob1"})
+        if path.endswith("/git/trees"):
+            return httpx.Response(201, json={"sha": "tree1"})
+        if path.endswith("/git/commits"):
+            return httpx.Response(201, json={"sha": "commit2"})
+        if request.method == "PATCH":
+            return httpx.Response(200, json={})
+        if path.endswith("/pulls/7"):
+            return httpx.Response(200, json={"state": "open"})
+        return httpx.Response(404, json={"message": "no"})
+
+    with GitHubClient(TOKEN, transport=httpx.MockTransport(fake)) as gh:
+        assert gh.pull_request_open("acme", "shop", 7) is True
+        sha = gh.push_to_branch("acme", "shop", "testsphere/tests-3", [("testsphere/a.ts", "x")], "Update")
+    assert sha == "commit2"
+    commit = next(body for m, p, body in calls if m == "POST" and p.endswith("/git/commits"))
+    assert commit["parents"] == ["head1"]
+    patch = next(body for m, p, body in calls if m == "PATCH")
+    assert patch == {"sha": "commit2", "force": False}

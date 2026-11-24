@@ -247,6 +247,8 @@ class Settings(BaseSettings):
     PIPELINE_ROUTE_PAGES: int = Field(default_factory=lambda: max(0, int(os.getenv("PIPELINE_ROUTE_PAGES", "5"))))
     PIPELINE_DEEP_PAGES: int = Field(default_factory=lambda: max(0, int(os.getenv("PIPELINE_DEEP_PAGES", "3"))))
     PIPELINE_AI_PLANNER: str = Field(default_factory=lambda: os.getenv("PIPELINE_AI_PLANNER", "auto").lower())
+    # Export the trusted generated tests as Playwright files for the project's repository
+    PIPELINE_EXPORT_SUITE: bool = Field(default_factory=lambda: os.getenv("PIPELINE_EXPORT_SUITE", "true").lower() in ("true", "1"))
     PIPELINE_AI_PLANNER_TIMEOUT: float = Field(default_factory=lambda: float(os.getenv("PIPELINE_AI_PLANNER_TIMEOUT", "120")))
     # An AI agent reaches the written goal in a browser once and records it as a test (auto: with a real model)
     PIPELINE_AI_EXPLORER: str = Field(default_factory=lambda: os.getenv("PIPELINE_AI_EXPLORER", "auto").lower())
