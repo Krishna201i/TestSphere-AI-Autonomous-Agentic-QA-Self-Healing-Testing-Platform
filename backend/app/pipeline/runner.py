@@ -558,9 +558,6 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
 
     profile = profile_of(project)
     planned = suite.page_tests(analysis, project.get("prompt"))
-    extra, ai_note = ([], None) if profile.max_ai_tests == 0 else await ai_plan.ai_tests(
-        analysis, project.get("prompt"), (blueprint or {}).get("frameworks"), profile=profile)
-    planned += extra
     candidates = suite.candidate_pages(analysis, blueprint, link_limit=settings.PIPELINE_LINK_PAGES,
                                        route_limit=settings.PIPELINE_ROUTE_PAGES)
     answers = await _reachable([c["url"] for c in candidates]) if candidates else {}
@@ -577,6 +574,7 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
                 and answers[c["url"]].get("digest") in fallback]
     left_out += [f"{c['label']} (answers with the site's catch-all page: not served here)" for c in unserved]
     reachable = [c for c in reachable if c not in files and c not in unserved]
+    pages: dict[str, dict[str, Any]] = {}
     if project.get("sign_in_first"):
         # These pages run signed in, but analysis sees them signed out (often a
         # redirect to sign in): check they stay put instead of checking content
@@ -591,6 +589,14 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
             else:
                 # Sent elsewhere signed out (a protected page): check it stays that way
                 planned.append((page and suite.redirect_test(c, page)) or suite.render_test(c))
+
+    # The AI planner sees every page analyzed above (not one that redirected
+    # elsewhere), so its tests can be journeys across the site
+    journey_pages = {c["url"]: pages[c["url"]] for c in reachable
+                     if c["url"] in pages and not suite.redirected(c, pages[c["url"]])}
+    extra, ai_note = ([], None) if profile.max_ai_tests == 0 else await ai_plan.ai_tests(
+        analysis, project.get("prompt"), (blueprint or {}).get("frameworks"), profile=profile, pages=journey_pages)
+    planned += extra
 
     planned = select_by_profile(planned, profile)
     generated, created = [], 0
@@ -800,10 +806,20 @@ async def _stage_acceptance(state: _RunState, test_cases: list[Record], results:
     (``app/pipeline/acceptance.py``) and note each test's verdict."""
     from app.pipeline import acceptance
 
-    if settings.ACCEPTANCE_MAX_PER_RUN <= 0:
-        return
-    counts = await acceptance.check_new_tests(state.db, test_cases, results, app_url,
-                                              limit=settings.ACCEPTANCE_MAX_PER_RUN)
+    counts = {} if settings.ACCEPTANCE_MAX_PER_RUN <= 0 else await acceptance.check_new_tests(
+        state.db, test_cases, results, app_url, limit=settings.ACCEPTANCE_MAX_PER_RUN)
+    # Re-read: the check above stored new verdicts on the test cases
+    fresh = [state.db.get(TEST_CASES, tc["id"]) or tc for tc in test_cases]
+    graduated = acceptance.graduate(state.db, fresh, results)
+    for r in results:
+        if any(g["id"] == r["test_case_id"] for g in graduated):
+            r["graduated"] = True
+    if graduated:
+        record_audit(state.db, actor=state.doc["actor"], kind="pipeline", ref=str(state.id),
+                     owner_uid=state.doc.get("owner_uid"), level="success",
+                     message=f"Pipeline #{state.id}: {len(graduated)} test(s) left quarantine after failing on a "
+                             f"broken page and passing {acceptance.TRUST_PASSES} runs in a row: "
+                             + ", ".join(str(g.get('name')) for g in graduated[:5]))
     verdicts = {tc["id"]: (state.db.get(TEST_CASES, tc["id"]) or {}).get("acceptance") for tc in test_cases}
     for r in results:
         if (v := verdicts.get(r["test_case_id"])) and v.get("status"):
@@ -816,6 +832,11 @@ async def _stage_acceptance(state: _RunState, test_cases: list[Record], results:
         summary = ", ".join(f"{n} {words.get(k, k)}" for k, n in sorted(counts.items()))
         if stage:
             state.stage("execute", stage["status"], f"{stage.get('detail') or ''} · broken-page check: {summary}")
+    if graduated:
+        stage = next((s for s in state.doc["stages"] if s["key"] == "execute"), None)
+        if stage:
+            state.stage("execute", stage["status"], f"{stage.get('detail') or ''} · {len(graduated)} test(s) earned "
+                                                    "trust and now count toward the verdict")
 
 
 def _tested_pages(test_cases: list[Record], app_url: str) -> list[str]:

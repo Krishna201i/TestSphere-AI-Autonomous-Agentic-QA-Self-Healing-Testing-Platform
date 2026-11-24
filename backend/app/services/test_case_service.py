@@ -51,7 +51,9 @@ class TestCaseService:
     ) -> Record:
         TestCaseService.get_test_case(db, test_case_id)
         fields = {"external_id": external_id, "name": name, "description": description,
-                  "category": category, "priority": priority, "version": version, "quarantined": quarantined}
+                  "category": category, "priority": priority, "version": version, "quarantined": quarantined,
+                  # A person's choice: the pipeline never lifts a quarantine someone set by hand
+                  "quarantine_pinned": quarantined}
         return db.update(TEST_CASES, test_case_id, **{k: v for k, v in fields.items() if v is not None})
 
     @staticmethod

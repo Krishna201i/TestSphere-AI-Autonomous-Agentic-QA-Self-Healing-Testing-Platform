@@ -143,3 +143,37 @@ async def check_new_tests(db: Store, test_cases: list[Record], results: list[dic
         db.update(TEST_CASES, tc["id"], acceptance=verdict)
         counts[verdict["status"]] = counts.get(verdict["status"], 0) + 1
     return counts
+
+
+# Consecutive passing runs (on the same steps) a quarantined test needs, on top
+# of a "verified" verdict, before it may fail a run
+TRUST_PASSES = 2
+
+
+def graduate(db: Store, test_cases: list[Record], results: list[dict[str, Any]],
+             *, passes_needed: int = TRUST_PASSES) -> list[Record]:
+    """Count each test's consecutive passes on its current steps and lift the
+    quarantine of the tests that earned trust: their current steps are
+    ``verified`` (they fail when what they check is removed from the page) and
+    they passed the last *passes_needed* runs.  A quarantine a person set
+    (``quarantine_pinned``) is theirs to lift.  Returns the graduated tests."""
+    outcome = {r["test_case_id"]: r.get("status") for r in results}
+    graduated: list[Record] = []
+    for tc in test_cases:
+        status = outcome.get(tc["id"])
+        if status is None:
+            continue
+        steps = steps_of(tc)
+        key = steps_key(steps) if steps else None
+        trust = tc.get("trust") or {}
+        passes = int(trust.get("passes") or 0) if trust.get("steps_key") == key else 0
+        passes = passes + 1 if status in ("PASSED", "HEALED") else 0
+        changes: dict[str, Any] = {"trust": {"steps_key": key, "passes": passes}}
+        verified = (tc.get("acceptance") or {}).get("status") == VERIFIED             and (tc.get("acceptance") or {}).get("steps_key") == key
+        if tc.get("quarantined") and not tc.get("quarantine_pinned") and verified and passes >= passes_needed:
+            changes["quarantined"] = False
+            changes["trust"]["graduated_at"] = now_iso()
+        row = db.update(TEST_CASES, tc["id"], **changes)
+        if changes.get("quarantined") is False:
+            graduated.append(row or tc)
+    return graduated

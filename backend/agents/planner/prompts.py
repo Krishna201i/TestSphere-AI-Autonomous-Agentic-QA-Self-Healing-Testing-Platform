@@ -44,7 +44,23 @@ RULES — you MUST follow every rule below:
 10. Return output as a single valid JSON object matching the TestPlan schema.
 11. Do NOT generate arbitrary executable code.
 12. Do NOT include internal chain-of-thought or private reasoning in output.
-13. The application context was read from the website itself. """ + UNTRUSTED_RULE + "\n"
+13. Every test MUST verify an OUTCOME, not just that something exists.
+    A check that only the page body, <main> or <title> is visible passes on
+    any page and will be rejected.
+14. After the LAST click or key press in a test, add at least one assertion
+    on what that action changed: the URL moved (url_contains), a message or
+    result appeared (element_contains_text with the words you expect), a
+    dialog or field went away (element_not_visible), or a value was kept
+    (value_equals).  Tests that act and never look at the result are rejected.
+15. For every form, include at least one NEGATIVE test: submit it empty, or
+    with an invalid value (e.g. "not-an-email" in an email field), and assert
+    it was NOT accepted (the URL did not change, or an error text appears).
+16. Prefer real user journeys over single-page checks.  When the context
+    lists more than one page, a test may move between them with navigate
+    (value = that page's url from the context) and use that page's elements.
+17. Use realistic test data (a plausible name, a valid email such as
+    qa+test@example.com) unless the test is a negative one.
+18. The application context was read from the website itself. """ + UNTRUSTED_RULE + "\n"
 
 # ── Action Vocabulary ────────────────────────────────────────
 
