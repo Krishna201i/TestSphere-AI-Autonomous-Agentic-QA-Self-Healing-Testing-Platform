@@ -43,6 +43,20 @@ function DatabaseBanner() {
   );
 }
 
+/** The backend's AI is the offline mock: AI planning and AI fixes are off, and
+ *  agent answers are scripted.  Said once, on every page, not buried in a menu. */
+export function MockModelBanner() {
+  const { system } = useWorkspace();
+  if (system?.llm?.provider !== 'mock') return null;
+  return (
+    <div className="alert-banner" role="status">
+      <b>AI is in offline demo mode.</b> No model is configured on the server (<span className="mono">LLM_PROVIDER=mock</span>),
+      so AI test planning and AI fixes are switched off and agent answers are scripted. Rule-based tests, self-healing
+      and security scans still run for real. Set <span className="mono">LLM_PROVIDER=chain</span> with a provider key to turn the AI on.
+    </div>
+  );
+}
+
 /** What happened to a GitHub sign-in that had to be linked to an existing account. */
 function AccountBanner() {
   const { accountNotice, clearAccountNotice } = useAuth();
@@ -195,6 +209,7 @@ function Dashboard({ uid }) {
         <div className="shell-main">
           <TopNav page={page} onNavigate={navigate} onMenu={() => setMenuOpen(true)} />
           <DatabaseBanner />
+          <MockModelBanner />
           <AccountBanner />
           <main>
             <PageErrorBoundary key={page}>

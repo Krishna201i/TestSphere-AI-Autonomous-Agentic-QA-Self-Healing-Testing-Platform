@@ -13,6 +13,7 @@ import logging
 import re
 import ssl
 import time
+from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlparse
 
@@ -235,7 +236,7 @@ class URLAnalyzerService:
         # Input the page's other forms must refuse (app/services/form_checks.py)
         form_tests = [] if blocked else form_checks.negative_tests(normalized_url, inputs, buttons, html, prompt)
 
-        # Generate real telemetry event logs
+        # What the analysis did (shown as the run's log)
         events = cls._generate_telemetry_events(
             url=normalized_url,
             title=page_title,
@@ -247,6 +248,9 @@ class URLAnalyzerService:
             overall_score=overall_score,
             steps_count=len(synthesized_steps),
             error=error_encountered,
+            rendered=rendered,
+            hidden_controls=hidden_controls,
+            blocked=blocked,
         )
 
         resolved_name = test_case_name or f"Live QA: {page_title[:40]}"
@@ -938,7 +942,7 @@ class URLAnalyzerService:
         return steps, coverage
 
     # -------------------------------------------------------------------------
-    # Telemetry Log Synthesizer
+    # Analysis log
     # -------------------------------------------------------------------------
 
     @classmethod
@@ -954,46 +958,38 @@ class URLAnalyzerService:
         overall_score: int,
         steps_count: int,
         error: str | None = None,
+        *,
+        rendered: bool = False,
+        hidden_controls: int | None = None,
+        blocked: str | None = None,
     ) -> list[dict[str, Any]]:
-        events = [
-            {
-                "event_type": "WORKFLOW_STARTED",
-                "message": f"Connected to live target endpoint: {url}",
-            },
-            {
-                "event_type": "PAGE_INSPECTION_COMPLETED",
-                "message": f"HTTP {status_code} OK (Latency: {latency_ms}ms) | Title: '{title[:45]}'",
-            },
-            {
-                "event_type": "DOM_ELEMENTS_DISCOVERED",
-                "message": (
-                    f"DOM Discovery: Discovered {buttons_count} button(s), "
-                    f"{inputs_count} input field(s), and {forms_count} form(s)"
-                ),
-            },
-            {
-                "event_type": "HEALTH_AUDIT_COMPLETED",
-                "message": f"Autonomous QA Quality Score: {overall_score}/100 across Security, A11y & Performance",
-            },
-            {
-                "event_type": "TEST_PLAN_GENERATED",
-                "message": f"Synthesized {steps_count}-step autonomous QA test suite using discovered DOM locators",
-            },
-        ]
-
+        """What this analysis actually did, in order.  Every line states a fact
+        the analysis measured; nothing here claims a check that was not run
+        (the planned steps are verified only when a test executes them)."""
+        events = [{"event_type": "WORKFLOW_STARTED", "message": f"Fetching {url}"}]
         if error:
-            events.append({
-                "event_type": "EXECUTION_WARNING",
-                "message": f"Live network note: {error}",
-            })
-        else:
-            events.append({
-                "event_type": "EXECUTION_RESULT_RECEIVED",
-                "message": "Real DOM locators matched and verified cleanly against target application",
-            })
-            events.append({
-                "event_type": "WORKFLOW_COMPLETED",
-                "message": "Autonomous QA workflow completed with real live site telemetry",
-            })
+            events.append({"event_type": "PAGE_FETCH_FAILED",
+                           "message": f"Could not load the page after {latency_ms}ms: {error[:200]}"})
+            return events
 
+        reason = HTTPStatus(status_code).phrase if status_code in HTTPStatus._value2member_map_ else ""
+        events.append({
+            "event_type": "PAGE_INSPECTION_COMPLETED" if status_code < 400 else "PAGE_INSPECTION_FAILED",
+            "message": f"HTTP {status_code} {reason}".rstrip() + f" in {latency_ms}ms · title '{title[:45]}'",
+        })
+        how = "the DOM a real browser built after the page's scripts ran" if rendered else "the server's HTML"
+        found = f"Read {how}: {buttons_count} button(s), {inputs_count} input field(s), {forms_count} form(s)"
+        if hidden_controls:
+            found += f"; {hidden_controls} control(s) hidden from visitors left out"
+        events.append({"event_type": "DOM_ELEMENTS_DISCOVERED", "message": found})
+        events.append({"event_type": "HEALTH_AUDIT_COMPLETED",
+                       "message": f"Header, accessibility and response-time checks scored {overall_score}/100"})
+        if blocked:
+            events.append({"event_type": "EXECUTION_WARNING",
+                           "message": f"Interaction not planned: {blocked}"})
+        events.append({
+            "event_type": "TEST_PLAN_GENERATED",
+            "message": (f"Planned {steps_count} step(s) from the elements found; they are checked against the "
+                        "live page only when the test runs") if steps_count else "No interaction steps could be planned",
+        })
         return events
