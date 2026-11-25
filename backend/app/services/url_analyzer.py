@@ -71,6 +71,26 @@ async def get_verifying_first(url: str, *, timeout: float, headers: dict[str, st
         return await client.get(url, headers=headers), False
 
 
+# How much of each kind the analysis lists (the coverage suite builds a test
+# per listed element; counts above are always the full totals)
+MAX_LISTED_CONTROLS = 40
+MAX_LISTED_HEADINGS = 30
+MAX_LISTED_LINKS = 100
+MAX_LISTED_IMAGES = 40
+# Response headers kept with the analysis (shown in the report's page audit)
+_REPORTED_HEADERS = ("content-type", "server", "strict-transport-security", "content-security-policy",
+                     "x-frame-options", "x-content-type-options", "referrer-policy", "permissions-policy",
+                     "cache-control", "x-powered-by")
+
+
+def _int_attr(value: str | None) -> int | None:
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return n if 0 < n < 100_000 else None
+
+
 # A bare boolean attribute (required, required="", required=required)
 _REQUIRED = re.compile(r"(?:^|\s)required(?=[\s=/>]|$)", re.IGNORECASE)
 # Set in the browser on every control, link and heading a visitor cannot see
@@ -78,13 +98,15 @@ HIDDEN_MARK = "data-ts-hidden"
 _HIDDEN = re.compile(rf"(?:^|\s){HIDDEN_MARK}(?=[\s=/>]|$)", re.IGNORECASE)
 _MARK_HIDDEN_JS = """(mark) => {
   let hidden = 0;
-  for (const el of document.querySelectorAll('input,button,select,textarea,a[href],h1,h2,h3')) {
+  for (const el of document.querySelectorAll('input,button,select,textarea,a[href],h1,h2,h3,img')) {
     const seen = el.checkVisibility
       ? el.checkVisibility({checkOpacity: true, checkVisibilityCSS: true})
       : Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-    if (!seen) {
+    // An image with no size (lazy, not loaded yet) is not shown either
+    const sized = el.tagName !== 'IMG' || (el.offsetWidth > 0 && el.offsetHeight > 0);
+    if (!seen || !sized) {
       el.setAttribute(mark, '');
-      if (!/^(A|H1|H2|H3)$/.test(el.tagName) && el.type !== 'hidden') hidden += 1;
+      if (!/^(A|H1|H2|H3|IMG)$/.test(el.tagName) && el.type !== 'hidden') hidden += 1;
     }
   }
   return hidden;
@@ -204,8 +226,11 @@ class URLAnalyzerService:
         buttons = cls._extract_buttons(html)
         forms = cls._extract_forms(html)
         links = cls._extract_links(html, domain)
+        link_details = cls._extract_link_details(html)
         headings = cls._extract_headings(html)
         images = cls._extract_images(html)
+        lang_match = re.search(r"""<html\b[^>]*\blang=["']?([A-Za-z][\w-]*)""", html, re.IGNORECASE)
+        page_lang = lang_match.group(1) if lang_match else None
 
         # Audits & Health Scoring
         security_audit = cls._audit_security(normalized_url, headers, certificate_valid)
@@ -265,6 +290,13 @@ class URLAnalyzerService:
             "page_title": page_title,
             "meta_description": meta_desc,
             "rendered_in_browser": rendered,
+            # Whether what the inventory lists was checked to be visible on load
+            # (hidden controls, links and images left out), not only present in the HTML
+            "visibility_checked": bool(rendered and hidden_controls is not None),
+            "page_lang": page_lang,
+            "response_headers": {k.lower(): v[:300] for k, v in headers.items()
+                                 if k.lower() in _REPORTED_HEADERS},
+            "html_bytes": len(html),
             "elements_inventory": {
                 "inputs_count": len(inputs),
                 "buttons_count": len(buttons),
@@ -274,11 +306,14 @@ class URLAnalyzerService:
                 # Controls in the HTML a visitor cannot see on load (None: not checked)
                 "hidden_controls": hidden_controls,
                 "images_count": len(images),
-                "inputs": inputs[:8],  # preview top inputs
-                "buttons": buttons[:8],  # preview top buttons
-                "forms": forms[:4],
-                "headings": headings[:6],
-                "links": links[:30],  # raw hrefs; the pipeline turns same-site ones into page tests
+                "inputs": inputs[:MAX_LISTED_CONTROLS],
+                "buttons": buttons[:MAX_LISTED_CONTROLS],
+                "forms": forms[:8],
+                "headings": headings[:MAX_LISTED_HEADINGS],
+                "links": links[:MAX_LISTED_LINKS],  # raw hrefs; the pipeline turns same-site ones into page tests
+                # Visible links with their text and a selector (coverage tests click them)
+                "link_details": link_details[:MAX_LISTED_LINKS],
+                "images": images[:MAX_LISTED_IMAGES],
             },
             "health_audit": {
                 "overall_score": overall_score,
@@ -388,6 +423,8 @@ class URLAnalyzerService:
                 "selector": selector,
                 "required": bool(_REQUIRED.search(tag)),
                 "autocomplete": attr_dict.get("autocomplete"),
+                "maxlength": _int_attr(attr_dict.get("maxlength")),
+                "readonly": "readonly" in attr_dict or bool(re.search(r"(?:^|\s)(readonly|disabled)(?=[\s=/>]|$)", tag, re.I)),
                 "form": cls._form_at(spans, pos),
             }))
         for m in re.finditer(r"<textarea\b([^>]*)>", html, re.IGNORECASE):
@@ -398,6 +435,9 @@ class URLAnalyzerService:
             selector = best_unique(stable_candidates("textarea", attr_dict), universe)
             if selector:
                 found.append((m.start(), {"type": "textarea", "name": name, "id": elem_id,
+                                          "maxlength": _int_attr(attr_dict.get("maxlength")),
+                                          "readonly": bool(re.search(r"(?:^|\s)(readonly|disabled)(?=[\s=/>]|$)",
+                                                                     m.group(1), re.I)),
                                           "placeholder": attr_dict.get("placeholder"),
                                           "aria_label": attr_dict.get("aria-label"),
                                           "selector": selector, "required": bool(_REQUIRED.search(m.group(1))),
@@ -409,15 +449,16 @@ class URLAnalyzerService:
             name, elem_id = attr_dict.get("name"), attr_dict.get("id")
             selector = best_unique(stable_candidates("select", attr_dict), universe)
             # The first real choice: not a disabled or empty "Choose..." placeholder
-            option = next((v for attrs, label in re.findall(r"<option\b([^>]*)>(.*?)</option>", m.group(2),
-                                                            re.IGNORECASE | re.DOTALL)
-                           if "disabled" not in attrs.lower()
-                           and (v := cls._parse_tag_attrs(attrs).get("value", re.sub(r"<[^>]+>", "", label).strip()))),
-                          None)
+            choices = [v for attrs, label in re.findall(r"<option\b([^>]*)>(.*?)</option>", m.group(2),
+                                                        re.IGNORECASE | re.DOTALL)
+                       if "disabled" not in attrs.lower()
+                       and (v := cls._parse_tag_attrs(attrs).get("value", re.sub(r"<[^>]+>", "", label).strip()))]
+            option = choices[0] if choices else None
             if selector:
                 found.append((m.start(), {"type": "select", "name": name, "id": elem_id, "placeholder": None,
                                           "aria_label": attr_dict.get("aria-label"), "selector": selector,
                                           "required": bool(_REQUIRED.search(m.group(1))), "option": option,
+                                          "options": list(dict.fromkeys(choices))[:10],
                                           "form": cls._form_at(spans, m.start())}))
         return [field for _, field in sorted(found, key=lambda f: f[0])]  # in page order
 
@@ -494,7 +535,31 @@ class URLAnalyzerService:
     def _extract_links(cls, html: str, domain: str) -> list[str]:
         links = [m.group(2) for m in re.finditer(r"""<a(\s+[^>]*?)href=["']([^"'#]+)["'][^>]*>""", html, re.IGNORECASE)
                  if not _HIDDEN.search(m.group(0))]
-        return list(dict.fromkeys(links))[:50]
+        return list(dict.fromkeys(links))[:150]
+
+    @classmethod
+    def _extract_link_details(cls, html: str) -> list[dict[str, Any]]:
+        """Visible links as {href, text, new_tab, selector}: one per href, in page order.
+
+        The selector keeps to visible matches (``:visible``): the same link is
+        often also in a closed mobile menu, and the first match would be that one."""
+        out: dict[str, dict[str, Any]] = {}
+        for m in re.finditer(r"""<a(\s+[^>]*?)href=(["'])([^"'#]+)\2([^>]*)>(.*?)</a\s*>""", html,
+                             re.IGNORECASE | re.DOTALL):
+            attrs_text = m.group(1) + m.group(4)
+            href = html_lib.unescape(m.group(3)).strip()
+            if not href or _HIDDEN.search(attrs_text) or href in out:
+                continue
+            attrs = cls._parse_tag_attrs(attrs_text)
+            text = re.sub(r"\s+", " ", html_lib.unescape(re.sub(r"<[^>]+>", " ", m.group(5)))).strip()
+            out[href] = {
+                "href": href,
+                "text": (text or attrs.get("aria-label") or attrs.get("title") or "")[:60],
+                "new_tab": (attrs.get("target") or "").lower() == "_blank",
+                "download": "download" in attrs,
+                "selector": f"a[href={css_string(m.group(3))}]:visible",
+            }
+        return list(out.values())[:150]
 
     @classmethod
     def _extract_headings(cls, html: str) -> list[str]:
@@ -514,9 +579,16 @@ class URLAnalyzerService:
         results = []
         for match in re.finditer(r"<img\s+([^>]+)>", html, re.IGNORECASE):
             attrs = cls._parse_tag_attrs(match.group(1))
+            src = attrs.get("src", "")
+            alt = attrs.get("alt")
+            usable = src and not src.startswith("data:") and len(src) <= 300
             results.append({
-                "src": attrs.get("src", "")[:50],
-                "has_alt": bool(attrs.get("alt")),
+                "src": src[:300],
+                "has_alt": bool(alt),
+                "alt": (alt or "")[:120],
+                # A hidden image (a closed menu, a carousel's other slides) is never checked to be shown
+                "hidden": bool(_HIDDEN.search(match.group(1))),
+                "selector": f"img[src={css_string(src)}]" if usable else None,
             })
         return results
 

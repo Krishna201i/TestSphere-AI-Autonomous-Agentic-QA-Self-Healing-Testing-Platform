@@ -270,10 +270,24 @@ const TEST_TYPES = [
   ['negative', 'Negative', 'what must be refused: wrong password, empty or invalid input'],
   ['content', 'Content', 'the main heading is shown'],
   ['pages', 'Linked pages', 'linked pages and code routes render'],
+  ['elements', 'Page elements', 'every field takes input, every button shows its label, every choice can be made'],
+  ['validation', 'Field validation', 'fields stay required, keep their type and their length limit'],
+  ['navigation', 'Navigation', 'every link is shown and leads where it says; reload and Back work'],
+  ['accessibility', 'Accessibility', 'page language, image alt text, field names for screen readers'],
+  ['responsive', 'Responsive layout', 'each page still shows its content at phone and tablet width'],
 ];
 const DATA_KEYS = [['text', 'Text to type (search term, item)'], ['email', 'Email'], ['name', 'Name'],
   ['username', 'User name'], ['password', 'Password (never sent to the AI)']];
-const DEFAULT_PROFILE = { test_types: TEST_TYPES.map((t) => t[0]), test_data: {}, max_ai_tests: 5, strict: false, acceptance: true };
+const COVERAGE_TYPES = ['elements', 'validation', 'navigation', 'accessibility', 'responsive'];
+const DEFAULT_PROFILE = { test_types: TEST_TYPES.map((t) => t[0]), test_data: {}, max_ai_tests: 5, strict: false, acceptance: true, version: 2 };
+
+/** A saved profile as the form shows it: one saved before the coverage kinds existed gets them (it never declined them). */
+function storedProfile(saved) {
+  if (!saved) return DEFAULT_PROFILE;
+  const types = saved.test_types || DEFAULT_PROFILE.test_types;
+  const upgraded = saved.version ? types : [...types, ...COVERAGE_TYPES.filter((t) => !types.includes(t))];
+  return { ...DEFAULT_PROFILE, ...saved, test_types: upgraded, version: 2 };
+}
 
 /** The generation settings as form fields (controlled): kinds of tests, test data, AI tests, strict, broken-page check. */
 function ProfileFields({ profile, onChange }) {
@@ -327,12 +341,12 @@ function cleanProfile(profile) {
 
 /** What the pipeline generates for this project: test types, test data, AI tests, strictness, broken-page check. */
 function GenerationProfile({ project, onChanged }) {
-  const [profile, setProfile] = useState({ ...DEFAULT_PROFILE, ...(project.generation_profile || {}) });
+  const [profile, setProfile] = useState(storedProfile(project.generation_profile));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => { setProfile({ ...DEFAULT_PROFILE, ...(project.generation_profile || {}) }); }, [project.id, project.generation_profile]);
+  useEffect(() => { setProfile(storedProfile(project.generation_profile)); }, [project.id, project.generation_profile]);
 
 
   async function save(e) {

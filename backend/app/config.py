@@ -243,9 +243,17 @@ class Settings(BaseSettings):
     # LLM Test Planner in the pipeline: "auto" (when LLM_PROVIDER is a real model), "on" or "off"
     # Other pages a pipeline tests: linked pages and codebase routes, and how
     # many of them are analyzed for content checks (the rest only must render)
-    PIPELINE_LINK_PAGES: int = Field(default_factory=lambda: max(0, int(os.getenv("PIPELINE_LINK_PAGES", "3"))))
+    PIPELINE_LINK_PAGES: int = Field(default_factory=lambda: max(0, int(os.getenv("PIPELINE_LINK_PAGES", "20"))))
     PIPELINE_ROUTE_PAGES: int = Field(default_factory=lambda: max(0, int(os.getenv("PIPELINE_ROUTE_PAGES", "5"))))
-    PIPELINE_DEEP_PAGES: int = Field(default_factory=lambda: max(0, int(os.getenv("PIPELINE_DEEP_PAGES", "3"))))
+    PIPELINE_DEEP_PAGES: int = Field(default_factory=lambda: max(0, int(os.getenv("PIPELINE_DEEP_PAGES", "15"))))
+    # The coverage suite (app/pipeline/coverage.py): a test per heading, field,
+    # button, link and image of every analyzed page.  "off" plans only the core suite.
+    PIPELINE_COVERAGE: bool = Field(default_factory=lambda: os.getenv("PIPELINE_COVERAGE", "on").lower() not in ("off", "false", "0"))
+    # At most this many generated tests per run (the coverage suite is cut first)
+    PIPELINE_MAX_TESTS: int = Field(default_factory=lambda: max(1, int(os.getenv("PIPELINE_MAX_TESTS", "400"))))
+    # Tests of one run executed at once (each takes a browser slot: ENGINE_MAX_BROWSERS)
+    PIPELINE_TEST_CONCURRENCY: int = Field(default_factory=lambda: max(1, int(os.getenv(
+        "PIPELINE_TEST_CONCURRENCY", os.getenv("ENGINE_MAX_BROWSERS", "2")))))
     PIPELINE_AI_PLANNER: str = Field(default_factory=lambda: os.getenv("PIPELINE_AI_PLANNER", "auto").lower())
     # Export the trusted generated tests as Playwright files for the project's repository
     PIPELINE_EXPORT_SUITE: bool = Field(default_factory=lambda: os.getenv("PIPELINE_EXPORT_SUITE", "true").lower() in ("true", "1"))

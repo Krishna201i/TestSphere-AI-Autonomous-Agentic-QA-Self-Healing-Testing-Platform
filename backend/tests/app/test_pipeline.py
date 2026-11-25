@@ -161,7 +161,9 @@ def stage(run, key):
     return next(s for s in run["stages"] if s["key"] == key)
 
 
-def test_full_run_chains_every_stage(fresh_store, stub_network):
+def test_full_run_chains_every_stage(fresh_store, stub_network, monkeypatch):
+    # The core suite, test by test (the coverage suite: tests/app/test_coverage.py)
+    monkeypatch.setattr(settings, "PIPELINE_COVERAGE", False)
     project = make_project(fresh_store, prompt="log in", repo_url="https://github.com/acme/shop")
     # An earlier ingestion of the repo: its GET routes become page tests
     fresh_store.insert(BLUEPRINTS, source=project["repo_url"], name="shop", project_id=project["id"], owner_uid="local-dev",
@@ -1166,3 +1168,16 @@ def test_the_exported_suite_never_stands_in_for_the_security_proposal(fresh_stor
     first = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
     second = run_once(fresh_store, project, FakeOrchestrator({}), bare_site())
     assert first["fix_patch"]["id"] and second["fix_patch"]["id"] == first["fix_patch"]["id"]
+
+
+def test_progress_updates_keep_a_stages_start_time(fresh_store):
+    project = make_project(fresh_store)
+    state = runner._RunState(fresh_store, runner.create_run(fresh_store, project, trigger="manual", actor="tester"))
+    state.stage("execute", "running", "0 of 3 run")
+    started = stage(state.doc, "execute")["started_at"]
+    state.doc["stages"] = [{**s, "started_at": "2026-01-01T00:00:00+00:00"} if s["key"] == "execute" else s
+                           for s in state.doc["stages"]]
+    state.stage("execute", "running", "2 of 3 run")  # progress, not a new start
+    assert started and stage(state.doc, "execute")["started_at"] == "2026-01-01T00:00:00+00:00"
+    state.stage("execute", "done", "3 of 3 passed")
+    assert stage(state.doc, "execute")["finished_at"] > "2026-01-01"

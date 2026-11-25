@@ -9,8 +9,17 @@ review settings):
     smoke       the page loads (title, body)
     functional  the written goal / the page's form, and a login's successful sign-in
     negative    what must be refused: wrong password, empty or invalid form input
-    content     the page shows its main heading
+    content     the page shows its main heading, and every other heading
     pages       linked pages and code routes render
+    elements    every field is shown and takes input; every button is shown
+                with its label; every dropdown option and checkbox works
+    validation  every field keeps its contract: required, its type, its
+                maximum length
+    navigation  every link is shown; same-site links open their page; pages
+                survive a reload and the Back button
+    accessibility  the page declares its language; images keep their alt
+                text; fields keep their accessible names
+    responsive  each page still shows its content at phone and tablet width
 - ``test_data``   values to type, by field kind: username, password, email,
                   name, text (a search term or item to add).  The goal's own
                   values win when both give one.
@@ -29,8 +38,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-TestType = Literal["smoke", "functional", "negative", "content", "pages"]
-ALL_TYPES: tuple[str, ...] = ("smoke", "functional", "negative", "content", "pages")
+TestType = Literal["smoke", "functional", "negative", "content", "pages",
+                   "elements", "validation", "navigation", "accessibility", "responsive"]
+# The coverage suite's kinds (app/pipeline/coverage.py), added in profile version 2
+COVERAGE_TYPES: tuple[str, ...] = ("elements", "validation", "navigation", "accessibility", "responsive")
+ALL_TYPES: tuple[str, ...] = ("smoke", "functional", "negative", "content", "pages", *COVERAGE_TYPES)
+PROFILE_VERSION = 2
 DATA_KEYS = ("username", "password", "email", "name", "text")
 _NEGATIVE_SLUGS = ("wrong-password", "empty-submit", "password-mismatch", "invalid-email", "duplicate-email",
                    "password-masked", "form-required-empty", "form-invalid-email")
@@ -42,6 +55,9 @@ class GenerationProfile(BaseModel):
     max_ai_tests: int = Field(5, ge=0, le=20)
     strict: bool = False
     acceptance: bool = True
+    # Every profile saved from now on carries the current version; one stored
+    # without it predates the coverage kinds (``profile_of`` adds them)
+    version: int = PROFILE_VERSION
 
     @field_validator("test_data")
     @classmethod
@@ -55,6 +71,10 @@ class GenerationProfile(BaseModel):
 def profile_of(project: dict[str, Any] | None) -> GenerationProfile:
     """The project's profile (defaults where unset or unreadable)."""
     raw = (project or {}).get("generation_profile")
+    if isinstance(raw, dict) and "version" not in raw and isinstance(raw.get("test_types"), list):
+        # Saved before the coverage kinds existed: it chose among the kinds
+        # there were, and never declined the new ones
+        raw = {**raw, "test_types": [*raw["test_types"], *(t for t in COVERAGE_TYPES if t not in raw["test_types"])]}
     try:
         return GenerationProfile.model_validate(raw or {})
     except ValueError:
@@ -64,6 +84,8 @@ def profile_of(project: dict[str, Any] | None) -> GenerationProfile:
 def type_of(test: dict[str, Any]) -> str:
     """Which test type a planned test belongs to."""
     slug, category = str(test.get("slug") or ""), str(test.get("category") or "")
+    if slug.startswith("cov-"):
+        return category  # content, elements, validation, navigation, accessibility or responsive
     if category in ("link", "route") or slug.startswith(("link-", "route-")):
         return "pages"
     if slug == "smoke":

@@ -291,7 +291,10 @@ async def _execute_step(
         pre_action_fp = await _fingerprint_if_present(page, step)
         locator_used = await _perform_action(page, step, config)
         # Step 3: enrich target with fingerprint + ranked fallback locators
-        if locator_used and step.target is not None:
+        # (a passed hidden-check whose element was never there has nothing to
+        # fingerprint: capturing would only wait out its timeout)
+        if locator_used and step.target is not None and not (
+                step.action == ActionType.ASSERT_HIDDEN and pre_action_fp is None):
             await _enrich_target(page, step.target, locator_used, pre_action_fp)
         duration_ms = _elapsed_ms(step_start)
         return StepResult(

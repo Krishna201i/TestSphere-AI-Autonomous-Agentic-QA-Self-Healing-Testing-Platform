@@ -52,7 +52,7 @@ from app.models import (
 )
 from app.models.test_execution import TestExecutionStatus
 from app.notify import notify_run
-from app.pipeline import ai_plan, explore, suite
+from app.pipeline import ai_plan, coverage, explore, suite
 from app.pipeline.profile import profile_of
 from app.pipeline.profile import select as select_by_profile
 from app.reporting.summary import run_summary
@@ -212,7 +212,8 @@ class _RunState:
         for s in stages:
             if s["key"] == key:
                 if status == "running":
-                    s["started_at"] = now_iso()
+                    if s.get("status") != "running" or not s.get("started_at"):
+                        s["started_at"] = now_iso()  # a progress update keeps the stage's start
                 elif status in ("done", "failed", "skipped"):
                     s["finished_at"] = now_iso()
                     s["started_at"] = s["started_at"] or s["finished_at"]
@@ -391,7 +392,9 @@ async def _execute(state: _RunState, project: Record, orchestrator: Any, scanner
 
     # ── plan ──
     state.stage("plan", "running")
-    application, test_cases, plan_detail = await _plan(db, project, analysis, blueprint)
+    snapshot: dict[str, Any] = {}
+    application, test_cases, plan_detail = await _plan(db, project, analysis, blueprint, snapshot)
+    state.save(analysis=analysis_snapshot(analysis, snapshot.get("pages") or {}))
     coverage = (analysis.get("synthesized_test_case") or {}).get("goal") or {}
     # No goal test at all, and the analysis did not say why (it does for a
     # sign-in without credentials, a sign-up without test accounts, a CAPTCHA)
@@ -484,6 +487,37 @@ async def _stage_codebase(state: _RunState, project: Record) -> dict[str, Any] |
     return blueprint
 
 
+_INVENTORY_COUNTS = ("inputs_count", "buttons_count", "forms_count", "links_count", "headings_count",
+                     "images_count", "hidden_controls")
+
+
+def _page_audit(analysis: dict[str, Any]) -> dict[str, Any]:
+    """One analyzed page as the report shows it: how it answered, what is on
+    it, and its health audit.  No element lists, no page text beyond the
+    title, description and headings."""
+    inv = analysis.get("elements_inventory") or {}
+    return {
+        "url": analysis.get("url"), "final_url": analysis.get("final_url"),
+        "status_code": analysis.get("status_code"), "latency_ms": analysis.get("latency_ms"),
+        "title": analysis.get("page_title"), "description": (analysis.get("meta_description") or "")[:300] or None,
+        "lang": analysis.get("page_lang"), "html_kb": round((analysis.get("html_bytes") or 0) / 1024, 1),
+        "rendered_in_browser": bool(analysis.get("rendered_in_browser")),
+        "visibility_checked": bool(analysis.get("visibility_checked")),
+        "counts": {k.removesuffix("_count"): inv.get(k) for k in _INVENTORY_COUNTS if inv.get(k) is not None},
+        "headings": [str(h)[:80] for h in (inv.get("headings") or [])[:12]],
+        "images_without_alt": sum(1 for i in inv.get("images") or [] if not i.get("has_alt")),
+        "headers": analysis.get("response_headers") or {},
+        "health": analysis.get("health_audit") or {},
+    }
+
+
+def analysis_snapshot(analysis: dict[str, Any], pages: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """What the run's analysis found, kept with the run for its report: the
+    start page and every other page analyzed."""
+    return {"start": _page_audit(analysis),
+            "pages": [_page_audit(p) for u, p in pages.items() if u != analysis.get("url")]}
+
+
 def _count(n: int, word: str) -> str:
     """'1 risk', '3 risks'."""
     return f"{n} {word}{'' if n == 1 else 's'}"
@@ -535,6 +569,32 @@ async def _fallback_digests(base_url: str) -> set[str]:
     return digests
 
 
+async def _second_hop(analysis: dict[str, Any], candidates: list[dict[str, Any]],
+                      pages: dict[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Same-site pages linked from the analyzed pages but not from the start
+    page: the ones that loaded (to analyze and test), and those left out.
+    Never more than the page limits leave room for."""
+    links = sum(1 for c in candidates if c["kind"] == "link")
+    room = min(settings.PIPELINE_DEEP_PAGES - len(pages), settings.PIPELINE_LINK_PAGES - links)
+    if room <= 0 or not pages:
+        return [], []
+    known = {suite.normalize(analysis["url"])} | {suite.normalize(c["url"]) for c in candidates}
+    found: list[dict[str, Any]] = []
+    for url, page in pages.items():
+        if suite.redirected({"url": url}, page):
+            continue
+        for c in suite.candidate_pages({**page, "url": url}, None, link_limit=50, route_limit=0):
+            if suite.normalize(c["url"]) not in known:
+                known.add(suite.normalize(c["url"]))
+                found.append(c)
+    found = found[: room * 2]  # some will not load
+    answers = await _reachable([c["url"] for c in found]) if found else {}
+    ok = [c for c in found if (a := answers.get(c["url"])) and a["status"] < 400 and not a.get("file")]
+    left_out = [f"{c['label']} ({(answers.get(c['url']) or {}).get('status') or 'unreachable'})" for c in found
+                if not answers.get(c["url"]) or answers[c["url"]]["status"] >= 400]
+    return ok[:room], left_out
+
+
 async def _analyze_pages(urls: list[str]) -> dict[str, dict[str, Any]]:
     """Each page's analysis (title, headings, controls); a page that fails or
     takes too long is left out and keeps a plain render check."""
@@ -551,7 +611,9 @@ async def _analyze_pages(urls: list[str]) -> dict[str, dict[str, Any]]:
 
 
 async def _plan(db: Store, project: Record, analysis: dict[str, Any],
-                blueprint: dict[str, Any] | None) -> tuple[Record, list[Record], str]:
+                blueprint: dict[str, Any] | None, snapshot: dict[str, Any] | None = None) -> tuple[Record, list[Record], str]:
+    """Plan the run's tests and save them as test cases.  *snapshot*, when
+    given, receives the other pages analyzed (for the report's page audit)."""
     owner = project.get("owner_uid")
     app_url = project["app_url"]
     application = db.find_one(APPLICATIONS, project_id=project["id"], base_url=app_url)
@@ -584,6 +646,13 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
         planned += [suite.stays_on_page_test(c) for c in reachable]
     else:
         pages = await _analyze_pages([c["url"] for c in reachable[:settings.PIPELINE_DEEP_PAGES]])
+        # One hop further: pages linked only from the pages just analyzed (a
+        # blog's posts, a docs section), within the same page limits
+        hop, hop_left_out = await _second_hop(analysis, candidates, pages)
+        if hop:
+            pages.update(await _analyze_pages([c["url"] for c in hop]))
+            reachable += hop
+        left_out += hop_left_out
         # A page that redirected was analyzed as the page it led to: no content checks from that
         for c in reachable:
             page = pages.get(c["url"])
@@ -601,11 +670,27 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
         analysis, project.get("prompt"), (blueprint or {}).get("frameworks"), profile=profile, pages=journey_pages)
     planned += extra
 
+    # Breadth: a test per heading, field, button, link and image of every page
+    # analyzed above (app/pipeline/coverage.py), after the core tests
+    covered: list[dict[str, Any]] = []
+    if settings.PIPELINE_COVERAGE:
+        covered = coverage.site_coverage(analysis["url"], analysis, journey_pages)
+        planned += covered
+    if snapshot is not None:
+        snapshot["pages"] = journey_pages
+
     planned = select_by_profile(planned, profile)
+    cut = max(0, len(planned) - settings.PIPELINE_MAX_TESTS)
+    planned = planned[:settings.PIPELINE_MAX_TESTS]  # the core suite comes first, so coverage is cut first
     generated, created = [], 0
     for test in planned:
         external_id = f"{GENERATED_PREFIX}{project['id']}-{test['slug']}"
-        description = json.dumps({"steps": test["steps"], "generated_by": "pipeline", "prompt": project.get("prompt")})
+        stored: dict[str, Any] = {"steps": test["steps"], "generated_by": "pipeline", "prompt": project.get("prompt")}
+        if test.get("about"):  # a coverage test: what it protects and on which page
+            stored.update(about=test["about"], page=test.get("page"))
+        if test.get("viewport"):  # runs at this screen size (a responsive check)
+            stored["viewport"] = test["viewport"]
+        description = json.dumps(stored)
         row = db.find_one(TEST_CASES, application_id=application["id"], external_id=external_id)
         if row is None:
             row = TestCaseService.create_test_case(
@@ -640,6 +725,12 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
              if not str(tc.get("external_id") or "").startswith(GENERATED_PREFIX) and not tc.get("retired")]
     from_repo = sum(1 for tc in saved if str(tc.get("external_id") or "").startswith(REPO_PREFIX))
     detail = f"{len(generated) + len(saved)} tests: {len(generated)} generated ({created} new)"
+    kept_cov = coverage.counts(t for t in planned if str(t.get("slug", "")).startswith("cov-"))
+    if kept_cov:
+        detail += (f" · coverage of {1 + len(journey_pages)} page(s): "
+                   + ", ".join(f"{n} {kind}" for kind, n in kept_cov.items()))
+    if cut:
+        detail += f" · {cut} more planned test(s) left out (PIPELINE_MAX_TESTS={settings.PIPELINE_MAX_TESTS})"
     if saved:
         detail += f", {len(saved)} saved" + (f" ({from_repo} from the repository's Playwright tests)" if from_repo else "")
     if repo_note:
@@ -740,12 +831,24 @@ def _signed_in_kwargs(tc: Record, sign_in_first: bool, session: list[dict]) -> d
     return {}
 
 
-MAX_LISTED_CHECKS = 4
+MAX_LISTED_CHECKS = 8
+_VIEWPORT = re.compile(r"^[1-9]\d{2,3}x[1-9]\d{2,3}$")
+
+
+def _viewport_of(tc: Record) -> str | None:
+    """The screen size a test runs at (a responsive check), or None for the default."""
+    try:
+        stored = json.loads(tc.get("description") or "{}")
+    except ValueError:
+        return None
+    size = stored.get("viewport") if isinstance(stored, dict) else None
+    return size if isinstance(size, str) and _VIEWPORT.match(size) else None
 
 
 def _what_it_checks(tc: Record) -> dict[str, Any]:
-    """For the report: how many steps a test has and what its checks verify,
-    so a passed test says what passed, not only that it did."""
+    """For the report: how many steps a test has, what its checks verify,
+    which page it starts on and (coverage tests) what it protects, so a
+    passed test says what passed, not only that it did."""
     try:
         stored = json.loads(tc.get("description") or "{}")
     except ValueError:
@@ -755,45 +858,47 @@ def _what_it_checks(tc: Record) -> dict[str, Any]:
         return {}
     checks = [str(s.get("description") or "").strip() for s in steps
               if isinstance(s, dict) and "assert" in str(s.get("action") or "").lower()]
-    return {"step_count": len(steps), "checks": [c for c in checks if c][:MAX_LISTED_CHECKS]}
+    out: dict[str, Any] = {"step_count": len(steps), "checks": [c for c in checks if c][:MAX_LISTED_CHECKS]}
+    start = next((s.get("value") for s in steps if isinstance(s, dict)
+                  and str(s.get("action") or "").upper() in ("NAVIGATE", "GOTO") and s.get("value")), None)
+    page = (stored.get("page") if isinstance(stored, dict) else None) or (urlparse(str(start)).path or "/" if start else None)
+    if page:
+        out["page"] = page
+    if isinstance(stored, dict) and stored.get("about"):
+        out["about"] = stored["about"]
+    if isinstance(stored, dict) and stored.get("viewport"):
+        out["viewport"] = stored["viewport"]
+    return out
 
 
 async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrator: Any,
                          owner: str | None, *, sign_in_first: bool = False) -> list[dict[str, Any]]:
     from app.orchestration.orchestrator import get_platform_orchestrator
-    from engine.schemas import RunOptions
 
     orch = orchestrator or get_platform_orchestrator()
-    db = state.db
     results: list[dict[str, Any]] = []
     # In memory for this run only: it holds the app's login cookies
     session: list[dict] = []
     if sign_in_first:  # the sign-in test runs first so later pages can start signed in
         test_cases = sorted(test_cases, key=lambda tc: not _is_sign_in(tc))
     state.stage("execute", "running", f"0 of {len(test_cases)} run")
-    for idx, tc in enumerate(test_cases, start=1):
-        state.stage("execute", "running", f"Running {idx} of {len(test_cases)}: {tc['name']}")
-        execution = TestExecutionService.create_execution(db, test_case_id=tc["id"], owner_uid=owner)
-        visual, duration_ms, diagnosis = None, None, None
-        try:
-            res = await orch.execute_test_run(db=db, execution_id=execution["id"], options=RunOptions(headless=True),
-                                              **_signed_in_kwargs(tc, sign_in_first, session))
-            status, error = res.get("status", "FAILED"), res.get("error_message")
-            visual, duration_ms, diagnosis = res.get("visual"), res.get("duration_ms"), res.get("diagnosis")
-        except StoreUnavailableError:
-            raise
-        except Exception as exc:
-            logger.exception("Pipeline #%s: test %s crashed", state.id, tc["id"])
-            status, error = TestExecutionStatus.FAILED.value, f"Execution error: {exc}"
-            db.update(TEST_EXECUTIONS, execution["id"], status=status, error_message=error, completed_at=now_iso())
-        healed = status == TestExecutionStatus.HEALED.value or (
-            status == TestExecutionStatus.PASSED.value and str(error or "").startswith("Self-healed"))
-        results.append({"test_case_id": tc["id"], "name": tc["name"], "category": tc.get("category"),
-                        "execution_id": execution["id"], "status": status, "error": error, "healed": healed,
-                        "quarantined": bool(tc.get("quarantined")),
-                        "visual_changed": bool((visual or {}).get("changed")),
-                        "duration_ms": duration_ms, "diagnosis": diagnosis, **_what_it_checks(tc)})
-        state.save(tests=results)
+    slots = asyncio.Semaphore(settings.PIPELINE_TEST_CONCURRENCY)
+    finished: dict[int, dict[str, Any]] = {}
+
+    async def run_one(idx: int, tc: Record) -> None:
+        async with slots:
+            await _execute_one(state, orch, tc, owner, sign_in_first, session, finished, idx)
+            # In plan order, whichever finished first
+            results[:] = [finished[i] for i in sorted(finished)]
+            state.stage("execute", "running", f"{len(finished)} of {len(test_cases)} run · last: {tc['name']}")
+            state.save(tests=results)
+
+    first = 1
+    if sign_in_first and test_cases and _is_sign_in(test_cases[0]):
+        # Its session must exist before the signed-in pages start
+        await run_one(1, test_cases[0])
+        first = 2
+    await asyncio.gather(*(run_one(idx, tc) for idx, tc in enumerate(test_cases[first - 1:], start=first)))
     all_failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value)
     failed = sum(1 for r in results if r["status"] == TestExecutionStatus.FAILED.value and not r.get("quarantined"))
     quarantined_failed = all_failed - failed
@@ -801,6 +906,35 @@ async def _stage_execute(state: _RunState, test_cases: list[Record], orchestrato
                 f"{len(results) - all_failed} of {len(results)} passed" + (f", {failed} failed" if failed else "")
                 + (f", {quarantined_failed} quarantined failed (does not fail the run)" if quarantined_failed else ""))
     return results
+
+
+async def _execute_one(state: _RunState, orch: Any, tc: Record, owner: str | None, sign_in_first: bool,
+                       session: list[dict], finished: dict[int, dict[str, Any]], idx: int) -> None:
+    """Run one test case and record its result under its plan position *idx*."""
+    from engine.schemas import RunOptions
+
+    db = state.db
+    execution = TestExecutionService.create_execution(db, test_case_id=tc["id"], owner_uid=owner)
+    visual, duration_ms, diagnosis = None, None, None
+    try:
+        res = await orch.execute_test_run(db=db, execution_id=execution["id"],
+                                          options=RunOptions(headless=True, viewport=_viewport_of(tc)),
+                                          **_signed_in_kwargs(tc, sign_in_first, session))
+        status, error = res.get("status", "FAILED"), res.get("error_message")
+        visual, duration_ms, diagnosis = res.get("visual"), res.get("duration_ms"), res.get("diagnosis")
+    except StoreUnavailableError:
+        raise
+    except Exception as exc:
+        logger.exception("Pipeline #%s: test %s crashed", state.id, tc["id"])
+        status, error = TestExecutionStatus.FAILED.value, f"Execution error: {exc}"
+        db.update(TEST_EXECUTIONS, execution["id"], status=status, error_message=error, completed_at=now_iso())
+    healed = status == TestExecutionStatus.HEALED.value or (
+        status == TestExecutionStatus.PASSED.value and str(error or "").startswith("Self-healed"))
+    finished[idx] = {"test_case_id": tc["id"], "name": tc["name"], "category": tc.get("category"),
+                     "execution_id": execution["id"], "status": status, "error": error, "healed": healed,
+                     "quarantined": bool(tc.get("quarantined")),
+                     "visual_changed": bool((visual or {}).get("changed")),
+                     "duration_ms": duration_ms, "diagnosis": diagnosis, **_what_it_checks(tc)}
 
 
 async def _stage_acceptance(state: _RunState, test_cases: list[Record], results: list[dict[str, Any]],
@@ -1355,7 +1489,8 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
                                      if summary["visual_changes"] else "")
                                   + (f" · compared with run #{previous['id']}" if previous else " · first run")
                                   + (f" · {line}" if (line := dbsource.summary_line(summary["database"])) else ""))
-    state.save(status=status, summary=summary, regressions=regressions, tests=results, finished_at=now_iso())
+    state.save(status=status, summary=summary, regressions=regressions, tests=results, finished_at=now_iso(),
+               security_findings=_findings_for_report(security))
     _finish_project(db, project, state)
     record_audit(
         db, actor=state.doc["actor"], kind="pipeline", ref=str(state.id), owner_uid=project.get("owner_uid"),
@@ -1364,6 +1499,24 @@ def _report(state: _RunState, project: Record, results: list[dict[str, Any]], se
                 + (f", {summary['healed']} healed" if summary["healed"] else "")
                 + (f", {len(regressions)} regression(s)" if regressions else ""),
     )
+
+
+MAX_REPORTED_FINDINGS = 100
+_SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+_TIER_RANK = {"proven": 0, "unconfirmed": 1, "hardening": 2}
+
+
+def _findings_for_report(security: dict[str, Any] | None) -> list[dict[str, Any]] | None:
+    """The scan's findings as the report lists them, most serious first (None: no scan ran)."""
+    if not security:
+        return None
+    rows = sorted(security.get("findings") or [], key=lambda f: (_TIER_RANK.get(f.get("tier"), 3),
+                                                                 _SEVERITY_RANK.get(f.get("severity"), 5)))
+    return [{"check_id": f.get("check_id"), "title": f.get("title"), "severity": f.get("severity"),
+             "tier": f.get("tier"), "component": str(f.get("component") or "")[:300],
+             "evidence": [str(e)[:300] for e in (f.get("evidence") or [])[:3]],
+             "root_cause": str(f.get("root_cause") or "")[:500], "recommendation": str(f.get("recommendation") or "")[:500]}
+            for f in rows[:MAX_REPORTED_FINDINGS]]
 
 
 def _finish_project(db: Store, project: Record, state: _RunState) -> None:

@@ -5,9 +5,9 @@
  * the visual check (baseline, new screenshot and their difference, with a
  * button to accept an intended change as the new baseline).
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRight, Check, Download, ExternalLink, FileCode2, FileText, Image, Link2, ShieldOff, Shield, Wand2, X,
+  ArrowLeft, ArrowRight, Check, Download, ExternalLink, FileCode2, FileText, Image, Link2, ListTree, Search, ShieldOff, Shield, Wand2, X,
 } from 'lucide-react';
 import { useWorkspace } from '../state/Workspace';
 import {
@@ -22,11 +22,19 @@ import { RunFixProposal } from '../components/FixPatch';
 import RepositoryTests from '../components/RepositoryTests';
 import Pager from '../components/Pager';
 import { usePaged } from '../lib/usePaged';
-import { RunStatus, StageIcon } from './Autopilot';
+import { RunStatus } from './Autopilot';
+import {
+  KindTable, PageAudit, PageTable, Recommendations, ResultBar, ResultLegend, SecurityFindings, StageTimeline, TimingCard,
+} from '../components/RunInsights';
+import { KINDS, auditedPages, duration, filterTests, kindLabel, kindOf, tally } from '../lib/runInsights';
 
 const ACTIVE = ['queued', 'running'];
 const TRIGGER_LABEL = { manual: 'Manual', schedule: 'Scheduled', webhook: 'GitHub push' };
 const STEP_STATUS = { passed: 'PASSED', failed: 'FAILED', healed: 'HEALED', skipped: 'PENDING' };
+const PAGE_SIZE = 50;
+const RESULTS = [['all', 'All'], ['failed', 'Failed'], ['passed', 'Passed'], ['healed', 'Healed'], ['quarantined', 'Quarantined']];
+const SECTIONS = [['run-overview', 'Overview'], ['run-tests', 'Tests'], ['run-pages', 'Pages'], ['run-security', 'Security'],
+  ['run-timing', 'Timing'], ['run-stages', 'Stages']];
 
 /** "12.3k" tokens the run's model calls used, of the budget when there is one. */
 export function aiTokens(usage) {
@@ -199,6 +207,19 @@ function ExecutionDetail({ test, onQuarantine, onVisualAccepted }) {
         {test.quarantined && <span className="pill gray">Quarantined</span>}
         {test.visual_changed && <span className="pill violet">Visual change</span>}
       </div>
+      {(test.about || test.page) && (
+        <dl className="kv small">
+          {test.page && <><dt>Page</dt><dd className="mono">{test.page}</dd></>}
+          <dt>Kind</dt><dd>{kindLabel(kindOf(test))}</dd>
+          {test.about && <><dt>Protects</dt><dd>{test.about}</dd></>}
+        </dl>
+      )}
+      {test.checks?.length > 0 && (
+        <div>
+          <h4 className="section-title">What it checks</h4>
+          <ul className="check-list small">{test.checks.map((c, i) => <li key={i} className="cell-wrap">{c}</li>)}</ul>
+        </div>
+      )}
       {test.status === 'FAILED' && <Diagnosis diagnosis={ex?.diagnosis || test.diagnosis} />}
       <div className="row">
         {ex?.trace && (
@@ -286,14 +307,20 @@ export default function RunDetail({ params, onNavigate }) {
     }
   }
   const [notice, setNotice] = useState(null); // e.g. a download that failed
+  const [filter, setFilter] = useState({ kind: 'all', result: 'all', query: '' });
   const selectedExec = Number(execParam) || null;
-  const testPage = usePaged(run?.tests, 15);
-  const selectedIndex = (run?.tests || []).findIndex((t) => t.execution_id === selectedExec);
+  const shown = useMemo(() => filterTests(run?.tests, filter), [run?.tests, filter]);
+  const testPage = usePaged(shown, PAGE_SIZE);
+  const selectedIndex = shown.findIndex((t) => t.execution_id === selectedExec);
   const { setPage: setTestPage } = testPage;
   // An opened test (a link, a run card) is always on the page shown
   useEffect(() => {
-    if (selectedIndex >= 0) setTestPage(Math.floor(selectedIndex / 15) + 1);
+    if (selectedIndex >= 0) setTestPage(Math.floor(selectedIndex / PAGE_SIZE) + 1);
   }, [selectedIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pickKind = (kind) => {
+    setFilter((f) => ({ ...f, kind }));
+    document.getElementById('run-tests')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  };
 
   useEffect(() => {
     let alive = true;
@@ -346,10 +373,14 @@ export default function RunDetail({ params, onNavigate }) {
   const tests = run.tests || [];
   // Quarantine is the test case's state now (the run only kept a snapshot of it)
   const caseById = new Map(testCases.map((t) => [t.id, t]));
-  const withState = tests.map((t) => ({
+  const stateOf = (t) => ({
     ...t, quarantined: caseById.has(t.test_case_id) ? Boolean(caseById.get(t.test_case_id).quarantined) : Boolean(t.quarantined),
-  }));
+  });
+  const withState = tests.map(stateOf);
   const selected = withState.find((t) => t.execution_id === selectedExec) || null;
+  const all = tally(withState);
+  const pagesCovered = new Set(tests.map((t) => t.page).filter(Boolean)).size || auditedPages(run).length;
+  const kindsRun = new Set(tests.map(kindOf)).size;
 
   return (
     <div className="page">
@@ -391,40 +422,51 @@ export default function RunDetail({ params, onNavigate }) {
       {notice && <div className="alert-banner inline" role="alert">{notice}</div>}
       <RunSummary lines={s?.narrative} />
 
-      <ol className="stage-list" aria-label="Stages">
-        {run.stages.map((st) => (
-          <li key={st.key} className={`stage-item ${st.status}`}>
-            <StageIcon status={st.status} />
-            <div className="min-w-0">
-              <div className="stage-label">{st.label}</div>
-              {st.detail && <div className="small muted cell-wrap">{st.detail}</div>}
-            </div>
-          </li>
-        ))}
-      </ol>
+      <nav className="section-nav" aria-label="Sections of this run">
+        {SECTIONS.map(([id, label]) => <a key={id} className="chip" href={`#/runs/${run.id}`} onClick={(e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); }}>{label}</a>)}
+      </nav>
 
-      {s && (
-        <div className="stat-tiles">
-          <div className="stat-tile"><div className="v">{s.passed}/{s.total}</div><div className="l">Tests passed</div></div>
-          <div className="stat-tile" title="Passing tests that failed on a deliberately broken copy of their page: the ones a pass actually means something for">
-            <div className="v">{s.verified ?? '—'}</div><div className="l">Proven to catch a break</div>
-          </div>
-          <div className="stat-tile"><div className={`v ${s.failed ? 'bad' : ''}`}>{s.failed}</div><div className="l">Failed{s.quarantined_failed ? ` (+${s.quarantined_failed} quarantined)` : ''}</div></div>
-          <div className="stat-tile"><div className="v">{s.healed}</div><div className="l">Self-healed</div></div>
-          <div className="stat-tile"><div className="v">{s.flaky ?? 0}</div><div className="l">Flaky</div></div>
-          <div className="stat-tile"><div className="v">{(run.regressions || []).length}</div><div className="l">Regressions</div></div>
-          <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Proven security issues{s.hardening ? <span className="muted"> · {s.hardening} hardening</span> : null}</div></div>
-          {run.llm_usage && (
-            <div className="stat-tile" title={`${run.llm_usage.input_tokens.toLocaleString()} in, ${run.llm_usage.output_tokens.toLocaleString()} out`}>
-              <div className={`v ${run.llm_usage.budget_exhausted ? 'bad' : ''}`}>{aiTokens(run.llm_usage)}</div>
-              <div className="l">AI tokens · {run.llm_usage.calls} {run.llm_usage.calls === 1 ? 'call' : 'calls'}{run.llm_usage.budget_exhausted ? ' · budget used up' : ''}</div>
-            </div>
-          )}
-          {s.visual_changes > 0 && (
-            <div className="stat-tile"><div className="v">{tests.filter((t) => t.visual_changed).length}</div><div className="l">Visual changes to review</div></div>
-          )}
+      <section className="card" id="run-overview" aria-labelledby="overview-title">
+        <div className="card-head">
+          <h3 id="overview-title">Results</h3>
+          <span className="muted small">{all.passed} of {all.total} passed · {all.rate}%</span>
         </div>
-      )}
+        <ResultBar t={all} big />
+        <ResultLegend />
+        {s && (
+          <div className="stat-tiles">
+            <div className="stat-tile"><div className={`v ${all.total && !all.failed ? 'good' : ''}`}>{all.rate}%</div><div className="l">Pass rate</div></div>
+            <div className="stat-tile"><div className="v">{s.passed}/{s.total}</div><div className="l">Tests passed</div></div>
+            <div className="stat-tile" title="Passing tests that failed on a deliberately broken copy of their page: the ones a pass actually means something for">
+              <div className="v">{s.verified ?? '—'}</div><div className="l">Proven to catch a break</div>
+            </div>
+            <div className="stat-tile"><div className={`v ${s.failed ? 'bad' : ''}`}>{s.failed}</div><div className="l">Failed{s.quarantined_failed ? ` (+${s.quarantined_failed} quarantined)` : ''}</div></div>
+            <div className="stat-tile"><div className="v">{s.healed}</div><div className="l">Self-healed</div></div>
+            <div className="stat-tile"><div className="v">{s.flaky ?? 0}</div><div className="l">Flaky</div></div>
+            <div className="stat-tile"><div className="v">{(run.regressions || []).length}</div><div className="l">Regressions</div></div>
+            <div className="stat-tile"><div className="v">{s.findings ? Object.values(s.findings).reduce((a, b) => a + b, 0) : '—'}</div><div className="l">Proven security issues{s.hardening ? <span className="muted"> · {s.hardening} hardening</span> : null}</div></div>
+            <div className="stat-tile"><div className="v">{pagesCovered || '—'}</div><div className="l">Pages covered</div></div>
+            <div className="stat-tile"><div className="v">{kindsRun}</div><div className="l">Kinds of test</div></div>
+            {all.time > 0 && <div className="stat-tile"><div className="v">{duration(all.time)}</div><div className="l">Test time, summed</div></div>}
+            {run.llm_usage && (
+              <div className="stat-tile" title={`${run.llm_usage.input_tokens.toLocaleString()} in, ${run.llm_usage.output_tokens.toLocaleString()} out`}>
+                <div className={`v ${run.llm_usage.budget_exhausted ? 'bad' : ''}`}>{aiTokens(run.llm_usage)}</div>
+                <div className="l">AI tokens · {run.llm_usage.calls} {run.llm_usage.calls === 1 ? 'call' : 'calls'}{run.llm_usage.budget_exhausted ? ' · budget used up' : ''}</div>
+              </div>
+            )}
+            {s.visual_changes > 0 && (
+              <div className="stat-tile"><div className="v">{tests.filter((t) => t.visual_changed).length}</div><div className="l">Visual changes to review</div></div>
+            )}
+          </div>
+        )}
+      </section>
+
+      <Recommendations run={run} tests={withState} />
+
+      <section className="card" id="run-stages" aria-labelledby="stages-title">
+        <div className="card-head"><h3 id="stages-title"><ListTree size={18} aria-hidden="true" /> Stages</h3></div>
+        <StageTimeline stages={run.stages} />
+      </section>
 
       {!ACTIVE.includes(run.status) && <ShareReport runId={run.id} />}
 
@@ -434,29 +476,80 @@ export default function RunDetail({ params, onNavigate }) {
       {run.ai_fix?.id && <RunFixProposal patchId={run.ai_fix.id} />}
       {run.suite_patch?.id && <RunFixProposal patchId={run.suite_patch.id} />}
 
-      <div className={selected ? 'grid-side-main' : ''}>
+      {tests.length > 0 && (
+        <div className="grid-2">
+          <KindTable tests={withState} onPick={pickKind} />
+          <PageTable tests={withState} />
+        </div>
+      )}
+
+      <div className={selected ? 'grid-side-main' : ''} id="run-tests">
         <section className="card">
-          <div className="card-head"><h3>Tests</h3><span className="muted small">{tests.length}</span></div>
-          {tests.length === 0 ? <div className="empty">{ACTIVE.includes(run.status) ? 'Tests appear here as they run.' : 'This run did not reach test execution.'}</div> : (
+          <div className="card-head"><h3>Tests</h3><span className="muted small">{shown.length === tests.length ? tests.length : `${shown.length} of ${tests.length}`}</span></div>
+          {tests.length > 0 && (
+            <div className="test-filters">
+              <label className="search">
+                <Search size={16} aria-hidden="true" />
+                <input type="search" aria-label="Search tests" placeholder="Search by name, page or check"
+                  value={filter.query} onChange={(e) => setFilter((f) => ({ ...f, query: e.target.value }))} />
+              </label>
+              <label className="field-inline small">
+                Kind
+                <select className="input" value={filter.kind} onChange={(e) => setFilter((f) => ({ ...f, kind: e.target.value }))}>
+                  <option value="all">All kinds</option>
+                  {KINDS.filter(([k]) => tests.some((t) => kindOf(t) === k)).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                </select>
+              </label>
+              <div className="row" role="group" aria-label="Result">
+                {RESULTS.map(([key, label]) => (
+                  <button key={key} type="button" className={`chip ${filter.result === key ? 'active' : ''}`} aria-pressed={filter.result === key}
+                    onClick={() => setFilter((f) => ({ ...f, result: key }))}>{label}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {tests.length === 0 ? <div className="empty">{ACTIVE.includes(run.status) ? 'Tests appear here as they run.' : 'This run did not reach test execution.'}</div> : shown.length === 0 ? (
+            <div className="empty">No test matches these filters.
+              <button type="button" className="btn btn-sm" onClick={() => setFilter({ kind: 'all', result: 'all', query: '' })}>Show all tests</button>
+            </div>
+          ) : (
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>Test</th><th>Result</th>{!selected && <th>Details</th>}</tr></thead>
+                <thead><tr><th>Test</th><th>Result</th>{!selected && <th>What it checks</th>}{!selected && <th className="num">Time</th>}</tr></thead>
                 <tbody>
-                  {withState.slice(testPage.from - 1, testPage.to).map((t) => (
-                    <tr key={t.execution_id} className={`selectable ${t.execution_id === selectedExec ? 'selected' : ''}`}
-                      {...selectableRow(() => open(t.execution_id === selectedExec ? null : t.execution_id), t.execution_id === selectedExec)}>
-                      <td className="cell-wrap">{t.name}<div className="small muted">{t.category || 'saved'} · #{t.execution_id}</div></td>
-                      <td>
-                        <div className="row">
-                          <span className={`status ${testLabel(t)}`}>{testLabel(t)}</span>
-                          {t.flaky && <span className="status FLAKY">Flaky</span>}
-                          {t.quarantined && <span className="pill gray">Quarantined</span>}
-                          {t.visual_changed && <span className="pill violet">Visual change</span>}
-                        </div>
-                      </td>
-                      {!selected && <td className="small cell-wrap">{t.error ? t.error.split('\n')[0] : '—'}</td>}
-                    </tr>
-                  ))}
+                  {testPage.items.map((t0) => {
+                    const t = stateOf(t0);
+                    return (
+                      <tr key={t.execution_id} className={`selectable ${t.execution_id === selectedExec ? 'selected' : ''}`}
+                        {...selectableRow(() => open(t.execution_id === selectedExec ? null : t.execution_id), t.execution_id === selectedExec)}>
+                        <td className="cell-wrap">{t.name}<div className="small muted">{kindLabel(kindOf(t))}{t.page ? ` · ${t.page}` : ''} · #{t.execution_id}</div></td>
+                        <td>
+                          <div className="row">
+                            <span className={`status ${testLabel(t)}`}>{testLabel(t)}</span>
+                            {t.flaky && <span className="status FLAKY">Flaky</span>}
+                            {t.quarantined && <span className="pill gray">Quarantined</span>}
+                            {t.visual_changed && <span className="pill violet">Visual change</span>}
+                          </div>
+                        </td>
+                        {!selected && (
+                          <td className="small cell-wrap">
+                            {t.status === 'FAILED' ? (
+                              <>
+                                {t.diagnosis?.label && <span className="pill red">{t.diagnosis.label}</span>}
+                                <div className="text-danger">{t.error ? t.error.split('\n')[0] : 'Failed'}</div>
+                              </>
+                            ) : (t.checks?.length ? (
+                              <ul className="check-list">
+                                {t.checks.slice(0, 3).map((c, i) => <li key={i}>{c}</li>)}
+                                {t.checks.length > 3 && <li className="muted">+{t.checks.length - 3} more</li>}
+                              </ul>
+                            ) : <span className="muted">{t.about || '—'}</span>)}
+                          </td>
+                        )}
+                        {!selected && <td className="num small nowrap">{duration(t.duration_ms)}</td>}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               <Pager paged={testPage} label="tests" />
@@ -465,6 +558,10 @@ export default function RunDetail({ params, onNavigate }) {
         </section>
         {selected && <ExecutionDetail key={selected.execution_id} test={selected} onQuarantine={quarantine} onVisualAccepted={visualAccepted} />}
       </div>
+
+      <div id="run-pages"><PageAudit run={run} /></div>
+      <div id="run-security"><SecurityFindings run={run} /></div>
+      <div id="run-timing"><TimingCard tests={tests} onOpen={(id) => open(id)} /></div>
 
       {(run.regressions || []).length > 0 && (
         <section className="card">

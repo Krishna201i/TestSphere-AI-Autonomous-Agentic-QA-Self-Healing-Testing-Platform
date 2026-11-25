@@ -86,7 +86,8 @@ export function runBars(pipelineRuns, n = WINDOW) {
 const GROUP = {
   smoke: 'Functional', functional: 'Functional', interaction: 'Functional', studio: 'Functional', ai: 'Functional',
   auth: 'Functional', negative: 'Functional', explored: 'Functional', content: 'Content', link: 'Navigation',
-  route: 'Navigation', visual: 'Visual',
+  route: 'Navigation', visual: 'Visual', elements: 'Functional', validation: 'Functional', navigation: 'Navigation',
+  accessibility: 'Accessibility', responsive: 'Visual',
 };
 
 /** Open issues by kind: security findings plus the latest run's failed tests by category. */
@@ -101,7 +102,7 @@ export function issueBreakdown({ pipelineRuns, findings: allFindings }) {
     if (t.status === 'FAILED') add(GROUP[t.category] || 'Other');
   }
   const total = [...counts.values()].reduce((a, b) => a + b, 0);
-  const order = ['Security', 'Functional', 'Content', 'Navigation', 'Visual', 'Other'];
+  const order = ['Security', 'Functional', 'Content', 'Navigation', 'Accessibility', 'Visual', 'Other'];
   return {
     total,
     parts: order.filter((k) => counts.get(k)).map((k) => ({ label: k, count: counts.get(k), share: counts.get(k) / total })),

@@ -53,6 +53,9 @@ def _normalize(url: str) -> str:
     return urlunparse((p.scheme.lower(), p.netloc.lower(), path, "", p.query, ""))
 
 
+normalize = _normalize  # one page's key, whatever its trailing slash or case
+
+
 def _shorten(text: str, limit: int) -> str:
     """*text* cut at a word boundary within *limit* characters ("Cost & Perfo" reads as broken)."""
     text = text.strip()
