@@ -83,7 +83,6 @@ def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict
     """Tests for the analyzed page itself."""
     url = analysis["url"]
     title = analysis.get("page_title") or ""
-    inventory = analysis.get("elements_inventory") or {}
     tests: list[dict[str, Any]] = []
 
     smoke = [_step(1, "NAVIGATE", value=url, description=f"Open {url}")]

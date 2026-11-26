@@ -146,7 +146,6 @@ class _Builder:
 
     # ── content ──
     def headings(self, skip_first: bool) -> None:
-        inventory = self.analysis.get("elements_inventory") or {}
         seen: set[str] = set()
         for heading in stable_headings(self.analysis)[1 if skip_first else 0:]:
             text = _short(heading, 60).rstrip("…")
@@ -293,7 +292,6 @@ class _Builder:
                 ], about="The link takes the visitor where it says")
 
     def stability(self, back_to: str | None) -> None:
-        inventory = self.analysis.get("elements_inventory") or {}
         headings = [h for h in stable_headings(self.analysis) if len(h.strip()) >= 3]
         if not headings:
             return
@@ -314,7 +312,6 @@ class _Builder:
 
     # ── responsive ──
     def responsive(self) -> None:
-        inventory = self.analysis.get("elements_inventory") or {}
         headings = [_short(h, 40).rstrip("…") for h in stable_headings(self.analysis) if len(h.strip()) >= 3]
         headings = list(dict.fromkeys(headings))[:MAX_RESPONSIVE_HEADINGS]
         if not headings:
