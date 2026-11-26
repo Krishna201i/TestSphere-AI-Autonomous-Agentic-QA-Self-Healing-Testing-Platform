@@ -83,6 +83,15 @@ _REPORTED_HEADERS = ("content-type", "server", "strict-transport-security", "con
                      "cache-control", "x-powered-by")
 
 
+_NOT_ON_PAGE = re.compile(r"<(script|style|template|noscript)\b[^>]*>.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+
+
+def visible_markup(html: str) -> str:
+    """*html* without what never renders as page content: scripts, styles,
+    templates (a closed shadow root's fields cannot be reached) and noscript."""
+    return _NOT_ON_PAGE.sub(" ", html)
+
+
 def _int_attr(value: str | None) -> int | None:
     try:
         n = int(str(value).strip())
@@ -151,9 +160,13 @@ class URLAnalyzerService:
         allow_test_accounts: bool = False,
         email_domain: str | None = None,
         test_data: dict[str, str] | None = None,
+        storage_state: dict | None = None,
     ) -> dict[str, Any]:
         """Fetch real website HTML, inspect DOM elements, and synthesize live test plan.
 
+        *storage_state* reads the page signed in (a session captured by the
+        run's sign-in test): the page is always read in a browser starting
+        from that session, never from the signed-out HTTP answer.
         *allow_test_accounts* lets a sign-up form's test create a real account
         (a new one every run, at *email_domain*); off, the sign-up is reported
         as not tested.
@@ -209,8 +222,9 @@ class URLAnalyzerService:
 
         rendered, hidden_controls = False, None
         if not error_encountered and status_code < 400 and (
-                settings.ANALYZE_VISIBILITY or cls._looks_client_rendered(html)):
-            dom = await cls._render_in_browser(normalized_url, mark_hidden=settings.ANALYZE_VISIBILITY)
+                storage_state is not None or settings.ANALYZE_VISIBILITY or cls._looks_client_rendered(html)):
+            dom = await cls._render_in_browser(normalized_url, mark_hidden=settings.ANALYZE_VISIBILITY,
+                                               storage_state=storage_state)
             if dom:
                 (html, hidden_controls, rendered_url), rendered = dom, True
                 final_url = rendered_url or final_url
@@ -222,13 +236,16 @@ class URLAnalyzerService:
         page_title = html_lib.unescape(page_title)  # "Cost &amp; Performance" is "Cost & Performance"
 
         # DOM Element Extraction
-        inputs = cls._extract_inputs(html)
-        buttons = cls._extract_buttons(html)
-        forms = cls._extract_forms(html)
-        links = cls._extract_links(html, domain)
-        link_details = cls._extract_link_details(html)
-        headings = cls._extract_headings(html)
-        images = cls._extract_images(html)
+        # Only markup a visitor can get: text inside scripts, styles and
+        # templates is not on the page (a script's '<input id="x">' string)
+        markup = visible_markup(html)
+        inputs = cls._extract_inputs(markup)
+        buttons = cls._extract_buttons(markup)
+        forms = cls._extract_forms(markup)
+        links = cls._extract_links(markup, domain)
+        link_details = cls._extract_link_details(markup)
+        headings = cls._extract_headings(markup)
+        images = cls._extract_images(markup)
         lang_match = re.search(r"""<html\b[^>]*\blang=["']?([A-Za-z][\w-]*)""", html, re.IGNORECASE)
         page_lang = lang_match.group(1) if lang_match else None
 
@@ -281,7 +298,9 @@ class URLAnalyzerService:
         resolved_name = test_case_name or f"Live QA: {page_title[:40]}"
 
         return {
-            "success": error_encountered is None and status_code < 400,
+            # Signed in, only the browser's reading counts (the HTTP answer was signed out)
+            "success": error_encountered is None and status_code < 400 and (storage_state is None or rendered),
+            "signed_in": storage_state is not None and rendered,
             "url": normalized_url,
             "final_url": final_url,
             "domain": domain,
@@ -352,7 +371,8 @@ class URLAnalyzerService:
         return len(text) < 400
 
     @classmethod
-    async def _render_in_browser(cls, url: str, *, mark_hidden: bool = False) -> tuple[str, int | None, str] | None:
+    async def _render_in_browser(cls, url: str, *, mark_hidden: bool = False,
+                                 storage_state: dict | None = None) -> tuple[str, int | None, str] | None:
         """The page's DOM after its scripts ran, from the engine's guarded
         browser (same egress policy and browser slots as test runs), and how
         many controls are hidden.  With *mark_hidden* every control, link and
@@ -364,7 +384,7 @@ class URLAnalyzerService:
             from engine.browser import BrowserSession
             from engine.schemas import EngineConfig
 
-            async with BrowserSession(EngineConfig(headless=True)) as session:
+            async with BrowserSession(EngineConfig(headless=True), storage_state=storage_state) as session:
                 page = await session.new_page()
                 await page.goto(url, wait_until="domcontentloaded", timeout=20_000)
                 try:

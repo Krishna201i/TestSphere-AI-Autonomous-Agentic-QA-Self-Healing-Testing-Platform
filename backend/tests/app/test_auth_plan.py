@@ -193,3 +193,22 @@ async def test_a_sign_in_form_still_shown_is_a_failed_check_not_a_hidden_element
         error_message="assert_hidden failed: '#password' is still visible"))
     assert analysis.failure_type == FailureType.ASSERTION_FAILURE
     assert "None" not in analysis.root_cause and "still visible" in analysis.root_cause
+
+
+async def test_the_log_out_control_is_found_however_its_text_is_wrapped():
+    # Found on a real site: <a><i class="icon"> Logout</i></a> was never matched,
+    # so every log-out test there failed
+    from playwright.async_api import async_playwright
+
+    from app.services.auth_plan import LOG_OUT
+
+    found = {'<a href="/logout"><i class="icon"> Logout</i></a>': 1, "<button>Sign out</button>": 1,
+             '<a href="/o"><span>Log out</span></a>': 1, '<a href="/o"><b>Log off</b></a>': 1,
+             '<a href="/help">Logout help center</a>': 0, '<a href="/p">Profile</a>': 0}
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        for html, expected in found.items():
+            await page.set_content(html)
+            assert await page.locator(LOG_OUT).count() == expected, html
+        await browser.close()

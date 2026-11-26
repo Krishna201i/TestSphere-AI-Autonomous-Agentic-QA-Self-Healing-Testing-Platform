@@ -18,6 +18,7 @@ write never masks the original test failure.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from pathlib import Path
@@ -30,9 +31,20 @@ log = logging.getLogger(__name__)
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
+# A test id can be a long URL path; with the folders around it that passes
+# Windows' 260-character path limit (and Linux's 255-character names)
+MAX_SEGMENT = 32
+
+
 def safe_segment(value: str) -> str:
-    """*value* as one path segment that stays inside its parent directory."""
-    return _UNSAFE.sub("_", str(value)).strip("._") or "_"
+    """*value* as one short path segment that stays inside its parent
+    directory.  A long value keeps its start and gets a hash of the whole,
+    so two long ids that share a start stay apart."""
+    clean = _UNSAFE.sub("_", str(value)).strip("._") or "_"
+    if len(clean) <= MAX_SEGMENT:
+        return clean
+    digest = hashlib.sha256(str(value).encode()).hexdigest()[:10]
+    return f"{clean[:MAX_SEGMENT - 11].rstrip('._')}-{digest}"
 
 
 def _step_dir(base_dir: str, test_id: str, step_id: str) -> Path:

@@ -89,7 +89,7 @@ def test_the_plan_checks_files_by_request_and_leaves_out_unserved_routes(fresh_s
     blueprint = {"routes": [{"method": "GET", "path": "/health"}]}
     project = ProjectService.create_project(fresh_store, name="SPA", owner_uid="local-dev", app_url=spa_host + "/")
 
-    async def no_deep_analysis(urls):
+    async def no_deep_analysis(urls, session=None):
         return {}
 
     monkeypatch.setattr(runner, "_analyze_pages", no_deep_analysis)

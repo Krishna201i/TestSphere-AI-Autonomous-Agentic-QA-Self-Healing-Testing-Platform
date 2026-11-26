@@ -48,8 +48,11 @@ ERROR_SHOWN = f":is({_ERROR_PARTS}):visible"
 # A server error page instead of the result
 SERVER_ERROR = (':is(h1, h2, h3, p, [role=alert]):text-matches("internal server error|something went wrong|'
                 'unexpected error|bad gateway|service unavailable|^\\\\s*50[0-4]\\\\b", "i")')
-# The control that signs out, as a person sees it
-LOG_OUT = (':is(a, button, [role=button], [role=menuitem]):text-matches("^\\\\s*(?:log ?out|sign ?out|log off)\\\\s*$", "i")'
+# The control that signs out, as a person sees it.  :text-matches() matches
+# the innermost element holding the text, so a link that wraps it
+# (<a><i class="icon">Logout</i></a>, very common) is found through :has()
+_LOG_OUT_TEXT = ':text-matches("^\\\\s*(?:log ?out|sign ?out|log off)\\\\s*$", "i")'
+LOG_OUT = (f':is(a, button, [role=button], [role=menuitem]):is({_LOG_OUT_TEXT}, :has({_LOG_OUT_TEXT}))'
            ':visible')
 
 _CAPTCHA = re.compile(r"g-recaptcha|recaptcha/api|h-captcha|hcaptcha\.com|cf-turnstile|challenges\.cloudflare\.com",

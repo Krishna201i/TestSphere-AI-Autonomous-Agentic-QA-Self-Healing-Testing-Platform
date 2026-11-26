@@ -25,7 +25,9 @@ import subprocess
 import sys
 import threading
 import weakref
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -70,6 +72,76 @@ def set_request_guard(guard: Callable[[str], None] | None) -> None:
 # ~150-300 MB); further sessions wait for a free slot.
 MAX_BROWSERS = max(1, int(os.getenv("ENGINE_MAX_BROWSERS", "2")))
 _slots: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
+
+
+class _SharedBrowsers:
+    """Browsers kept open for the sessions inside one ``shared_browsers()``
+    scope.  Each session still gets its own context (separate cookies,
+    storage and cache) but skips starting Playwright, Chromium and the
+    egress proxy.  The proxy caches each host's verdict with the addresses it
+    pinned, so sharing it for one run keeps the same protection."""
+
+    def __init__(self) -> None:
+        self._entries: dict[tuple, dict] = {}
+        self._lock = asyncio.Lock()
+        self.launched = 0
+
+    async def browser_for(self, session: BrowserSession) -> Browser:
+        cfg = session._config
+        key = (cfg.browser, cfg.headless, cfg.slow_mo_ms)
+        async with self._lock:
+            entry = self._entries.get(key)
+            if entry and entry["browser"].is_connected():
+                return entry["browser"]
+            if entry:  # it crashed: start a fresh one
+                await self._close(entry)
+                del self._entries[key]
+            egress = EgressProxy(_request_guard) if _request_guard is not None else None
+            session._egress = egress
+            session._proxy_url = await egress.start() if egress else None
+            pw = session._pw = await async_playwright().start()
+            try:
+                browser = await session._launch_or_install()
+            except BaseException:
+                await self._close({"pw": pw, "browser": None, "egress": egress})
+                raise
+            finally:
+                session._pw, session._egress = None, None  # the scope owns them, not the session
+            self._entries[key] = {"pw": pw, "browser": browser, "egress": egress}
+            self.launched += 1
+            return browser
+
+    @staticmethod
+    async def _close(entry: dict) -> None:
+        for thing, method in ((entry["browser"], "close"), (entry["pw"], "stop"), (entry["egress"], "close")):
+            if thing is not None:
+                try:
+                    await getattr(thing, method)()
+                except Exception as exc:  # noqa: BLE001 - closing what may already be gone
+                    log.debug("Closing a shared browser: %s", exc)
+
+    async def close(self) -> None:
+        for entry in self._entries.values():
+            await self._close(entry)
+        self._entries.clear()
+
+
+_shared: ContextVar[_SharedBrowsers | None] = ContextVar("testsphere_shared_browsers", default=None)
+
+
+@asynccontextmanager
+async def shared_browsers() -> AsyncIterator[_SharedBrowsers]:
+    """Within this scope, ``BrowserSession``s reuse one running browser (a
+    pipeline run's hundreds of tests start in a fraction of the time), and
+    everything it started closes when the scope ends.  Outside it, every
+    session launches and closes its own browser, as before."""
+    shared = _SharedBrowsers()
+    token = _shared.set(shared)
+    try:
+        yield shared
+    finally:
+        _shared.reset(token)
+        await shared.close()
 
 
 def _browser_slots() -> asyncio.Semaphore:
@@ -178,6 +250,8 @@ class BrowserSession:
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._egress: EgressProxy | None = None
+        self._proxy_url: str | None = None
+        self._shared_browser = False  # the browser belongs to a shared_browsers() scope
         self._slot: asyncio.Semaphore | None = None
 
     # ------------------------------------------------------------------
@@ -202,25 +276,17 @@ class BrowserSession:
         return self
 
     async def _open(self) -> None:
-        if _request_guard is not None:
-            self._egress = EgressProxy(_request_guard)
-            self._proxy_url = await self._egress.start()
-        self._pw = await async_playwright().start()
-        log.debug(
-            "Launching %s headless=%s slow_mo=%d",
-            self._config.browser,
-            self._config.headless,
-            self._config.slow_mo_ms,
-        )
-        try:
-            self._browser = await self._launch()
-        except Exception as exc:
-            if not _is_missing_browser(exc):
-                raise
-            failure = await asyncio.to_thread(install_browser, self._config.browser)
-            if failure:
-                raise RuntimeError(f"{exc}\n({failure})") from exc
-            self._browser = await self._launch()
+        shared = _shared.get()
+        if shared is not None:
+            # A run's shared browser: this session only opens its own context
+            self._browser = await shared.browser_for(self)
+            self._shared_browser = True
+        else:
+            if _request_guard is not None:
+                self._egress = EgressProxy(_request_guard)
+                self._proxy_url = await self._egress.start()
+            self._pw = await async_playwright().start()
+            self._browser = await self._launch_or_install()
         self._context = await self._browser.new_context(
             viewport=dict(zip(("width", "height"), map(int, self._config.viewport.split("x")), strict=True)),
             ignore_https_errors=True,
@@ -229,6 +295,23 @@ class BrowserSession:
         if self._config.tracing_enabled:
             await self._context.tracing.start(screenshots=True, snapshots=True)
             log.debug("Tracing started")
+
+    async def _launch_or_install(self) -> Browser:
+        log.debug(
+            "Launching %s headless=%s slow_mo=%d",
+            self._config.browser,
+            self._config.headless,
+            self._config.slow_mo_ms,
+        )
+        try:
+            return await self._launch()
+        except Exception as exc:
+            if not _is_missing_browser(exc):
+                raise
+            failure = await asyncio.to_thread(install_browser, self._config.browser)
+            if failure:
+                raise RuntimeError(f"{exc}\n({failure})") from exc
+            return await self._launch()
 
     async def _launch(self) -> Browser:
         name = self._config.browser
@@ -250,7 +333,7 @@ class BrowserSession:
             await self._stop_tracing()
             if self._context is not None:
                 await self._context.close()
-            if self._browser is not None:
+            if self._browser is not None and not self._shared_browser:
                 await self._browser.close()
             if self._pw is not None:
                 await self._pw.stop()

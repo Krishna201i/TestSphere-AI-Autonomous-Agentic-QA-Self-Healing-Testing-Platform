@@ -122,7 +122,9 @@ async def run_test(
     step_results: list[StepResult] = []
     # One directory per run: concurrent runs of the same test never share (and
     # wipe) each other's evidence, and the test id cannot point outside it
-    artifacts_dir = str(Path(config.artifacts_dir) / f"{safe_segment(plan.test_id)}-{uuid.uuid4().hex[:12]}")
+    # The run's own folder: a random id only (the test id is already the
+    # folder of each step inside it); deep install paths stay under Windows' limit
+    artifacts_dir = str(Path(config.artifacts_dir) / f"run-{uuid.uuid4().hex[:12]}")
     visual_result: dict | None = None
 
     try:

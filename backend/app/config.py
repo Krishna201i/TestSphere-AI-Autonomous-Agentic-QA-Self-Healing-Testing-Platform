@@ -251,6 +251,10 @@ class Settings(BaseSettings):
     PIPELINE_COVERAGE: bool = Field(default_factory=lambda: os.getenv("PIPELINE_COVERAGE", "on").lower() not in ("off", "false", "0"))
     # At most this many generated tests per run (the coverage suite is cut first)
     PIPELINE_MAX_TESTS: int = Field(default_factory=lambda: max(1, int(os.getenv("PIPELINE_MAX_TESTS", "400"))))
+    # Reuse one running browser for a whole run (each test still gets its own
+    # isolated context): far less time starting Chromium for every test
+    PIPELINE_SHARED_BROWSER: bool = Field(default_factory=lambda: os.getenv(
+        "PIPELINE_SHARED_BROWSER", "on").lower() not in ("off", "false", "0"))
     # Tests of one run executed at once (each takes a browser slot: ENGINE_MAX_BROWSERS)
     PIPELINE_TEST_CONCURRENCY: int = Field(default_factory=lambda: max(1, int(os.getenv(
         "PIPELINE_TEST_CONCURRENCY", os.getenv("ENGINE_MAX_BROWSERS", "2")))))

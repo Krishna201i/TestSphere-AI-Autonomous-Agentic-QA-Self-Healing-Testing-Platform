@@ -72,6 +72,13 @@ def _clean_title(title: str) -> str:
     return _shorten(re.split(r" - | — | \| |\|", title)[0].strip() or title, 30)
 
 
+def stable_headings(analysis: dict[str, Any]) -> list[str]:
+    """The page's headings without those seen to change between visits (an
+    A/B test, a rotating banner): a check on them would fail at random."""
+    changing = {h.lower() for h in analysis.get("changing_text") or []}
+    return [h for h in (analysis.get("elements_inventory") or {}).get("headings") or [] if h.lower() not in changing]
+
+
 def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict[str, Any]]:
     """Tests for the analyzed page itself."""
     url = analysis["url"]
@@ -97,7 +104,7 @@ def page_tests(analysis: dict[str, Any], prompt: str | None = None) -> list[dict
     tests += analysis.get("auth_tests") or []
     tests += analysis.get("form_tests") or []
 
-    headings = inventory.get("headings") or []
+    headings = stable_headings(analysis)
     if headings:
         heading = _shorten(headings[0], 40)
         tests.append({
@@ -191,7 +198,7 @@ def page_check_test(candidate: dict[str, str], page: dict[str, Any]) -> dict[str
     if title and not title.endswith(" Webpage"):
         steps.append(_step(len(steps) + 1, "ASSERT_CONTAINS_TEXT", target="head > title", value=_clean_title(title),
                            description=f"Page title contains '{_clean_title(title)}'"))
-    headings = inventory.get("headings") or []
+    headings = stable_headings(page)
     if headings:
         steps.append(_step(len(steps) + 1, "ASSERT_CONTAINS_TEXT", target="body", value=headings[0][:40],
                            description=f"Page shows '{headings[0][:40]}'"))
@@ -213,7 +220,7 @@ def redirect_test(candidate: dict[str, Any], page: dict[str, Any]) -> dict[str, 
     /app back to its landing page): opening it shows where it led, not its
     own content.  If the page ever opens for a signed-out visitor, the check
     fails.  None when the page it led to has no heading to recognise."""
-    headings = (page.get("elements_inventory") or {}).get("headings") or []
+    headings = stable_headings(page)
     if not headings:
         return None
     url = candidate["url"]

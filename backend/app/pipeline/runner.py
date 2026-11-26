@@ -32,7 +32,7 @@ from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -264,7 +264,14 @@ async def execute_run(run_id: int, orchestrator: Any = None, scanner: Any = None
         budget = None
         try:
             with token_budget(settings.LLM_MAX_TOKENS_PER_RUN) as budget:
-                await _execute(state, project, orchestrator, scanner)
+                if settings.PIPELINE_SHARED_BROWSER:
+                    from engine.browser import shared_browsers
+
+                    # One browser for the whole run; each test still gets its own context
+                    async with shared_browsers():
+                        await _execute(state, project, orchestrator, scanner)
+                else:
+                    await _execute(state, project, orchestrator, scanner)
         except StoreUnavailableError as exc:
             logger.error("Pipeline #%s stopped: database unavailable: %s", run_id, exc)
             try:
@@ -569,6 +576,61 @@ async def _fallback_digests(base_url: str) -> set[str]:
     return digests
 
 
+CHANGE_READS = 3
+
+
+def _cookie_header(session: dict | None, url: str) -> str | None:
+    """The session's cookies for *url*'s host, as a Cookie header (None: none)."""
+    host = (urlparse(url).hostname or "").lower()
+    pairs = [f"{c['name']}={c['value']}" for c in (session or {}).get("cookies") or []
+             if c.get("name") and "value" in c
+             and (host == str(c.get("domain", "")).lstrip(".").lower()
+                  or host.endswith("." + str(c.get("domain", "")).lstrip(".").lower()))]
+    return "; ".join(pairs) or None
+
+
+async def _mark_changing_text(pages: list[dict[str, Any]], session: dict | None = None) -> int:
+    """Read each page again a few times and note, as its ``changing_text``,
+    the headings that differ between visits; returns how many.  Judged only
+    on pages whose HTML carries headings (a page built by scripts is not), and
+    only when the reads disagree, or share no heading with the analysis.  A
+    page analyzed signed in is read with the *session*'s cookies, and judged
+    only by the reads disagreeing (a read that was not let in shows the same
+    sign-in page every time, which proves nothing)."""
+    from app.services.url_analyzer import visible_markup
+
+    async def reads(url: str, signed_in: bool) -> list[set[str]]:
+        headers = {"User-Agent": URLAnalyzerService.USER_AGENT}
+        if signed_in and (cookie := _cookie_header(session, url)):
+            headers["Cookie"] = cookie
+        found = []
+        for _ in range(CHANGE_READS):
+            try:
+                response, _ = await get_verifying_first(url, timeout=8.0, headers=headers)
+            except Exception:  # noqa: BLE001 - nothing to compare with: leave the page as analyzed
+                return []
+            found.append({h.lower() for h in URLAnalyzerService._extract_headings(visible_markup(response.text))})
+        return found
+
+    results = await asyncio.gather(*(reads(p["url"], bool(p.get("signed_in"))) for p in pages))
+    marked = 0
+    for page, rs in zip(pages, results, strict=True):
+        if not rs or not any(rs):
+            continue
+        seen = (page.get("elements_inventory") or {}).get("headings") or []
+        known = {h.lower() for h in seen}
+        # The reads differ, or none of what the analysis saw is in them (swapped
+        # wholesale); a heading only scripts add is no reason (the rest agree)
+        disagree = len({frozenset(r) for r in rs}) > 1 or (not page.get("signed_in") and not (known & set.union(*rs)))
+        if disagree:
+            everywhere = set.intersection(*rs)
+            changed = [h for h in seen if h.lower() not in everywhere]
+            if changed:
+                page["changing_text"] = changed
+                marked += len(changed)
+    return marked
+
+
 async def _second_hop(analysis: dict[str, Any], candidates: list[dict[str, Any]],
                       pages: dict[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
     """Same-site pages linked from the analyzed pages but not from the start
@@ -595,12 +657,14 @@ async def _second_hop(analysis: dict[str, Any], candidates: list[dict[str, Any]]
     return ok[:room], left_out
 
 
-async def _analyze_pages(urls: list[str]) -> dict[str, dict[str, Any]]:
-    """Each page's analysis (title, headings, controls); a page that fails or
-    takes too long is left out and keeps a plain render check."""
+async def _analyze_pages(urls: list[str], session: dict | None = None) -> dict[str, dict[str, Any]]:
+    """Each page's analysis (title, headings, controls), signed in when given
+    a *session*; a page that fails or takes too long is left out and keeps a
+    plain render check."""
     async def one(url: str) -> dict[str, Any] | None:
         try:
-            page = await asyncio.wait_for(URLAnalyzerService.analyze_live_website(url=url), timeout=45)
+            page = await asyncio.wait_for(URLAnalyzerService.analyze_live_website(url=url, storage_state=session),
+                                          timeout=45)
         except Exception as exc:  # noqa: BLE001 - one page's analysis never stops the run
             logger.info("Could not analyze %s for content checks: %s", url, exc)
             return None
@@ -622,6 +686,7 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
                                 base_url=app_url, description="Created by the automated pipeline", owner_uid=owner)
 
     profile = profile_of(project)
+    changing = await _mark_changing_text([analysis])
     planned = suite.page_tests(analysis, project.get("prompt"))
     candidates = suite.candidate_pages(analysis, blueprint, link_limit=settings.PIPELINE_LINK_PAGES,
                                        route_limit=settings.PIPELINE_ROUTE_PAGES)
@@ -640,34 +705,50 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
     left_out += [f"{c['label']} (answers with the site's catch-all page: not served here)" for c in unserved]
     reachable = [c for c in reachable if c not in files and c not in unserved]
     pages: dict[str, dict[str, Any]] = {}
-    if project.get("sign_in_first"):
-        # These pages run signed in, but analysis sees them signed out (often a
-        # redirect to sign in): check they stay put instead of checking content
+    # "Sign in first": sign in once now, so the pages behind the login are
+    # analyzed (and covered) as a signed-in visitor sees them
+    session, landing = (await _sign_in_session(planned, analysis["url"])) if project.get("sign_in_first") else (None, None)
+    sign_in_note = None
+    if session and landing and urlparse(landing).netloc == urlparse(analysis["url"]).netloc and             suite.normalize(landing) not in {suite.normalize(u) for u in [analysis["url"], *(c["url"] for c in reachable)]}:
+        # Where signing in leads (a dashboard): rarely linked from the sign-in page itself
+        reachable.insert(0, {"kind": "link", "url": landing, "label": urlparse(landing).path or "/"})
+    if project.get("sign_in_first") and session is None:
+        # No session (no sign-in test, or it did not get in): analysis would see
+        # the sign-in redirect, so these pages only check they stay put
         planned += [suite.stays_on_page_test(c) for c in reachable]
+        sign_in_note = "signed-in pages only checked to stay put: signing in while planning did not work"
     else:
-        pages = await _analyze_pages([c["url"] for c in reachable[:settings.PIPELINE_DEEP_PAGES]])
+        pages = await _analyze_pages([c["url"] for c in reachable[:settings.PIPELINE_DEEP_PAGES]], session)
         # One hop further: pages linked only from the pages just analyzed (a
         # blog's posts, a docs section), within the same page limits
         hop, hop_left_out = await _second_hop(analysis, candidates, pages)
         if hop:
-            pages.update(await _analyze_pages([c["url"] for c in hop]))
+            pages.update(await _analyze_pages([c["url"] for c in hop], session))
             reachable += hop
         left_out += hop_left_out
+        # Text a page shows differently on each visit never becomes a check
+        changing += await _mark_changing_text(list(pages.values()), session)
         # A page that redirected was analyzed as the page it led to: no content checks from that
         for c in reachable:
             page = pages.get(c["url"])
             if page and not suite.redirected(c, page):
-                planned.append(suite.page_check_test(c, page))
+                planned.append({**suite.page_check_test(c, page), **({"signed_in": True} if session else {})})
+            elif session:
+                planned.append(suite.stays_on_page_test(c))  # even signed in, it sent the visitor away
             else:
                 # Sent elsewhere signed out (a protected page): check it stays that way
                 planned.append((page and suite.redirect_test(c, page)) or suite.render_test(c))
+        if session:
+            sign_in_note = f"signed in while planning: {len(pages)} page(s) behind the login analyzed and covered"
 
     # The AI planner sees every page analyzed above (not one that redirected
     # elsewhere), so its tests can be journeys across the site
     journey_pages = {c["url"]: pages[c["url"]] for c in reachable
                      if c["url"] in pages and not suite.redirected(c, pages[c["url"]])}
+    # (AI tests run signed out: never planned across pages seen signed in)
     extra, ai_note = ([], None) if profile.max_ai_tests == 0 else await ai_plan.ai_tests(
-        analysis, project.get("prompt"), (blueprint or {}).get("frameworks"), profile=profile, pages=journey_pages)
+        analysis, project.get("prompt"), (blueprint or {}).get("frameworks"), profile=profile,
+        pages={} if session else journey_pages)
     planned += extra
 
     # Breadth: a test per heading, field, button, link and image of every page
@@ -675,6 +756,10 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
     covered: list[dict[str, Any]] = []
     if settings.PIPELINE_COVERAGE:
         covered = coverage.site_coverage(analysis["url"], analysis, journey_pages)
+        if session:  # the pages behind the login run from the sign-in test's session
+            behind = {suite.normalize(u) for u in journey_pages}
+            covered = [{**t, "signed_in": True} if suite.normalize(urljoin(analysis["url"], t.get("page") or "/")) in behind
+                       else t for t in covered]
         planned += covered
     if snapshot is not None:
         snapshot["pages"] = journey_pages
@@ -690,6 +775,8 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
             stored.update(about=test["about"], page=test.get("page"))
         if test.get("viewport"):  # runs at this screen size (a responsive check)
             stored["viewport"] = test["viewport"]
+        if test.get("signed_in"):  # starts from the sign-in test's session
+            stored["signed_in"] = True
         description = json.dumps(stored)
         row = db.find_one(TEST_CASES, application_id=application["id"], external_id=external_id)
         if row is None:
@@ -745,6 +832,10 @@ async def _plan(db: Store, project: Record, analysis: dict[str, Any],
     hidden = (analysis.get("elements_inventory") or {}).get("hidden_controls")
     if hidden:
         detail += f" · {hidden} control(s) hidden on load (in a dialog, tab or menu) were not tested"
+    if sign_in_note:
+        detail += f" · {sign_in_note}"
+    if changing:
+        detail += f" · {changing} heading(s) that change between visits (A/B tests, rotating content) not checked"
     if ai_note:
         detail += f" · {ai_note}"
     if explore_note:
@@ -826,9 +917,47 @@ def _signed_in_kwargs(tc: Record, sign_in_first: bool, session: list[dict]) -> d
         return {}
     if _is_sign_in(tc):
         return {"keep_state": session}
-    if session and tc.get("category") in ("link", "route"):
+    if session and (tc.get("category") in ("link", "route") or _stored(tc).get("signed_in")):
         return {"storage_state": session[-1]}
     return {}
+
+
+def _stored(tc: Record) -> dict[str, Any]:
+    """A test case's stored description (steps and notes), or {}."""
+    try:
+        stored = json.loads(tc.get("description") or "{}")
+    except ValueError:
+        return {}
+    return stored if isinstance(stored, dict) else {}
+
+
+async def _sign_in_session(tests: list[dict[str, Any]], url: str) -> tuple[dict | None, str | None]:
+    """Run the planned sign-in (the goal's form test) once and return the
+    signed-in session it ends with and the page it ended on, or (None, None)
+    when there is no sign-in test or it did not get in.  The session stays in
+    memory: it holds login cookies."""
+    sign_in = next((t for t in tests if t.get("slug") == "interaction"), None)
+    if sign_in is None:
+        return None, None
+    from agents.planner.schemas import TestCase as PlannedCase
+    from app.orchestration.converters import test_case_to_engine_plan
+    from app.orchestration.orchestrator import parse_stored_steps
+    from engine.runner import run_test
+    from engine.schemas import RunOptions
+
+    kept: list[dict] = []
+    try:
+        steps, checks = parse_stored_steps(sign_in["steps"], url)
+        case = PlannedCase(test_id="plan-sign-in", name=sign_in["name"], page_url=url, steps=steps, assertions=checks)
+        result = await asyncio.wait_for(
+            run_test(test_case_to_engine_plan(case, url), RunOptions(headless=True), keep_state=kept), timeout=120)
+    except Exception as exc:  # noqa: BLE001 - planning goes on signed out
+        logger.info("Signing in while planning did not work: %s", exc)
+        return None, None
+    if not kept:
+        return None, None
+    landing = next((s.page_url for s in reversed(result.steps) if s.page_url), None)
+    return kept[-1], landing
 
 
 MAX_LISTED_CHECKS = 8

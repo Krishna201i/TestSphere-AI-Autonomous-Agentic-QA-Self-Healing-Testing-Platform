@@ -46,6 +46,7 @@ from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
+from app.pipeline.suite import stable_headings
 from engine.locators import css_string
 
 CATEGORIES = ("content", "elements", "validation", "navigation", "accessibility", "responsive")
@@ -147,7 +148,7 @@ class _Builder:
     def headings(self, skip_first: bool) -> None:
         inventory = self.analysis.get("elements_inventory") or {}
         seen: set[str] = set()
-        for heading in (inventory.get("headings") or [])[1 if skip_first else 0:]:
+        for heading in stable_headings(self.analysis)[1 if skip_first else 0:]:
             text = _short(heading, 60).rstrip("…")
             if len(text) < 3 or text.lower() in seen or not self.first_time("heading", text.lower()):
                 continue
@@ -293,7 +294,7 @@ class _Builder:
 
     def stability(self, back_to: str | None) -> None:
         inventory = self.analysis.get("elements_inventory") or {}
-        headings = [h for h in inventory.get("headings") or [] if len(h.strip()) >= 3]
+        headings = [h for h in stable_headings(self.analysis) if len(h.strip()) >= 3]
         if not headings:
             return
         heading = _short(headings[0], 40).rstrip("…")
@@ -314,7 +315,7 @@ class _Builder:
     # ── responsive ──
     def responsive(self) -> None:
         inventory = self.analysis.get("elements_inventory") or {}
-        headings = [_short(h, 40).rstrip("…") for h in inventory.get("headings") or [] if len(h.strip()) >= 3]
+        headings = [_short(h, 40).rstrip("…") for h in stable_headings(self.analysis) if len(h.strip()) >= 3]
         headings = list(dict.fromkeys(headings))[:MAX_RESPONSIVE_HEADINGS]
         if not headings:
             return
